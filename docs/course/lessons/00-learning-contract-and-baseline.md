@@ -6,6 +6,8 @@
 
 开课记录：学习者于 2026-07-15 明确要求开始第 00 课。
 
+后续范围同步：第 00 课提交后，学习者把第一期收敛为单目录、单任务的最小 coding loop。本文保留 listener、subscription、active Run 和 Session 的源码学习记录，但完整生命周期、订阅 API、Goal Runtime 和 Session 实现已经移至二期；旧课次指向已按新课程地图修正。
+
 ## 为什么先上这一课
 
 Agent 代码会跨越模型协议、并发、工具执行、文件系统和持久化。如果不先固定“阅读哪一版 Pi”“如何区分行为与机制”“什么时候能提交”，后续结论就无法追溯。第 00 课不实现 Agent 功能，它建立所有后续课程共用的学习与工程条件。
@@ -21,7 +23,7 @@ Agent 代码会跨越模型协议、并发、工具执行、文件系统和持�
 | 00-E | 最小 Go module 边界 | `go.mod`；冻结基线只保存在课程文档 | 已完成 |
 | 00-F | 本课验收与提交门禁 | 测试、理解确认、文档完整性、用户明确要求 commit | 已完成 |
 
-本课不会实现 Agent Loop、listener 容器或 Run 生命周期。当前深入讨论这些概念，是为了学习如何从 Pi 中提取行为契约；对应 Go Runtime 在后续课程实现，其中 listener settlement 和 Run 生命周期集中在第 05 课。
+本课不会实现 Agent Loop、listener 容器或 Run 生命周期。当前深入讨论这些概念，是为了学习如何从 Pi 中提取行为契约；第一期第 02-03 课只实现单次 Run 所需的事件、取消和 tool-loop settlement，长期 Agent 状态和完整 subscription 生命周期移至二期。
 
 ## 学习目标
 
@@ -123,7 +125,7 @@ coding-agent 在 agent-core 上又增加 `agent_settled`：一次低层 Run 的 
 - 语义判断：`run_start/run_end` 更准确，因为事件界定的是一次 `prompt()` 或 `continue()` 启动的 Run，不是 Agent 实例的生灭。
 - 课程决定：Go 的运行时概念、字段和讲解统一使用 Run，例如 `activeRun`、`finishRun`、`run_start` 和 `run_end`。
 - 源码引用：讲解冻结 Pi 实现时保留其字面事件名 `agent_start/agent_end`，避免把课程术语误写成上游事实。
-- 后续门禁：第 05 课在生命周期模型确定后定义 Runtime 内部的 Go 事件命名；开始和结束事件必须成对命名，不能只改一端。未来外部协议不在该课提前确定。
+- 后续门禁：第一期第 02 课定义最小 Runtime 内部事件命名；开始和结束事件必须成对命名，不能只改一端。可复用 Agent 的完整生命周期事件与未来外部协议留到二期重新确定。
 
 ### 讲解：错误和取消为什么仍然产生 `agent_end`
 
@@ -144,7 +146,7 @@ coding-agent 在 agent-core 上又增加 `agent_settled`：一次低层 Run 的 
 - 学习者反馈：尚未获得足够讲解，无法回答；后续课程必须先讲再问。
 - 讲解：RunEnd 事件通过 `processEvents()` 顺序等待 handlers。handlers 未返回时，loop executor 尚未返回，`runWithLifecycle()` 的 `finally` 尚未调用 `finishRun()`。
 - 直接结果：`activeRun` 仍存在，因此 `isStreaming=true`，新 `prompt()` 被拒绝，active-run promise 尚未 resolve，`waitForIdle()` 继续等待。
-- 命名观察：Pi 的 `isStreaming` 不只表示 Provider 正在输出 token，它覆盖整个尚未 settlement 的 Run，语义更接近 `isRunActive` 或 `busy`；Go 版本不能机械照搬字段名，第 05 课再决定状态模型。
+- 命名观察：Pi 的 `isStreaming` 不只表示 Provider 正在输出 token，它覆盖整个尚未 settlement 的 Run，语义更接近 `isRunActive` 或 `busy`；Go 版本不能机械照搬字段名。第一期只在第 02 课确定一次 Run 的终态和取消，长期 Agent 状态模型移至二期。
 - 课程修正：本题不再作为未讲解的预测题；完成上述源码时序讲解后，才允许进行新的理解检查。
 
 ### 讲解：Streaming、Running 与 Busy 不是同一层状态
@@ -156,7 +158,7 @@ coding-agent 在 agent-core 上又增加 `agent_settled`：一次低层 Run 的 
 - Session busy：可能还包含自动重试、压缩、post-run continuation 或其他上层工作；`busy` 必须先说明所属层，不能直接作为 agent-core 字段名。
 - 单一事实源：Go 版本不应分别维护 `activeRun` 和可写 `isRunning` 布尔值。应以 active Run 为事实源，公开状态从它派生，避免两个字段更新顺序不同而失配。
 - Pi 风险证据：`Agent.reset()` 会直接设置 `isStreaming=false`，但不清除 `activeRun`。若调用方在 Run 中直接 reset，状态显示与 `prompt()` 的 busy 检查可能不一致；现有 coding-agent 清理流程通常先 abort、等待 idle，再 reset，但 agent-core 没有在 API 上强制该顺序。
-- 第 05 课候选：内部保存单个 active-run record；公开 `IsRunning()` 从它派生。是否需要显式 `Running/Settling/Idle` phase，要由真实调用方和状态测试证明，当前不提前加入状态枚举。
+- 二期候选：内部保存单个 active-run record；公开 `IsRunning()` 从它派生。是否需要显式 `Running/Settling/Idle` phase，要由真实调用方和状态测试证明，第一期不提前加入状态枚举。
 - 理解检查：应同时保存 `activeRun` 和 `isRunning` 并手动同步，还是只保存 `activeRun`、让 `IsRunning()` 从它派生？
 - 学习者回答：选择只保存 `activeRun`，从它派生 `IsRunning()`。
 - 课程结论：正确。运行对象是事实源，布尔查询不应成为第二份可独立修改的状态。
@@ -194,7 +196,7 @@ Go 中“先检查 `activeRun == nil`，再赋值”必须位于同一临界区�
 | cooperative cancellation | `AbortController.signal` | `context.Context` + `CancelFunc` |
 | settlement wait | 手工 `Promise<void>` | settlement 后关闭 `done` channel |
 
-当前只建立候选机制，不在第 00 课实现；并发线性化、取消传播和 channel 关闭顺序在第 05 课用 race test 和确定性场景决定。
+当前只建立候选机制，不在第 00 课实现。第一期第 02-03 课验证单次 Run 的取消传播和 settlement；可复用 Agent 的 active-run 互斥、等待 API 与状态机在二期用 race test 和确定性场景决定。
 
 - 理解检查：调用取消后应立即让 `IsRunning()` 变为 false，还是等待 Provider、工具和 handlers 退出并完成 settlement？
 - 学习者回答：选择完成 settlement 后才变为 false。
@@ -213,7 +215,7 @@ Pi 的并行机制为每个 source-order entry 创建 Promise；工具完成时�
 
 Go 候选会为 tool calls 预分配按 source index 排列的 result slots，goroutine 把结果写回自己的 slot，同时通过单独的 completion channel 发送实时完成事件；等待全部完成后再按 index 生成 transcript。不能让 goroutine 按完成时间并发 append 到共享 transcript slice，否则既有 data race，也会把偶然调度顺序固化进上下文。
 
-完整并行实现、race test 和顺序测试属于第 04 课；第 00 课只学习识别这两个可观察顺序。
+完整并行实现、race test 和顺序测试属于第一期第 03 课；第 00 课只学习识别这两个可观察顺序。
 
 - 理解检查：A 先被模型请求、B 先完成时，应如何排列完成事件和 transcript？
 - 学习者回答：完成事件 B、A；transcript A、B。
@@ -236,9 +238,9 @@ pi-go 只验证自身，按责任使用三类测试：
 ### 已确认的前置讨论
 
 - 日期：2026-07-15
-- 结论：本课程中的 headless agent 指 `headless Agent Runtime`，不是简单的一次性 CLI，也不是最终的多用户 Agent Manager。
-- 边界：Runtime 负责 Agent Loop、Goal、工具和 Session；Manager 后续负责用户、仓库、并发、worktree 和 IM 路由。
-- 影响：当前课程保留本地可运行入口和可恢复 Session，但不提前实现外部调用协议或常驻多租户服务。
+- 原结论：headless 描述没有 TUI 的 Agent Runtime，不等于最终的多用户 Agent Manager；这个术语判断仍然成立。
+- 后续范围修正：第一期 Runtime 只负责单目录、单任务的 Provider/tool loop、内存 transcript 和 coding tools，不实现 Goal Runtime 或可恢复 Session。
+- 二期边界：Agent Manager 再负责用户、仓库、Session、并发、worktree 和 IM 路由；外部调用协议也等真实调用方出现后设计。
 
 ### 练习 1：识别产品契约
 
@@ -331,7 +333,7 @@ github.com/yuanbohan/pi-go
 - 课程结论：回答正确，而且提出了需要分开验证的两个语义。
 - 源码事实：Pi 使用 `Set` 注册和删除 listener，因此同一函数引用重复添加会去重，遍历遵循插入顺序。
 - 契约证据：`packages/agent/README.md` 明确声明 listeners 按 registration order 等待；`Agent.subscribe()` 的源码注释也作出相同承诺。
-- 当前判断：注册顺序是必须保留的契约。相同函数引用去重是可观察行为，但当前没有文档或测试证明它是有意承诺；在 Agent 生命周期课程决定 Go 订阅 API 时再显式选择，不通过模拟 JavaScript 函数身份来盲目复制。
+- 当前判断：注册顺序是 Pi 的明确契约。相同函数引用去重是可观察行为，但当前没有文档或测试证明它是有意承诺；二期 Agent 生命周期课程决定 Go 订阅 API 时再显式选择，不通过模拟 JavaScript 函数身份来盲目复制。
 - 影响：listener 顺序会决定外部持久化、日志、排队消息和错误传播的先后。即使 Agent 在通知前已经更新内部状态，顺序仍可能影响下一轮输入和调用方观察结果。
 
 ### 讨论：`listeners` 命名与实际职责
@@ -353,18 +355,18 @@ github.com/yuanbohan/pi-go
 - API 压力：公开 ID 只有在调用方需要跨所有者、跨进程、持久化或稍后按编号管理订阅时才有明显价值；当前 Agent 内事件订阅没有这些要求。公开 ID 还会引入 ID 作用域、失效、复用和错误退订等额外契约。
 - Pi 现场实验：`Set` 的当前遍历是活的。已执行的 A 删除尚未执行的 B 并新增 C 时，本次遍历结果为 A、C；B 被跳过，C 会收到当前事件。
 - 未解决契约：退订是否幂等；同一 handler 重复注册是否形成一个或多个注册；当前事件分发期间退订何时生效；分发期间新增 handler 是否接收当前事件；订阅与退订是否要求并发安全。
-- 课程要求：第 05 课先从 Pi 源码和测试确认已承诺的行为，再为 pi-go 写确定性测试，最后决定使用 live traversal、snapshot、私有注册项、内部 ID 或公开 handle。不能从数据结构反推产品契约。
+- 课程要求：二期 subscription 课程先从 Pi 源码和测试确认已承诺的行为，再为 pi-go 写确定性测试，最后决定使用 live traversal、snapshot、私有注册项、内部 ID 或公开 handle。不能从数据结构反推产品契约。
 - 学习者回答：A 在处理事件 E 时退订尚未执行的 B，选择 B 不再接收当前事件；对于分发期间新增的 C 是否接收 E，当前不知道如何判断。
 - 补充证据：Pi 文档和 agent-core 测试没有声明分发期间新增或退订的语义；当前仓库用法也没有发现依赖“新 listener 立即接收正在分发的事件”。
 - 可靠性候选：事件开始时复制有序注册项，调用每项前再检查其 active 状态。这样 B 在轮到自己前被退订会跳过，事件开始后新增的 C 从下一个事件才生效。
-- 候选理由：退订表示调用方不再希望接收通知，应尽快生效；C 在事件开始时尚不是接收者，而且 live addition 允许 handler 不断新增新 handler，使一次事件分发可能无界增长。这个候选不同于 Pi 未文档化的 `Set` 遍历结果，必须在第 05 课作为明确的 pi-go 决策记录后才能实现。
+- 候选理由：退订表示调用方不再希望接收通知，应尽快生效；C 在事件开始时尚不是接收者，而且 live addition 允许 handler 不断新增新 handler，使一次事件分发可能无界增长。这个候选不同于 Pi 未文档化的 `Set` 遍历结果，必须在二期 subscription 课程作为明确的 pi-go 决策记录后才能实现。
 - 术语澄清：“从下一个事件生效”指下一次 `dispatchEvent()` 调用，而不是下一 Agent turn 或下一次 Run。C 会立即进入真实注册表，但不会进入当前事件已经创建的 handler 快照；下一事件创建新快照时才会包含 C。
 
 ### 学习原则修正
 
 - 学习者要求：导师需要持续 grill 和 challenge 学习者，不因学习者的局部判断而降低最终实现可靠性。
 - 课程接受：合理。导师也必须挑战自己先前给出的结论；双方赞同不构成证据。
-- 本次反例：上一轮过快把退订当成尚未确定的未来需求，忽略了 Pi `subscribe()` 已返回退订函数。修正为：退订能力属于当前移植范围，具体 Go 身份机制仍未决定。
+- 本次反例：上一轮过快把退订当成 Pi 中尚未确定的能力，忽略了 Pi `subscribe()` 已返回退订函数。源码结论修正为：退订是 Pi 的公开能力；后续一期范围再次收敛后，其 Go 移植和身份机制整体移至二期。这是范围推迟，不是否认上游事实。
 
 ### Review：为什么当前没有 `.go` 源文件
 

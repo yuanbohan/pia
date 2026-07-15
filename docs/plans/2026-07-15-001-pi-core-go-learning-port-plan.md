@@ -13,370 +13,382 @@ product_contract_source: ce-plan-bootstrap
 
 ## Goal Capsule
 
-在 `pi-go` 中以课程驱动完成 Pi 核心能力的 Go 语义移植，产出一个 DeepSeek-first、无 TUI、可执行真实 coding 任务并能向目标收敛的 headless Agent Runtime。每课同时交付解释、Go 代码、测试和决策记录；学习者理解并明确要求后才能 commit 和进入下一课。
+在 `pi-go` 中以课程驱动完成 Pi 核心 coding loop 的 Go 语义移植，最终让一个 DeepSeek-first、无 TUI 的本地 headless agent 在指定目录中独立完成一个固定的小型 bug-fix 任务。
 
-权威顺序：本计划的产品契约与 KTD → `docs/course/decisions.md` 的当前决定 → 当前课程文档 → 冻结的 Pi 源码与测试基线。发现冲突时停止扩展当前课，先更新权威文档。
+第一阶段只证明最短闭环：模型接收基础上下文，产生文本或工具调用，Runtime 安全调度 `read`、`write`、`edit`、`bash`，把结果加入 transcript 并继续调用模型，直到模型停止调用工具。课程不以复制 TypeScript 文件结构为目标，也不在第一阶段解决 Session、Goal Runtime、权限审批、IM 或多仓库管理。
 
-执行采用交互式学习节奏，不自动批量实现全部单元，不自动 commit，不自动推送或创建 PR。U1-U12 分别是第 00-11 课的实现边界。
+权威顺序为：本计划的 Product Contract 与 Planning Contract → `docs/course/decisions.md` 的当前决定 → 当前课程文档 → 冻结 Pi 源码与测试。`session-settled:` 只标记已经由学习者明确决定、未经重新讨论和确认不得改变的事项，不是把其余计划内容排除在权威契约之外。出现冲突时先修正文档，不让实现静默选择一套语义。
 
-停止条件：核心循环和 coding runtime 不能在 Faux Provider 下确定性验证；DeepSeek 当前 API 无法表达必需的流式工具调用；或新的决定会改变“headless、DeepSeek-first、非 SDK-first”的初始范围。上述情况需要回到学习讨论，不由实现者静默改范围。
+执行采用交互式课程节奏。每课先讲解和讨论；涉及 Go 实现的课程再完成对应代码与测试。第 00 课是只建立 module、课程文档和验证证据的基线例外，不创建占位 Runtime package。学习者确认理解并明确要求后才能 commit。计划更新不等于自动开始下一课。
+
+停止条件：DeepSeek 当前协议不能表达必需的流式 tool call；核心 loop 无法在 Faux Provider 下确定性验证；或者实现需要引入第一阶段明确排除的 Session、Goal Runtime 或外部服务协议。
+
+---
 
 ## Product Contract
 
 ### Summary
 
-项目通过逐课阅读 Pi、提炼行为契约、实现 Go 版本并验证自身行为，构建可用于真实仓库任务的 coding agent。低层 Agent Loop 保持通用，目标规划、coding workspace 和 Session 位于其上层。仓库同时保存最终代码和形成这些设计的学习过程。
+本项目通过逐课阅读冻结的 Pi 源码、提炼可观察契约、实现 Go 版本并验证自身行为，构建一个能在单一工作目录中完成真实编程任务的最小 coding agent。仓库同时保存最终代码和形成设计的学习过程。
 
 ### Actors
 
-- A1. 学习者：阅读、练习、讨论、确认理解，并决定何时提交和进入下一课。
-- A2. pi-go Agent 操作者：为一个仓库配置 Agent，为每个真实任务创建 Session，并选择执行策略。
-- A3. IM 集成方：未来根据部署与语言边界选择 gRPC、公共 Go SDK 或其他稳定接口；当前阶段不提供外部调用或适配器。
+- A1. 学习者：阅读、讨论、确认理解，并决定何时提交和进入下一课。
+- A2. 本地操作者：提供一个工作目录和一条 coding task prompt，观察 Agent 的工具调用与最终结果，并独立运行验收。
 
 ### Requirements
 
-#### 学习与可追溯性
+**学习与可追溯性**
 
-- R1. 每课必须在同一仓库交付课程内容、Go 代码、测试和验证证据。
-- R2. 每课必须在学习者确认理解后才可进入待提交状态，并且只有学习者明确要求时才 commit。
+- R1. 每课必须在同一仓库交付课程内容和验证证据；涉及 Go 实现的课程还必须交付对应 Go 代码与测试。第 00 课是只建立 module 和课程契约的基线例外，不创建占位 Runtime package。
+- R2. 每课只有在学习者确认理解后才能进入待提交状态，并且只有学习者明确要求时才 commit。
 - R3. 会影响范围、接口、顺序或验收的讨论必须更新课程文档或决策记录。
 
-#### Agent 核心语义
+**AI 与上下文**
 
-- R4. Go Agent Loop 必须对齐 Pi 基线的 turn、stream、tool call/result、transcript 和事件生命周期语义。
-- R5. 系统必须提供可脚本化 Faux Provider，使核心行为在无网络、无密钥和无随机性的环境中验证。
-- R6. Tool Loop 必须覆盖参数校验、未知工具、长度截断调用、顺序执行、并行执行和结果排序。
-- R7. Agent 必须覆盖 busy、cancel、listener settlement、steering、follow-up、continue 和 turn stop hooks。
+- R4. Go Agent Loop 必须保留 Pi 的 user、assistant、tool call、tool result、stop reason 和多轮 transcript 核心语义。
+- R5. 系统必须提供可脚本化 Faux Provider，使模型流、工具循环、错误和取消在无网络、无密钥的环境中确定性验证。
+- R14. 每次 Provider 调用必须收到稳定 system prompt、原始用户任务、完整有序 transcript、当前 tool schemas 和 workspace/cwd 约束；第一阶段不实现自动压缩、摘要、恢复或跨 Session 上下文。
 
-#### Provider 与 coding 能力
+**工具循环**
 
-- R8. 第一个真实 Provider 必须支持 DeepSeek SSE、thinking/reasoning content、工具调用和错误映射；非本地 endpoint 默认要求 HTTPS。
-- R9. coding runtime 必须提供 read、write、edit、bash；文件工具强制 workspace 边界，bash 固定初始 cwd 并支持取消、超时和输出截断。
-- R10. `cmd/pi-go` 必须作为 Agent Runtime 的本地运行和验收入口，能够接收目标、仓库、Session 和配置，呈现运行事件，并返回可判断成功、失败或 blocked 的结果；其输入输出不构成当前外部兼容协议。
-- R11. Goal Runtime 必须在通用 Agent Loop 之上维护 plan、progress、replan、done 和 blocked，不把目标状态塞入低层消息协议。
-- R12. 一个仓库使用 `.pi-go/agent.json` 作为可审阅 Agent 配置，每个真实任务拥有独立 Session 并可保存与恢复；Session 状态默认写入仅当前用户可访问的仓库外状态目录。
-- R13. 执行策略必须可配置；初始 `trusted` 模式不逐次审批且不把 bash 伪装成 sandbox，但 Provider 凭据隔离、参数校验、取消、超时和输出限制不能关闭。
+- R6. Tool Loop 必须覆盖工具查找、模型可见 schema、Go 侧参数校验、未知工具、非法参数、截断调用、执行错误和有序 tool results。
+- R15. 工具调度必须把连续的只读并行安全调用组成并行阶段，把其他工具作为串行屏障，并按模型源顺序执行这些阶段。
+- R16. 未知工具、参数错误、执行错误、单工具超时和非零 bash exit 必须形成 call-local error tool result 并继续同批后续阶段；单工具超时使用 child context，只有 Run context 取消才中止未开始的调用。
+
+**Provider 与 coding 能力**
+
+- R8. 第一个真实 Provider 必须支持 DeepSeek SSE、reasoning content、tool calls、usage 和错误映射；非本地 endpoint 默认要求 HTTPS。
+- R9. coding runtime 必须提供 `read`、`write`、`edit`、`bash`；文件工具通过固定 workspace root 执行 root-relative I/O，bash 固定初始 cwd、使用最小环境并支持进程组取消、超时、输出截断和子进程回收。
+- R10. `cmd/pi-go` 必须接收一个工作目录和任务 prompt，呈现运行事件并返回进程结果；其输入输出不构成公共 SDK 或稳定外部协议。
+- R17. 第一阶段最终验收必须使用仓库内固定 prompt、固定小型 Go bug-fix fixture、不可修改文件哈希和生产文件变更 allowlist，要求 Agent 自主读取代码、修改实现、运行测试并让原本失败的测试通过。
+- R18. Runtime 必须明确提示工作目录内容和 tool results 会发送给 DeepSeek；第一阶段要求操作者在启动前自行确认 workspace 可披露，Runtime 只显示披露提示，不实现确认或审批交互。transcript 只驻留内存且没有通用 secret detector 或 redactor。
+- R19. Run 取消必须停止新的 Provider 调用和工具阶段，取消并等待所有已启动的 stream、工具和 bash 进程组收敛，然后只发出一次最终 canceled Run 事件并返回非成功结果。
 
 ### Key Flows
 
-- F1. 课程闭环：选择当前课 → 阅读 Pi → 练习和讨论 → Go 实现与测试 → 验证 pi-go 行为 → 记录结论 → 理解确认 → 学习者要求 commit → 下一课。
-- F2. coding 任务：加载仓库级 Agent 配置 → 创建任务 Session → Goal Runtime 规划 → Agent Loop 调用模型与工具 → 观察与重规划 → done、failed 或 blocked → 保存事件和结果。
+- F1. 课程闭环：选择当前课 → 阅读 Pi → 讲解与讨论 → 完成本课适用的 Go 实现和测试 → 验证 → 记录结论 → 理解确认 → 学习者要求 commit → 下一课。第 00 课按 R1 的基线例外执行。
+- F2. coding task：组装 system prompt、用户任务、完整 transcript、tool schemas 与 workspace context → 调用模型 → 执行工具阶段 → 把 tool results 加入 transcript → 再次调用模型 → 完整 assistant response 不含 tool calls 时结束 Run → 外部验收测试独立判断代码结果。
 
 ### Acceptance Examples
 
-- AE1. 当一课代码和测试已经完成但学习者尚未要求提交时，仓库保留未提交修改，课程状态最多到“待提交”，系统不执行 commit。
-- AE2. 当两个并行工具按 B、A 的时间顺序结束时，完成事件允许是 B、A，但写入 transcript 的 tool results 必须保持模型调用中的 A、B 源顺序。
-- AE3. 当 Agent 忙碌时再次 prompt，调用必须失败并提示使用 steering 或 follow-up；消息不能静默插入当前 transcript。
-- AE4. 当 coding 任务要求修改仓库并运行验证时，Goal Runtime 必须能多轮调用 read/edit/bash，直到验收通过或产生可解释的 blocked 状态。
+- AE1. 当一课代码和测试已完成但学习者尚未要求提交时，仓库保留未提交修改，Runtime 不执行任何 Git 提交。
+- AE2. 当同一只读阶段中的工具 A、B 按 B、A 的顺序完成时，完成事件允许按 B、A 出现，但 transcript 中 tool results 必须保持 A、B 的模型源顺序。
+- AE5. 当调用序列为 `read(a)`、`read(b)`、`write(c)`、`read(c)`、`read(d)` 时，两个 read 组分别并行，`write(c)` 作为屏障位于两组之间。
+- AE6. 当并行 read 阶段中一个调用失败时，其他 read 仍完成，后续串行阶段继续执行；所有结果在下一轮一起交给模型。
+- AE7. 当固定 fixture 的测试初始失败时，Agent 使用真实 DeepSeek 完成修改后，同一测试通过，不可修改文件哈希保持不变，fixture 内 diff 只包含 allowlist 文件；该验收不声称限制 unsandboxed bash 的主机级副作用。
 
 ### Success Criteria
 
-- Faux Provider 下所有已移植的 Pi 行为契约都有确定性测试。
-- pi-go 能在 bug fix、受约束 feature 和测试/重构三类 coding fixtures 上自主修改代码并通过任务指定验收。
-- 取消不会留下失控的模型流、工具 goroutine 或 bash 子进程。
-- Session 可在进程重启后恢复到一致 transcript 和目标状态。
-- 操作者能从配置与文档判断哪些仓库内容会发给 DeepSeek，以及 `trusted` bash 拥有哪些主机权限。
+- Faux Provider 下已移植的消息、流、工具、错误、取消和顺序契约都有确定性测试。
+- `pi-go` 能在固定 bug-fix fixture 上通过真实 DeepSeek 完成 read、edit 或 write、bash test 的多轮闭环。
+- 并行只读阶段没有 data race；取消不会留下失控的模型流、工具 goroutine 或 bash 子进程。
+- 操作者能从有界事件和内存 transcript 判断模型做了什么、哪个工具失败以及 Run 为什么结束，默认输出不重复打印完整源码或未截断 tool output。
+- 第一阶段代码中不存在 Goal Runtime、Session persistence、IM、RPC、公共 SDK、权限审批或 benchmark/eval 模块。
 
 ### Scope Boundaries
 
-初始课程不实现 TUI、主题、按键、命令提示和交互式 slash commands。不实现多 Provider 完整矩阵、公共 Go SDK、网络 RPC、飞书或其他 IM 适配器，也不移植 Pi 的实验性 AgentHarness；先实现被 coding-agent 直接使用的低层 Agent 与 Agent Loop。
+**第一阶段不做**
 
-公共 SDK、网络 RPC/IM、多租户 Agent Manager、完整 sandbox、GitHub issue/PR 工具和更多 Provider 属于核心稳定后的扩展。当前设计必须为它们保留边界，但不能提前实现未被课程验证的抽象。第一轮可用独立进程和 worktree 并行不同 Session，同一 Session 只允许一个 active run。第一轮 bash 进程树取消以 macOS 和 Linux 为运行目标；Windows 支持在核心课程后单独设计和验收。
+- TUI、主题、按键、命令提示和 slash command UI。
+- 多 Provider 矩阵；真实 Provider 只实现 DeepSeek。
+- Goal Runtime、结构化 plan/progress/replan/done/blocked 状态机；第一阶段由模型决定是否继续调用工具，由外部测试判断任务是否成功。
+- Session 创建、持久化、恢复、自动 compaction、跨任务上下文和多 active run 管理。
+- Steering、follow-up、continue、完整 listener subscription 生命周期和 Agent Manager。
+- 公共 Go SDK、gRPC、IM 适配、多用户、多仓库、worktree 与 GitHub issue/PR 管理。
+- 权限审批、trust/yolo 配置矩阵和真正 sandbox；本地命令以当前用户权限运行，文件工具路径边界、凭据不向子进程传播、取消、超时和输出限制仍是强制安全不变量。
+- 通用 secret scanning 或 redaction。操作者必须只选择允许发送给 DeepSeek 的 workspace；默认事件输出只减少额外复制，不阻止模型看到 tool results。
+- Windows bash 进程树管理；第一阶段只验证 macOS 和 Linux 的进程组取消与回收。
+- Pi 与 pi-go 的自动 benchmark、eval package、进程比较协议或评分工具。学习者可以在仓库外手动使用同一 fixture 和 prompt 比较两者。
+
+**Deferred to Follow-Up Work**
+
+- 原 U6 的完整 Agent 生命周期与订阅语义。
+- 原 U7 的 steering、follow-up、continue 和 turn hooks。
+- 原 U11 的 Goal Runtime。
+- 原 U12 的 Session persistence 与恢复。
+- Agent Manager、IM、worktree、多用户、SDK/RPC、GitHub 管理和更强权限策略。
 
 ### Dependencies
 
-- 冻结 Pi 源码和测试：commit `dcfe36c79702ec240b146c45f167ab75ecddd205`，package version `0.80.7`。
-- Go toolchain：开发机当前为 `go1.26.1 darwin/arm64`；`go.mod` 的最低版本在第 00 课确定。
-- DeepSeek OpenAI-compatible API 与当前模型目录；实现第 07 课时再次核验官方文档。
+- 冻结 Pi 源码和测试：commit `dcfe36c79702ec240b146c45f167ab75ecddd205`，agent package version `0.80.7`。
+- Go toolchain：`go.mod` 使用 Go `1.26.0`。
+- DeepSeek OpenAI-compatible API；实现真实 Provider 时重新核验官方协议和可用模型，不把当前模型别名硬编码为课程契约。
+
+---
 
 ## Planning Contract
 
 ### Key Technical Decisions
 
 - KTD1. 以可观察行为为移植边界，使用 Go 原生并发和取消机制，不复制 TypeScript API 形状。（session-settled: user-approved — chosen over line-by-line translation: 目标是掌握并验证 Pi 核心设计）
-- KTD2. 当前代码放入 `internal/`，由 `cmd/pi-go` 提供本地运行和验收入口，不做 SDK-first，也不承诺外部调用协议。（session-settled: user-directed — chosen over SDK-first: 核心接口需要随课程校正）
+- KTD2. 当前代码放入 `internal/`，由 `cmd/pi-go` 提供本地运行和验收入口，不做 SDK-first。（session-settled: user-directed — chosen over SDK-first: 核心接口需要随课程校正）
 - KTD3. 首个真实 Provider 只实现 DeepSeek，Provider 接口保持可替换。（session-settled: user-directed — chosen over a multi-provider matrix: 先验证核心 loop）
 - KTD4. 不移植 TUI，只保留 Runtime 的本地 headless 运行、可观察事件和结果。（session-settled: user-directed — chosen over porting CLI/TUI behavior: UI 不决定 coding 目标能否完成）
-- KTD5. Faux Provider 先于 DeepSeek，用脚本响应和归一化事件轨迹锁定 Agent 语义。
-- KTD6. `internal/agent` 只负责通用消息与工具循环，`internal/goal` 负责目标计划和收敛。（session-settled: user-approved — chosen over embedding planning state in the loop: 两层需要独立验证和演进）
+- KTD5. Faux Provider 先于 DeepSeek，用脚本响应锁定模型流、工具循环和 transcript 语义。
+- KTD6. 第一阶段不实现 Goal Runtime；通用 Agent Loop 只负责模型与工具循环，任务成功由外部验收判断。（session-settled: user-directed — chosen over building plan/replan/done state now: 当前只验证 coding loop 能否完成任务）
 - KTD7. `internal/agent` 定义通用 Tool 契约，`internal/coding/tools` 提供文件和进程实现，避免核心层依赖 workspace。
-- KTD8. 执行策略可配置，初始默认 `trusted`，不逐工具审批；文件工具受 workspace 约束，bash 只有初始 cwd 而没有 sandbox。bash 使用最小继承环境加显式配置环境，不复制父进程全部环境；Provider 凭据隔离、参数校验、取消、超时和截断始终生效。（session-settled: user-directed — chosen over per-action approval: 长任务不能被审批循环阻断）
-- KTD9. Agent 配置按仓库，Session 按真实任务，持久状态不与进程内 Agent 对象等同。（session-settled: user-directed — chosen over one session per repository: 任务需要独立生命周期和并发）
+- KTD8. 第一阶段没有审批或 trust 策略系统；`read`、`write`、`edit` 受 workspace root 限制，bash 只保证从 workspace 启动并仍可访问当前用户资源。bash 使用最小 allowlist 环境加显式非敏感配置，Provider 凭据不通过 env、argv 或 tool config 传播；这不是对恶意 bash 的 secret isolation。（session-settled: user-directed — chosen over per-action approval: 长任务不能被审批循环阻断，完整权限策略延后）
 - KTD10. 每课是文档、代码、测试和讨论记录的共同边界，只有学习者明确要求后才 commit。（session-settled: user-directed — chosen over automatic course commits: 学习者需要理解和调整节奏）
-- KTD11. DeepSeek 模型 ID 由配置提供；实现时选择官方仍支持的 coding 候选，不让课程依赖已宣布下线的别名。
-- KTD12. 第一轮课程冻结 Pi commit 和 package version；上游升级通过新的显式决策处理，不静默改 fixture。
-- KTD13. Provider 对 Agent 暴露可取消的 pull/receive stream；Agent 对观察者使用等待完成的 event sink。channel 只允许作为 Provider 内部机制，不成为跨层 API。
+- KTD12. 第一轮课程冻结 Pi commit 和 package version；上游升级通过显式决策处理，不静默改变基线。
+- KTD13. Provider 对 Agent 暴露可取消的 pull/receive stream；Agent 对观察者使用等待完成的 event sink。并行 worker 只向 Run-owned coordinator 提交 outcome，只有 coordinator 串行调用 sink，避免 concurrent/reentrant handler。
 - KTD14. Tool 对模型暴露 JSON Schema，并用自身的 Go 解码与校验逻辑保护执行；初始版本不实现通用 JSON Schema evaluator。
-- KTD15. 仓库 Agent 配置与任务 Session 状态分离；Session 默认保存到可配置的仓库外状态目录，以 repo identity 和 session ID 定位。
-- KTD16. 第一轮 bash 进程树取消只承诺 macOS 和 Linux；Windows 运行时支持在核心课程后单独设计。
-- KTD17. Headless Agent Runtime 与未来 Agent Manager 分层。Runtime 负责单 Session 执行与恢复；Manager 负责用户、仓库、并发、worktree 和 IM 路由。（session-settled: user-approved — chosen over building a multi-tenant daemon inside the core runtime: 先掌握和验证 Agent 核心）
+- KTD16. 第一阶段 bash 进程树管理只支持 macOS 和 Linux；Windows 的进程模型与取消语义延后单独设计。
+- KTD17. Headless Agent Runtime 与未来 Agent Manager 分层；第一阶段只有单目录、单任务的本地 Runtime。（session-settled: user-approved — chosen over building multi-tenant orchestration into the loop: 先掌握和验证 Agent 核心）
+- KTD18. 第一阶段只实现基础 transcript，不做 Session、恢复或自动上下文整理。（session-settled: user-directed — chosen over production-grade context management: 先验证最小多轮 loop）
+- KTD19. 工具调度使用屏障式分段：连续 `CanRunParallel` 调用并行，其他调用逐个成为串行屏障，阶段之间保持模型源顺序。（session-settled: user-approved — chosen over Pi default whole-batch parallel and whole-batch sequential fallback: 保留只读并行，同时避免 read/write/bash 竞态）
+- KTD20. `CanRunParallel` 是工具显式声明且默认 false；第一阶段只有 `read` 为 true，`write`、`edit`、`bash` 和未知工具均为 false。
+- KTD21. 普通工具错误不触发 fail-fast；结果作为模型观察继续同批后续阶段，只有 Run context 取消才停止。（session-settled: user-directed — chosen over skipping the remaining batch after any error: 避免调度器猜测依赖并保持 Pi 的恢复方式）
+- KTD22. 固定 fixture 和 prompt 可以供学习者在仓库外手动比较 Pi 与 pi-go，但项目不实现任何比较或评分模块。（session-settled: user-directed — chosen over an in-repo eval module: 比较属于后续独立 benchmark 活动）
+- KTD23. 四个 coding tools 操作同一个 Run-pinned workspace；工具只返回原子能力的模型可用结果，不增加 `run_tests` 等 workflow tool。后一个阶段可以观察前一个阶段已完成的文件副作用。
+- KTD24. 完整接收且不含 tool calls 的 assistant response 即正常 loop completion，即使文本为空；provider/stream failure、Run cancellation 和 acceptance deadline 是不同终态。CLI 报告 loop 终态，fixture harness 独立判断 coding task 是否成功。
+- KTD25. Run cancellation 停止新工作，取消所有已启动 child contexts，等待 stream、tool workers、event sink 和 bash process group 收敛后再发出唯一最终事件。已启动调用保留 completed 或 canceled result，未启动调用不制造 synthetic result。
+- KTD26. Go `os.Root` 是第一阶段文件工具的 workspace boundary primitive；workspace 在 Run 开始时打开，read/create/overwrite/edit/replace 都通过 root-relative 方法完成，不使用易受 symlink TOCTOU 影响的“检查绝对路径后再普通 open”。
+- KTD27. 发送给模型的 transcript 只驻留内存；read 和 bash 在内容进入 transcript、event preview 或 Provider request 前完成大小限制。默认事件呈现 metadata、状态和有界 preview，不提供通用 secret redaction。
 
 ### High-Level Technical Design
 
-下面是责任边界，不是最终 Go API：
+第一阶段 Go import 依赖保持单向，composition root 负责装配具体 Provider 和 tools：
 
 ```mermaid
 flowchart TB
-    IM[future IM adapters] -. future .-> MANAGER[future Agent Manager]
-    MANAGER -. future contract TBD .-> CLI
-    CLI[cmd/pi-go\nheadless I/O] --> APP[app assembly]
-    APP --> GOAL[internal/goal\nplan and convergence]
-    APP --> SESSION[internal/session\nevent log and checkpoint]
-    GOAL --> CODING[internal/coding\nprompt, workspace, tools]
-    CODING --> AGENT[internal/agent\nturn and tool loop]
-    AGENT --> AI[internal/ai\nmessages, stream, provider]
-    AI --> FAUX[internal/ai/faux]
-    AI --> DEEPSEEK[internal/ai/deepseek]
+    CLI[cmd/pi-go\nlocal task entry] --> CODING[internal/coding\nprompt and workspace]
+    CODING --> AGENT[internal/agent\nmodel and tool loop]
     CODING --> TOOLS[read / write / edit / bash]
+    CODING --> DEEPSEEK[internal/ai/deepseek]
+    AGENT --> AI[internal/ai\nmessages and provider stream]
+    TOOLS --> AGENT
+    FAUX[internal/ai/faux] --> AI
+    DEEPSEEK --> AI
 ```
 
-图中的 IM Adapter 和 Agent Manager 是未来边界，不属于当前 U1-U12。当前依赖保持单向：`ai` 不依赖其他内部层；`agent` 只依赖 `ai`；`coding` 组合 `agent` 和工具；`goal` 组合 coding runtime；`app` 完成配置、Session checkpoint 与运行时装配。Runtime package 不保存冻结 Pi 元数据。`goal` 不导入 `session`，避免领域状态与持久化形成循环依赖。
-
-Agent 单次运行的状态机：
+一次 Run 的核心序列为：
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Idle
-    Idle --> Streaming: prompt/continue
-    Streaming --> ToolPreflight: tool calls complete
-    ToolPreflight --> ToolExecution: calls valid
-    ToolExecution --> Streaming: append ordered results
-    Streaming --> TurnSettling: assistant stops
-    ToolPreflight --> TurnSettling: terminal tool result
-    Streaming --> Cancelling: context cancelled
-    ToolExecution --> Cancelling: context cancelled
-    TurnSettling --> Streaming: steering/follow-up/continue
-    TurnSettling --> Idle: no next message
-    Cancelling --> Idle: resources settled
+sequenceDiagram
+    participant U as User
+    participant A as Agent Loop
+    participant M as Provider
+    participant T as Tools
+    U->>A: task prompt
+    loop until assistant returns no tool calls
+        A->>M: system + transcript
+        M-->>A: streamed assistant message
+        alt message contains tool calls
+            A->>T: execute ordered stages
+            T-->>A: ordered tool results
+            A->>A: append results to transcript
+        else final assistant text
+            A-->>U: run result
+        end
+    end
 ```
 
-核心流事件不直接等同于公开 channel API。Provider 对 Agent 暴露 pull/receive stream，内部可以使用 channel；Agent 的事件派发通过 awaited sink 等待 listener 完成，确保状态切换和 transcript 对观察者可预测。sink 接收当前 run context，listener 必须在取消后返回；runtime 不承诺挽救忽略 context 且永久阻塞的第三方 listener。
+工具批次通过一次线性扫描分段：
 
-### System-Wide Impact
+```mermaid
+flowchart LR
+    R1[parallel read group] --> W[write barrier]
+    W --> R2[parallel read group]
+    R2 --> B[bash barrier]
+    B --> R3[parallel read group]
+```
 
-- 消息类型是 Provider、Agent 和 Session 的共同边界；修改必须同时检查序列化和 fixture。
-- 事件顺序影响 UI/IM 消费者和日志回放；并发实现不能用完成时间改写 transcript 源顺序。
-- 工具执行拥有最大副作用面；文件路径解析、进程树取消、Provider 凭据隔离和输出限制要在默认 `trusted` 策略下仍生效。
-- Goal 状态不能只存在于 prompt 文本；checkpoint 必须能解释当前计划、已完成步骤和停止原因。
-- DeepSeek reasoning content 和工具调用的兼容规则属于 Provider 层，不能泄漏成通用消息协议中的模型专用分支。
+并行阶段为每个 source index 预留 result slot。worker 把 outcome 交给 coordinator，coordinator 按观察到的完成顺序串行发送完成事件；阶段结束后再按 source index 把 tool results 加入 transcript。串行屏障完成后才开始下一阶段。
 
-### Trust Boundaries
+### Pi Baseline and Intentional Divergence
 
-- 发给模型的 system prompt、用户目标、已选仓库内容和 tool results 会离开本机并进入配置的 DeepSeek 服务；这是 coding agent 的产品行为，不以“本地工具”名义隐藏。
-- `DEEPSEEK_API_KEY` 只用于 Provider HTTP 认证，不注入 bash 子进程，不写入事件、transcript 或 Session checkpoint。
-- DeepSeek 远程 endpoint 默认必须使用 HTTPS；只有显式开发配置才能连接本地明文测试服务器。
-- read、write 和 edit 拒绝解析后越出 workspace 的路径。符号链接行为必须由测试锁定，不能只做字符串前缀检查。
-- `trusted` bash 继承当前用户权限，可以通过绝对路径、`..` 或子命令访问 workspace 外部。初始课程只保证 cwd、取消、超时、进程树清理和输出限制；真正 confinement 属于后续 restricted/sandbox 策略。
-- bash 子进程只接收运行所需的最小继承环境和 Agent 配置显式允许的变量，不复制父进程全部环境。这个约束降低意外泄漏，不改变 `trusted` 可读取当前用户文件的事实。
-- 仓库内容和工具输出属于不可信输入。它们可以影响模型决策，但不能改变 runtime 对凭据、路径和终态验收的强制规则。
-- Session 状态可能包含源代码与工具输出。Session 默认使用仓库外用户状态目录和 owner-only 权限；初始版本不声称提供静态加密。
+冻结 Pi 的 agent-core 默认整批并行；全局 `sequential` 或批内任一 sequential tool 会让整批串行。coding-agent 的 `write` 和 `edit` 另用同文件 mutation queue 降低覆盖风险，但 `read` 和 `bash` 不受该队列保护。
+
+pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏障式分段，换取简单、可解释的读写顺序；这项差异必须由测试和课程文档明确记录，不能被描述成 Pi 的原始行为。
+
+### Course Sequencing
+
+| 课次 | 实现单元 | 主题 | 主要结果 |
+|---|---|---|---|
+| 00 | U1 | 学习契约与冻结基线 | 最小 Go module 和学习门禁 |
+| 01 | U2 | AI 协议与 Faux Provider | 模型无关消息、stream 和脚本 Provider |
+| 02 | U3 | 单次 Provider Turn 与 transcript | 一次模型流、assistant message 和 Run 终态 |
+| 03 | U4、U5 | 多轮 Tool Loop 与屏障式调度 | tool-result 驱动下一轮、只读并行和串行屏障 |
+| 04 | U8 | DeepSeek Provider | SSE、reasoning 和 tool-call streaming |
+| 05 | U9 | Coding Tools | read、write、edit、bash 和 workspace 边界 |
+| 06 | U10 | Headless coding task | 本地入口和固定 bug-fix 验收 |
+
+课次是学习边界，U-ID 是计划追踪边界；一课可以包含两个紧密依赖的实现单元。原 U6、U7、U11、U12 保留其历史含义，但移出第一阶段。
 
 ### Risks and Mitigations
 
-- 上游 Pi 漂移：冻结 SHA 和版本；升级前重新阅读受影响源码并形成显式决策。
-- DeepSeek 模型/API 漂移：模型配置化；Provider 课程开始时重查官方文档；协议 fixture 与真实 smoke test 分离。
-- Go 并发死锁或泄漏：所有长操作接收 `context.Context`；测试 cancel、listener 阻塞、并行工具和 race detector。
-- 工具修改主机或 workspace 外资源：文件工具限制解析后路径；明确记录 `trusted` bash 不隔离主机；端到端测试使用临时 workspace 和专用最小环境，需要隔离的任务以后使用 restricted/sandbox 策略。
-- 模型或仓库内容诱导凭据泄漏：Provider key 不进入工具环境和持久化产物；事件日志做凭据检查；操作者只把允许披露的仓库交给 DeepSeek。
-- Session 状态泄漏：默认放在非仓库目录，使用 owner-only 权限，文档说明删除方式；静态加密留给后续威胁模型决定。
-- 课程节奏改变架构：每次改变先更新决策与受影响 U-ID；不把实验残留留在下一个提交。
+- DeepSeek 模型或 SSE 协议漂移：模型 ID 配置化，Provider 课程开始时重查官方文档，离线 fixture 与真实 smoke test 分开。
+- 模型把有依赖的工具放进同一 assistant message：调度器只保证执行顺序，不制造新的 LLM 推理步骤；需要读取结果后再决定的操作必须进入下一轮模型调用。
+- `CanRunParallel` 被错误标记：默认 false，只有能证明无副作用的工具才显式开启，并用 race test 与阶段顺序测试锁定。
+- bash 逃逸 workspace：第一阶段明确不提供 sandbox；fixture 使用 disposable temp root、隔离 HOME/TMPDIR/cache 和最小环境，文档不把 cwd 或 fixture diff 描述为主机隔离。
+- workspace symlink race：文件工具固定 `os.Root` 并只使用 root-relative I/O；测试用 outside canary 验证 ancestor、final 和替换竞态不能越界。
+- 数据发送与日志泄漏：操作者只选择 disclosure-safe workspace；工具在进入 transcript 前限制输出，默认事件只提供有界 preview，并明确没有通用 redaction。
+- bash 遗留后台进程：每次调用拥有独立进程组；正常退出、超时和取消都在进入下一阶段前完成 terminate、必要时 hard kill、drain 和 reap。
+- 真实模型行为不确定：Faux Provider 证明 Runtime 契约，固定真实 fixture 证明一次端到端能力，两者互不替代。
 
-### Sequencing
-
-U1 建立所有课程共同基线。U2-U7 完成可确定性验证的 AI/Agent 核心。U8 接入真实 Provider。U9-U10 把通用 loop 组装成 coding runtime。U11 增加 Goal Runtime。U12 增加跨进程 Session。
+---
 
 ## Implementation Units
 
-R1-R3 是所有课程单元的共同门禁。U1-U12 依次对应第 00-11 课；每个单元都必须修改对应的 `docs/course/lessons/<NN>-<topic>.md`。下面列出的 Requirements 和 Files 是额外功能追踪，不免除课程文档、理解确认和显式 commit 授权。
+### U1. Establish Learning Contract and Frozen Baseline
 
-### Unit Index
+- **Goal:** 建立最小 Go module、冻结 Pi 基线，并定义课程学习与提交门禁。
+- **Requirements:** R1-R3；KTD1、KTD10、KTD12。
+- **Dependencies:** 无。
+- **Files:** `AGENTS.md`、`README.md`、`go.mod`、`docs/course/README.md`、`docs/course/decisions.md`、`docs/course/lessons/00-learning-contract-and-baseline.md`。
+- **Approach:** 冻结信息只进入课程文档，不创建课程专用 Runtime package。
+- **Test scenarios:** `go list -m` 返回预期 module；所有基线文档引用同一 Pi commit 和 package version。
+- **Verification:** module 边界成立，仓库没有占位 Go package 或公共 SDK。
 
-| Unit | 标题 | 主要文件 | 依赖 |
-|---|---|---|---|
-| U1 | 学习契约与冻结基线 | `go.mod`, `docs/course/` | 无 |
-| U2 | AI 协议与 Faux Provider | `internal/ai/`, `testdata/ai/` | U1 |
-| U3 | 单轮 Agent Loop | `internal/agent/loop.go`, `internal/agent/events.go` | U2 |
-| U4 | 顺序 Tool Loop | `internal/agent/tool.go`, `internal/agent/loop_test.go` | U3 |
-| U5 | 并行 Tool Loop | `internal/agent/loop.go`, `internal/agent/loop_test.go` | U4 |
-| U6 | Agent 生命周期 | `internal/agent/agent.go`, `internal/agent/agent_test.go` | U5 |
-| U7 | Steering 与 Follow-up | `internal/agent/queue.go`, `internal/agent/agent_test.go` | U6 |
-| U8 | DeepSeek Provider | `internal/ai/deepseek/` | U2, U7 |
-| U9 | Coding Tools | `internal/coding/tools/`, `internal/coding/workspace.go` | U4 |
-| U10 | Headless Agent Runtime | `internal/coding/`, `cmd/pi-go/` | U7, U8, U9 |
-| U11 | Goal Runtime | `internal/goal/` | U10 |
-| U12 | Session 与恢复 | `internal/session/` | U6, U11 |
+### U2. Define AI Protocol and Faux Provider
 
-### U1. 建立学习契约与冻结基线
+- **Goal:** 建立模型无关消息、内容块、usage、stop reason、流事件和可脚本 Provider。
+- **Requirements:** R4、R5、R14；KTD3、KTD5、KTD13。
+- **Dependencies:** U1。
+- **Files:** `internal/ai/message.go`、`internal/ai/model.go`、`internal/ai/stream.go`、`internal/ai/faux/provider.go`、`internal/ai/faux/provider_test.go`、`docs/course/lessons/01-ai-protocol-and-faux-provider.md`。
+- **Approach:** 从 Pi `packages/ai/src/types.ts` 和 stream contract 提取通用类型；Faux Provider 使用脚本事件，不加入 DeepSeek 专用字段。根 README、课程总纲和决策记录已在开课前对齐本计划，不把文档清理混入第 01 课实现。
+- **Execution note:** 先用测试定义事件流和取消语义，再实现 Faux Provider。
+- **Test scenarios:** 文本增量、reasoning 增量、tool-call argument 分片、正常结束、provider error、context cancel、脚本耗尽和重复读取结束状态。
+- **Verification:** 测试不访问网络，脚本输入产生稳定、可比较的事件序列。
 
-- Goal：创建最小 Go module，并在课程文档中冻结 Pi 基线与学习门禁。
-- Requirements：R1-R3。
-- Files：`AGENTS.md`、`go.mod`、`docs/course/README.md`、`docs/course/decisions.md`、`docs/course/lessons/00-learning-contract-and-baseline.md`。
-- Approach：不提前建立 Agent 接口或课程专用 Go package；上游 SHA 与 package version 只保存在课程文档，根 Go module 只承载后续完整 Runtime 实现。
-- Test Scenarios：module path 与 Git remote 一致；课程文档中的冻结基线一致；根 module 不含课程专用 package 或意外公开包。
-- Verification：`go list -m` 返回预期 module；课程状态停在学习者指定的门禁。
+### U3. Implement One Provider Turn and Transcript Assembly
 
-### U2. 定义 AI 协议与 Faux Provider
+- **Goal:** 完成 user message → provider stream → assistant message → transcript 的一次 Provider turn，并建立明确的正常、失败和取消终态。
+- **Requirements:** R4、R5、R14、R19；F2；KTD6、KTD13、KTD18、KTD24、KTD25。
+- **Dependencies:** U2。
+- **Files:** `internal/agent/loop.go`、`internal/agent/events.go`、`internal/agent/types.go`、`internal/agent/loop_test.go`、`docs/course/lessons/02-agent-loop-and-transcript.md`。
+- **Approach:** 本单元只实现无工具的一次 Provider turn 和基础 event sink；每次请求包含稳定 system prompt、原始 task、当前有序 transcript、tool schemas 和 workspace context。完整 response 无 tool calls 时正常结束，包括空文本；不加入 Session、steering、follow-up 或 compaction。
+- **Execution note:** 先锁定 transcript 和事件顺序，再实现 loop。
+- **Test scenarios:** 单轮文本、空文本正常结束、reasoning 与 text 混合、完整 Provider request 字段、provider error、stream cancel、event sink 延迟、Run cancel 等待 sink 返回、唯一最终事件且位于最后。
+- **Verification:** 每条退出路径产生一致的 assistant message 和明确终态；取消只在已启动 stream 与 sink settlement 后返回且没有遗留 goroutine。
 
-- Goal：建立模型无关消息、内容块、usage、stop reason、流事件和可脚本 Provider。
-- Requirements：R4、R5。
-- Files：`internal/ai/message.go`、`internal/ai/model.go`、`internal/ai/stream.go`、`internal/ai/faux/`、`testdata/ai/`。
-- Approach：从 Pi `packages/ai/src/types.ts` 和 EventStream 提取行为；Provider 对 Agent 使用 pull/receive stream，Agent 观察者使用 awaited sink；保留未知 JSON 的可控表示，不加入 DeepSeek 分支。
-- Test Scenarios：文本增量、thinking 增量、tool call 参数分片、结束、provider error、cancel；同一脚本产生稳定事件序列。
-- Verification：Faux 测试不访问网络，事件可序列化并被 golden fixture 比较。
+### U4. Implement Tool Contract and Error Semantics
 
-### U3. 实现单轮 Agent Loop
+- **Goal:** 让 Agent 校验和执行工具，把结果加入 transcript，并由 tool results 驱动下一轮 Provider 调用。
+- **Requirements:** R4、R6、R16；F2；KTD7、KTD14、KTD21。
+- **Dependencies:** U3。
+- **Files:** `internal/agent/tool.go`、`internal/agent/validation.go`、`internal/agent/loop.go`、`internal/agent/loop_test.go`、`docs/course/lessons/03-tool-loop-and-staged-scheduling.md`。
+- **Approach:** Tool 同时提供模型可见 schema 和 Go 参数解码校验；未知工具、非法参数、execute error、单工具 timeout 和非零 bash exit 都形成 call-local error tool result。单工具 timeout 使用 Run context 的 child context；模型因长度截断的 tool calls 全部失败且不执行。
+- **Execution note:** 从顺序执行写出失败测试，先证明 tool result 能驱动下一轮，再接入并行阶段。
+- **Test scenarios:** 成功调用、未知工具、非法 JSON、参数语义错误、execute error、单工具 timeout 不取消 Run、截断消息不执行、普通错误后同批后续调用继续、下一轮 Provider 收到完整有序 transcript 和未变化的 task/tool/workspace context、模型从 edit failure 恢复。
+- **Verification:** 非取消批次中的每个 tool call 都得到同 ID 的 tool result；普通错误不崩溃、不产生 terminal Run reason，也不阻止下一轮模型恢复。
 
-- Goal：完成 user message → provider stream → assistant message → transcript 的一轮状态机。
-- Requirements：R4、R5。
-- Files：`internal/agent/loop.go`、`internal/agent/events.go`、`internal/agent/types.go`、`internal/agent/loop_test.go`。
-- Approach：先实现无工具单轮；事件 sink 的完成被等待；context transform 和 model conversion 保持为显式 seam。
-- Test Scenarios：正常文本、空响应、provider error、转换失败、事件 listener 延迟、run context 取消后 listener 返回、cancel during stream。
-- Verification：事件和 transcript 满足本课记录的行为契约，无 goroutine 泄漏。
+### U5. Implement Barrier-Based Staged Scheduling
 
-### U4. 实现顺序 Tool Loop
+- **Goal:** 在保持源顺序和安全屏障的前提下并行执行连续只读工具。
+- **Requirements:** R15、R16、R19；AE2、AE5、AE6；KTD13、KTD19-KTD21、KTD25。
+- **Dependencies:** U4。
+- **Files:** `internal/agent/tool.go`、`internal/agent/loop.go`、`internal/agent/loop_test.go`、`docs/course/lessons/03-tool-loop-and-staged-scheduling.md`。
+- **Approach:** Tool 通过默认 false 的能力标记声明是否可并行；一次线性扫描把连续 parallel-safe calls 组成阶段，非并行工具各自成为屏障。并行 worker 只提交 outcome，Run-owned coordinator 串行派发 event；result slots 保持 transcript 源顺序。
+- **Execution note:** 先用受控阻塞工具证明并发度、完成顺序和 transcript 顺序，再实现调度扫描。
+- **Test scenarios:** 全 read 并行、read-read-write-read-read 分成三个阶段、连续 write/edit/bash 严格串行、B 先完成但 transcript 保持 A/B、event sink 最大并发度为一、sink 延迟不改变 transcript、并行 read 单个失败或 child timeout 后其余完成且下一阶段继续、Run cancel 取消并等待已启动 workers 且未开始阶段不执行。
+- **Verification:** `go test -race ./...` 通过；事件完成顺序、sink 串行性、transcript 源顺序和 cancellation settlement 分别满足测试契约。
 
-- Goal：让 Agent 能校验并顺序执行工具，再把 tool results 交给下一轮模型。
-- Requirements：R4、R6。
-- Files：`internal/agent/tool.go`、`internal/agent/validation.go`、`internal/agent/loop.go`、`internal/agent/loop_test.go`。
-- Approach：Tool 同时提供模型可见 JSON Schema 和 Go 侧参数解码/校验；不实现通用 JSON Schema evaluator；preflight 先校验全部调用；把未知工具、非法参数和长度截断调用转换为失败 tool result；工具执行上下文不暴露 Provider 凭据。
-- Test Scenarios：成功、unknown tool、invalid JSON/schema、execute error、terminal result、before/after hook、truncated call 不执行。
-- Verification：tool call/result 事件、下一轮 context 和停止原因满足本课测试场景。
+### U8. Implement DeepSeek Provider
 
-### U5. 实现并行工具与排序不变量
+- **Goal:** 把 DeepSeek SSE 映射到通用 AI stream，并支持 reasoning 与 tool calls。
+- **Requirements:** R8；KTD3、KTD13。
+- **Dependencies:** U2。课程顺序位于 U3-U5 之后，但 Provider package 不导入 Agent。
+- **Files:** `internal/ai/deepseek/client.go`、`internal/ai/deepseek/stream.go`、`internal/ai/deepseek/convert.go`、`internal/ai/deepseek/client_test.go`、`internal/ai/deepseek/stream_test.go`、`testdata/deepseek/`、`docs/course/lessons/04-deepseek-provider.md`。
+- **Approach:** HTTP transport 可注入；先用本地 SSE fixture 验证协议，再提供显式 opt-in 的真实 smoke test。模型 ID 和 endpoint 来自运行配置。
+- **Test scenarios:** 文本、reasoning、分片 tool arguments、多 tool calls、usage、HTTP error、malformed SSE、context cancel、远程明文 endpoint 被拒绝、本地测试 endpoint 显式放行。
+- **Verification:** 离线 fixture 全通过；有凭据时 smoke test 完成文本和 tool-call 响应，日志和事件不包含 API key。
 
-- Goal：实现批量工具并发、事件完成顺序和 transcript 源顺序。
-- Requirements：R4、R6；Acceptance：AE2。
-- Files：`internal/agent/loop.go`、`internal/agent/tool.go`、`internal/agent/loop_test.go`、`testdata/tools/`。
-- Approach：preflight 按源顺序执行；允许的工具并发执行；完成事件按实际完成时间发出；持久 tool results 按原始 call 顺序排列；任一 sequential 工具使整批顺序执行。
-- Test Scenarios：A/B 反向完成、混合 sequential/parallel、preflight failure、terminal result、cancel while batch running。
-- Verification：race detector 通过，事件与 transcript 的两个顺序分别满足契约。
+### U9. Implement Coding Tools and Workspace Boundary
 
-### U6. 实现 Agent 生命周期
+- **Goal:** 提供能修改真实临时仓库并运行验证的 `read`、`write`、`edit`、`bash`。
+- **Requirements:** R9、R15、R16、R18、R19；KTD7、KTD8、KTD16、KTD20、KTD23、KTD25-KTD27。
+- **Dependencies:** U4、U5。
+- **Files:** `internal/coding/workspace.go`、`internal/coding/tools/read.go`、`internal/coding/tools/write.go`、`internal/coding/tools/edit.go`、`internal/coding/tools/bash.go`、`internal/coding/tools/truncate.go`、`internal/coding/tools/tools_test.go`、`docs/course/lessons/05-coding-tools.md`。
+- **Approach:** Run 开始时用 `os.Root` 固定 canonical workspace，文件工具只使用 root-relative I/O 并拒绝非 regular-file 目标；write 和 edit 通过 workspace 内临时文件与替换提交结果，edit 使用精确且可验证的唯一替换。bash 绑定 cwd 和独立进程组，使用最小 allowlist 环境，但不声称 sandbox；第一阶段只支持 macOS 和 Linux。read 标记为 parallel-safe，其他三个工具保持默认 false。工具返回 resolved relative path、edit 匹配诊断、bash exit code/stdout/stderr/timeout/truncation 等模型可用结果。
+- **Execution note:** 使用临时 workspace 做集成测试，并在实现 bash 后立即验证进程组取消。
+- **Test scenarios:** read 成功与不存在、write 新建与覆盖、edit 唯一替换与零/多匹配、非 regular-file 拒绝、`..` 穿越、ancestor/final/dangling symlink、validation-to-open swap 和 outside canary；bash stdout/stderr、非零退出 error result、timeout、startup cancel、正常 shell exit 后后台子进程、grandchild 持有 pipe、输出在进入 transcript 前截断；任意父进程 secret、Provider key 和敏感 handle 不进入子进程或事件，显式允许变量可见；`write → read`、`edit → bash`、`bash-created file → read` 观察同一 workspace。
+- **Verification:** `os.Root` 文件操作不能越出 workspace；每个 bash 路径都在下一阶段前 drain、terminate、必要时 kill 并 reap 同进程组 descendants；`go test -race ./...` 通过。
 
-- Goal：建立可复用 Agent 对象，管理 transcript、监听器、active run、cancel 和状态清理。
-- Requirements：R7。
-- Files：`internal/agent/agent.go`、`internal/agent/state.go`、`internal/agent/agent_test.go`。
-- Approach：一次只允许一个 active run；prompt busy 时明确失败；listener settlement 纳入 run 完成；所有出口恢复一致 idle 状态。
-- Test Scenarios：concurrent prompt、cancel before/during stream、listener reject、provider failure、tool failure、重复订阅与取消订阅。
-- Verification：每条退出路径都清除 active run，cancel 可重复调用且不遗留 goroutine。
+### U10. Assemble Headless Coding Agent and Fixed Acceptance Task
 
-### U7. 实现 Steering、Follow-up 与 turn hooks
+- **Goal:** 让操作者用一个目录和一条 prompt 启动 Agent，并在固定 fixture 上完成真实 bug fix。
+- **Requirements:** R10、R17-R19；F2；AE7；KTD2、KTD4、KTD6、KTD17、KTD22-KTD25、KTD27。
+- **Dependencies:** U3-U5、U8、U9。
+- **Files:** `internal/coding/prompt.go`、`internal/coding/runtime.go`、`internal/coding/runtime_test.go`、`cmd/pi-go/main.go`、`cmd/pi-go/main_test.go`、`testdata/acceptance/bugfix/task.txt`、`testdata/acceptance/bugfix/`、`docs/course/lessons/06-headless-coding-task.md`、`README.md`。
+- **Approach:** 本地入口装配 DeepSeek、内存 transcript 和四个 coding tools。固定 Go fixture 的 `NormalizeTags` starter 实现不能满足“trim、删除空项、按首次出现顺序去重”的既有测试；checked-in prompt 要求定位并修复 bug、运行测试且不修改测试文件。真实验收把 regular-file-only fixture 复制到 checkout 外的 disposable temp root，隔离 HOME/TMPDIR/Go caches，设置最小环境、外部 deadline、immutable hashes、target allowlist 和相邻 canary。
+- **Execution note:** 先建立失败 fixture 和不可修改的验收断言，再组装 Runtime；真实模型运行只在离线契约测试全部通过后进行。
+- **Test scenarios:** fixture 初始测试失败、Faux 多轮 read/edit/bash 后通过、每轮 request context 完整、CLI help 和运行启动明确显示 DeepSeek data-egress 边界、无效 workspace、缺少 DeepSeek key、zero-tool assistant response 正常结束、provider failure 与用户取消返回不同非成功终态、acceptance deadline、真实 DeepSeek 在 final mutation 后运行成功 bash test、独立测试通过、immutable hashes 不变、fixture diff 只含 allowlist、相邻 canary 不变、无遗留进程。
+- **Verification:** structured trace 包含 read、edit 或 write、final mutation 后成功 bash test 和 loop terminal reason；同一 checked-in prompt 可以手动交给 Pi 和 pi-go。fixture diff 和 canary 只验证验收目录效果，不宣称 OS-wide containment，也不生成比较分数或 eval 文件。
 
-- Goal：对齐运行中插队和下一轮排队行为，并支持 continue、prepare-next-turn 与 stop hooks。
-- Requirements：R7；Acceptance：AE3。
-- Files：`internal/agent/queue.go`、`internal/agent/agent.go`、`internal/agent/agent_test.go`、`testdata/queue/`。
-- Approach：steering 和 follow-up 使用独立队列；只在 Pi 对应的 turn 边界消费；队列内容进入 transcript 的时机由测试锁定。
-- Test Scenarios：busy prompt、多个 steering、多个 follow-up、continue with/without transcript、prepare hook 注入、stop hook、cancel leaves queue policy explicit。
-- Verification：事件和 transcript 满足本课记录的队列契约。
-
-### U8. 实现 DeepSeek Provider
-
-- Goal：把 DeepSeek SSE 映射到通用 AI 事件，并支持 thinking 与工具调用。
-- Requirements：R8。
-- Files：`internal/ai/deepseek/client.go`、`internal/ai/deepseek/stream.go`、`internal/ai/deepseek/convert.go`、`internal/ai/deepseek/client_test.go`、`internal/ai/deepseek/stream_test.go`、`testdata/deepseek/`。
-- Approach：只依赖 DeepSeek 官方 OpenAI-compatible contract；HTTP transport 可注入；先用本地 SSE fixture，再用显式 opt-in smoke test。
-- Test Scenarios：文本、reasoning content、分片 tool arguments、多 tool calls、usage、HTTP error、malformed SSE、invalid tool arguments、cancel、模型配置变化、远程 HTTP endpoint 被拒绝、本地测试 endpoint 显式放行。
-- Verification：离线 fixture 全通过；有凭据时显式 smoke test 能完成文本和工具调用，不把密钥写入日志。
-
-### U9. 实现 coding tools 与 workspace 边界
-
-- Goal：提供可用于真实仓库的 read、write、edit、bash 工具，并准确表达 `trusted` 权限边界。
-- Requirements：R9、R13。
-- Files：`internal/coding/workspace.go`、`internal/coding/policy.go`、`internal/coding/tools/read.go`、`internal/coding/tools/write.go`、`internal/coding/tools/edit.go`、`internal/coding/tools/bash.go`、`internal/coding/tools/truncate.go` 及同目录测试。
-- Approach：Tool 契约来自 `agent`；文件路径通过 workspace 解析；edit 使用可验证的精确替换规则；bash 绑定初始 cwd、context 和进程树但不提供 sandbox；工具子进程排除 Provider 凭据；输出按字节与行截断并保留提示。
-- Test Scenarios：路径穿越、symlink 边界、文件不存在、非唯一 edit、取消 bash、超时、超长 stdout/stderr、父进程非允许环境变量不进入 bash、Provider key 不进入 bash、trusted 策略无交互审批、bash 可观察地不承诺 confinement。
-- Verification：临时 Git fixture 中的四个工具可组合工作；文件工具不会越出 workspace；bash 子进程可清理且不会收到 Provider 凭据。
-
-### U10. 组装 headless Agent Runtime
-
-- Goal：让用户目标通过 DeepSeek 和 coding tools 在指定仓库中执行，并输出结构化事件和终态。
-- Requirements：R9、R10、R13；Flow：F2。
-- Files：`internal/coding/runtime.go`、`internal/coding/prompt.go`、`internal/coding/runtime_test.go`、`internal/app/config.go`、`internal/app/run.go`、`cmd/pi-go/main.go`、`cmd/pi-go/main_test.go`。
-- Approach：CLI 只做 `.pi-go/agent.json` 配置、本地运行控制、结果呈现与装配；具体输入输出格式在实现课程按本地验收需求确定，不形成外部兼容承诺。Agent Runtime 负责单 Session 的 system prompt、上下文和工具注册；不加入 TUI、公共 SDK、gRPC 或多用户 Agent Manager。
-- Test Scenarios：Faux 驱动的读改验收、DeepSeek opt-in smoke、无效仓库、缺少密钥、工具失败后恢复、cancel 返回明确终态；blocked 终态在 U11 接入 Goal Runtime 后完成。
-- Verification：在 fixture 仓库中完成至少一个多轮修改任务并通过指定测试，本地入口能够呈现事件和明确终态。
-
-### U11. 实现 Goal Runtime
-
-- Goal：在 coding runtime 上实现以目标为导向的 plan、observe、replan 和终止判断。
-- Requirements：R10、R11；Acceptance：AE4。
-- Files：`internal/goal/runner.go`、`internal/goal/state.go`、`internal/goal/evaluator.go`、`internal/goal/runner_test.go`。
-- Approach：Goal state 是结构化领域状态；模型可提出或更新计划，但 runtime 校验状态转移、重试预算和 done/blocked 证据；低层 Agent Loop 不感知 goal。
-- Test Scenarios：一次完成、多步计划、验证失败后 replan、无进展检测、预算耗尽、用户取消、明确 blocked、错误 done 声明被验收拒绝。
-- Verification：Faux 场景可重放；真实 fixture 必须以验收结果而非模型自报作为完成依据。
-
-### U12. 实现每任务 Session 与恢复
-
-- Goal：持久化任务 transcript、goal state、事件和 checkpoint，使多任务隔离并可恢复。
-- Requirements：R12。
-- Files：`internal/session/session.go`、`internal/session/store.go`、`internal/session/file_store.go`、`internal/session/recovery_test.go`。
-- Approach：Session ID 与仓库 Agent 配置分离；默认使用操作系统用户状态目录并可配置；目录和文件使用 owner-only 权限；使用版本化 envelope 和原子写入；恢复时验证 repo identity、基线与 workspace 身份，不重放已提交副作用。
-- Test Scenarios：创建两个并行 Session、重启恢复、损坏 checkpoint、版本不兼容、cancel 后恢复、workspace SHA 改变、默认路径不在目标仓库、目录与文件权限不向其他用户开放。
-- Verification：进程重启后 transcript 和 goal state 一致；不同 Session 不共享队列或工具结果。
+---
 
 ## Verification Contract
 
-### 每课门禁
+### Per-Lesson Gates
 
-每课只运行与本课相关的测试并展示完整结果。涉及 Go 代码时至少执行：
+涉及 Go 代码的课程必须运行：
 
 ```bash
-gofmt -w <本课修改的 Go 文件>
+gofmt -w <changed-go-files>
 go test ./...
 go vet ./...
 ```
 
-涉及并发、取消、Session 或进程管理的课程还执行：
+涉及并行、取消或进程管理时还必须运行：
 
 ```bash
 go test -race ./...
 ```
 
-创建 fuzz target 后，在对应课程执行有时间上限的 fuzz 验证，并把产生的最小失败输入纳入 `testdata/` 或 Go fuzz corpus。
+课程只提交学习者已确认的课时文件。计划、课程文档和代码出现语义冲突时，先修正文档再通过门禁。
 
-### 外部服务门禁
+### Provider Gates
 
-默认测试不得读取 DeepSeek key 或调用付费 API。真实 Provider smoke test 必须显式 opt-in，记录模型 ID 和时间，使用 HTTPS，并验证 Provider key 没有出现在工具环境、transcript、事件或日志中。模型 smoke test 证明协议可用，不替代 Faux Provider 的确定性语义测试。
+默认测试不得读取 DeepSeek key 或调用付费 API。真实 smoke test 必须显式 opt-in，记录模型 ID 和 endpoint，并验证 Provider key 没有通过工具环境、argv、tool config、transcript、事件、日志或错误传播。测试还要用非 Provider secret canaries 证明 bash 只获得 allowlist 环境。真实 smoke test 只证明协议可用，不能替代 Faux Provider 的确定性测试。
 
-### Headless Runtime 门禁
+运行前必须明确告知操作者：system prompt、用户任务、模型选择的文件内容、命令和 tool output 会发送到 DeepSeek。默认 CLI 事件只显示 metadata、状态和有界 preview；transcript 不落盘，输出限制在内容进入 transcript 和 Provider request 前生效。
 
-端到端测试从临时 Git workspace 启动 `cmd/pi-go`，通过 Faux Provider 驱动确定性任务，至少检查任务断言、最终 diff、越界文件修改、终态和遗留进程。真实 DeepSeek 场景只能作为显式 opt-in smoke test，不能替代离线测试。
+### Final Coding Acceptance
+
+最终验收把 checked-in regular files 复制到真实 checkout 外的 disposable temp root，使用独立 HOME/TMPDIR/Go caches、最小环境、外部 deadline 和相邻 canary。先证明 starter tests 失败，再用 `testdata/acceptance/bugfix/task.txt` 启动 `pi-go`，最后独立运行 fixture tests。
+
+通过条件是测试成功、immutable hashes 未改变、fixture diff 只包含 allowlist、相邻 canary 未改变、无遗留子进程，并且 structured trace 包含读取、修改、final mutation 后成功测试和明确 loop terminal reason。这些检查不证明 unsandboxed bash 没有访问或修改主机其他位置。
+
+Pi 与 pi-go 的人工对比在本仓库外进行，不属于 `go test ./...`、命令输出或 Definition of Done。
+
+---
 
 ## Definition of Done
 
-全局完成要求：
+- R1-R6、R8-R10、R14-R19 均由至少一个 active U-ID 和可观察验证覆盖。
+- U1-U5、U8-U10 的课程文档、代码、测试和决策记录一致；被移出的 U6、U7、U11、U12 没有残留实现。
+- Faux Provider 下消息流、完整 request context、基础 transcript、多轮 tool loop、错误继续、屏障调度、串行 event sink 和 cancellation settlement 都有确定性测试。
+- DeepSeek Provider 的离线 SSE fixtures 通过，并完成一次显式真实 text/tool-call smoke test。
+- 四个 coding tools 在临时 workspace 中组合工作，`os.Root` 文件边界、进程组清理、超时、截断和凭据不传播测试通过。
+- `cmd/pi-go` 使用固定 prompt 在固定 bug-fix fixture 上完成真实 coding task，独立验收测试通过。
+- 第一阶段没有 TUI、Goal Runtime、Session、Agent Manager、SDK/RPC、IM、权限审批、GitHub 管理或自动 Pi 对比模块。
+- `gofmt`、`go test ./...`、`go vet ./...` 和适用的 `go test -race ./...` 通过。
+- 放弃的实验代码、未使用的抽象、临时 fixture 和失控进程已清理。
+- 每个 commit 都由学习者明确要求，并且只包含已经理解和确认的课程文件。
 
-- R1-R13 全部由至少一个 U-ID 和可观察验证覆盖。
-- U1-U12 的课程文档、代码、测试和决策记录一致，没有跳过的学习确认。
-- 核心 loop 的 Faux 测试、DeepSeek smoke、coding fixture、Goal Runtime 和 Session recovery 均有通过证据。
-- headless Agent Runtime 不依赖 TUI，默认不逐工具审批，本地入口可运行并呈现明确终态；文档不把 Runtime 误写成外部服务或多用户 Manager，也不把 `trusted` bash 描述为 sandbox。
-- 没有遗留被放弃的实验代码、无效 fixture、失控进程或测试密钥。
-- 所有 commit 都由学习者明确要求，并且只包含已经确认课程的相关文件。
-
-每个单元完成要求：该单元的 Test Scenarios 有实现和结果；受影响决策与课程状态已更新；学习者能解释核心行为与 Go 取舍；学习者明确要求后才提交。单元实现完成不等于课程已提交。
+---
 
 ## Appendix
 
-### Pi 源码基线
+### Frozen Pi Source Paths
 
+- `packages/ai/src/types.ts`
 - `packages/agent/src/types.ts`
 - `packages/agent/src/agent-loop.ts`
 - `packages/agent/src/agent.ts`
 - `packages/agent/test/agent-loop.test.ts`
 - `packages/agent/test/agent.test.ts`
-- `packages/ai/src/types.ts`
-- `packages/ai/src/providers/deepseek.ts`
+- `packages/coding-agent/src/core/tools/file-mutation-queue.ts`
 - `packages/coding-agent/src/core/tools/read.ts`
 - `packages/coding-agent/src/core/tools/write.ts`
 - `packages/coding-agent/src/core/tools/edit.ts`
 - `packages/coding-agent/src/core/tools/bash.ts`
 
-### External Sources
+### External Sources for Provider Lesson
 
 - [DeepSeek API documentation](https://api-docs.deepseek.com/)
 - [DeepSeek chat completion API](https://api-docs.deepseek.com/api/create-chat-completion)
 - [DeepSeek tool calls guide](https://api-docs.deepseek.com/guides/tool_calls)
-- [Organizing a Go module](https://go.dev/doc/modules/layout)
-- [Go language specification](https://go.dev/ref/spec)
-- [`context` package](https://pkg.go.dev/context)
-- [Go fuzzing tutorial](https://go.dev/doc/tutorial/fuzz)
+- [Go `os.Root`](https://pkg.go.dev/os#Root)

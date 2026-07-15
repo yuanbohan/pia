@@ -2,9 +2,15 @@
 
 面向学习与验证的 [Pi](https://github.com/earendil-works/pi) 核心能力 Go 语义移植。
 
-项目以课程驱动：每一课同时完成源码拆解、Go 实现、测试、讨论记录和一次由学习者批准的提交。当前阶段聚焦 AI 协议、Agent Loop、coding tools 和 Goal Runtime，不实现 TUI，也不优先承诺公共 SDK。
+项目以课程驱动：先阅读冻结的 Pi 源码并提炼可观察契约，再完成对应 Go 实现、测试、讨论记录和一次由学习者批准的提交。
+
+第一阶段只构建最小 coding loop：DeepSeek 接收基础上下文，Agent 多轮调用 `read`、`write`、`edit`、`bash`，把 tool results 加回内存 transcript，直到模型停止调用工具。最终用一个固定的小型 Go bug-fix fixture 验证它能在单一目录中完成真实编程任务。
+
+第一阶段不实现 Goal Runtime、Session 持久化、TUI、公共 SDK、RPC/IM、多用户、多仓库、worktree/GitHub 管理、权限策略矩阵或 Pi 对比工具。bash 不是 sandbox；具体安全边界和验收约束记录在完整实施计划中。
 
 - [课程总纲](docs/course/README.md)
 - [设计决策](docs/course/decisions.md)
 - [完整实施计划](docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md)
 - [第 0 课：学习契约与基线](docs/course/lessons/00-learning-contract-and-baseline.md)
+
+当前进度：第 00 课已提交，第 01 课“AI 协议与 Faux Provider”待学习者明确要求后开始。仓库暂时只有 `go.mod` 和课程文档，没有占位 Go package。
