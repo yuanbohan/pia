@@ -39,14 +39,14 @@ task + system prompt + transcript + tool schemas + workspace context
 
 核心术语：
 
-- `Agent Runtime`：当前课程的本地核心，负责 Provider 调用、内存 transcript、工具循环、事件和取消。
+- `Agent Runtime`：当前课程的本地核心，拥有同一对话的完整有序内存 transcript，并负责 Provider 调用、工具循环、事件和取消。
 - `Run`：一次任务 prompt 启动的完整循环，可以包含多个模型 Turn；课程使用 `run_start/run_end`，引用 Pi 源码时保留 `agent_start/agent_end`。
 - `Turn`：一次 assistant response，以及它触发的 tool calls 和 tool results。
 - `Tool stage`：同一 assistant message 中的一个执行阶段。连续 parallel-safe calls 构成并行阶段，其他调用分别构成串行屏障。
-- `Headless`：没有 TUI 或网页界面。第一阶段还进一步限定为单目录、单任务、单进程内存上下文，但这些不是“headless”一词本身的定义。
+- `Headless`：没有 TUI 或网页界面。第一阶段还进一步限定为单目录、单 active Run 和单进程内存上下文，但这些不是“headless”一词本身的定义。
 - `Agent Manager`：后续可能负责用户、仓库、Session、并发、worktree 和 IM 路由的服务；不属于第一阶段 Runtime。
 
-第一阶段不实现 Goal Runtime、Session 创建/持久化/恢复、自动 compaction、steering/follow-up、完整 subscription 生命周期、权限审批、公共 SDK、gRPC、IM、多用户、多仓库、worktree、GitHub 管理或自动 Pi 对比。
+第一阶段不实现 Goal Runtime、Session 创建/持久化/恢复、自动 compaction、steering/follow-up、完整 subscription 生命周期、权限审批、公共 SDK、gRPC、IM、多用户、多仓库、worktree、GitHub 管理或自动 Pi 对比。这里推迟的是 Session 基础设施；Agent 在当前进程内保留完整 transcript 属于核心语义。
 
 ## 每课工作方式
 
@@ -98,7 +98,7 @@ flowchart LR
 |---|---|---|---|
 | 00 | 学习契约与冻结基线 | `go.mod`、仓库约束和上游源码基线 | 已提交 |
 | 01 | AI 协议与 Faux Provider | 消息、内容块、stream、Provider 接口和脚本 Provider | 已提交 |
-| 02 | 单次 Provider Turn 与 transcript | 一次模型流、assistant message、request context 和 Run 终态 | 待开始 |
+| 02 | 单次 Provider Turn 与 transcript | 一次模型流、assistant message、request context 和 Run 终态 | 已提交 |
 | 03 | 多轮 Tool Loop 与屏障式调度 | schema、参数校验、tool results、错误继续、只读并行和串行屏障 | 待开始 |
 | 04 | DeepSeek Provider | SSE、reasoning、tool calls、usage 和错误映射 | 待开始 |
 | 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 待开始 |

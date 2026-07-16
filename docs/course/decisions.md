@@ -40,11 +40,11 @@
 - 决定：不实现主题、按键、命令提示、交互式选择器和 slash command UI。
 - 原因：它们不决定 coding loop 是否能完成任务，会稀释当前课程对核心语义的关注。
 
-### D7. 第一期是单目录、单任务，不建立 Agent 配置和 Session
+### D7. 第一期是单目录、单 active Run，不建立持久化 Session
 
-- 日期：2026-07-15
-- 决定：`cmd/pi-go` 每次只接收一个 workspace 和一条 task prompt，transcript 只在当前进程内存中存在。仓库级 Agent 配置、每任务 Session、跨任务上下文、多 active run 和多用户并发全部延后。
-- 原因：第一期验收只需要一个真实 coding task。长期“Agent 按仓库、Session 按任务”的方向可以在二期重新验证，但不应提前生成配置或持久化抽象。
+- 日期：2026-07-16
+- 决定：`cmd/pi-go` 的第一期验收仍只接收一个 workspace 和一条初始 task prompt，但核心 `Agent` 拥有当前进程内的完整有序 transcript，并可按顺序接收后续 user input；同一时刻只允许一个 active Run。Session 创建、持久化、恢复、分支、多用户并发和 Agent Manager 延后。
+- 原因：内存 transcript 是 Agent 保持目标和工具上下文的核心执行状态，不是可删减的 Session 附加能力；推迟的是持久化与管理层，而不是正确的消息所有权。
 
 ### D8. 第一期没有审批或 trust/yolo 策略系统
 
@@ -64,11 +64,11 @@
 - 决定：第一轮课程固定参考 Pi commit `dcfe36c79702ec240b146c45f167ab75ecddd205`、agent package version `0.80.7`。
 - 原因：固定源码坐标后，课程中的行为结论才能追溯到同一份实现；上游变化需要显式重新阅读和决策。
 
-### D11. Provider stream 使用 pull boundary，Agent event 使用串行 awaited sink
+### D11. Provider stream 使用 pull boundary；Agent event sink 延后设计
 
-- 日期：2026-07-15
-- 决定：Provider 对 Agent 暴露可取消的 pull/receive 流抽象；Agent 通过等待完成的 event sink 通知观察者。并行工具 worker 只把 outcome 交给当前 Run 的 coordinator，由 coordinator 串行调用 sink，不能并发或重入 handler。
-- 原因：pull boundary 把结束、错误和取消放在一个读取协议中；awaited sink 对齐 Pi 的 settlement 语义；单一 coordinator 同时保护事件顺序和 handler 并发边界。
+- 日期：2026-07-16
+- 决定：Provider 对 Agent 暴露可取消的 pull/receive 流抽象。第 02 课不设计或实现 Agent event sink；等本地 headless 入口真正需要展示运行过程时，再根据终端消费者核对事件形状、串行投递、错误和 settlement 语义。
+- 原因：pull boundary 直接参与模型调用、结束、错误和取消，属于基础执行数据流；event sink 服务运行观察和展示，当前 transcript loop 没有真实消费者，不应为了未来 TUI 提前固化接口。
 
 ### D12. 工具 schema 与 Go 参数校验分离
 
@@ -78,8 +78,8 @@
 
 ### D13. 第一期只保留内存 transcript
 
-- 日期：2026-07-15
-- 决定：Run 入口接收一次原始 task 并将它转换成 transcript 的首条 user message；每次 Provider 调用收到包含 workspace/cwd 说明的稳定 system prompt、完整有序 transcript 和当前 tool schemas，不增加独立 `Task` 或 `WorkspaceContext` AI 协议字段。第一期不持久化 transcript，不实现 checkpoint、恢复、自动 compaction、摘要或跨 Session 上下文。
+- 日期：2026-07-16
+- 决定：Agent 的第一次 Run 把原始 task 转换成 transcript 首条 user message；同一 Agent 后续每次 Run 都把新的 user input 追加到已有 transcript。每次 Provider 调用收到包含 workspace/cwd 说明的稳定 system prompt、截至当前的完整有序 transcript 和当前 tool schemas，不增加独立 `Task` 或 `WorkspaceContext` AI 协议字段。第一期不持久化 transcript，不实现 checkpoint、恢复、自动 compaction、摘要或跨 Session 上下文。
 - 原因：基础多轮上下文已经足以验证 coding loop；持久化和压缩会引入版本、恢复和敏感数据存储契约，必须由二期真实需求驱动。
 
 ### D14. 第一轮 bash 进程树支持 macOS 和 Linux
@@ -90,8 +90,8 @@
 
 ### D15. Agent Runtime 与 Agent Manager 分层
 
-- 日期：2026-07-15
-- 决定：第一期只构建单目录、单任务的本地 Runtime。后续 Agent Manager 才负责用户、仓库目录、Session、并发、worktree、GitHub 和 IM 路由；这些职责不能进入通用 Agent Loop。
+- 日期：2026-07-16
+- 决定：第一期只构建单目录、单 active Run 的本地 Runtime；同一 Agent 可以按顺序接收 user input 并保留完整内存 transcript。后续 Agent Manager 才负责用户、仓库目录、持久化 Session、多 Agent/Run 并发、worktree、GitHub 和 IM 路由；这些职责不能进入通用 Agent Loop。
 - 原因：headless 只描述无 UI 的运行形态，不等于当前已经提供外部服务或多租户调度。
 
 ### D16. 学习过程以证据驱动，不以对话共识驱动
@@ -126,8 +126,8 @@
 
 ### D21. Run 取消必须等待所有已启动工作收敛
 
-- 日期：2026-07-15
-- 决定：Run 取消停止新的 Provider 调用和工具阶段，取消所有已启动 child contexts，等待 stream、tool workers、awaited event sink 和 bash process group 收敛，然后只发出一次最终 canceled Run 事件并返回非成功结果。已启动调用保留 completed 或 canceled outcome；未启动调用不制造 synthetic result。
+- 日期：2026-07-16
+- 决定：Run 取消停止新的 Provider 调用和工具阶段，取消所有已启动 child contexts，等待 stream、tool workers 和 bash process group 收敛，然后返回明确的 canceled 非成功结果。已启动调用保留 completed 或 canceled outcome；未启动调用不制造 synthetic result。未来引入 event sink 时，再把观察通道的 settlement 纳入该取消契约。
 - 原因：取消请求不是完成信号。过早返回会遗留 goroutine、进程或晚到事件，并允许新旧副作用重叠。
 
 ### D22. 文件工具使用 os.Root；bash 不宣称 workspace containment
@@ -152,7 +152,43 @@
 
 - 日期：2026-07-16
 - 决定：`AssistantMessage` 第一阶段只保留有序 content blocks、token usage、stop reason 和 error message。暂不加入 api/provider/model、response ID/model、diagnostics、timestamp、cost 或未核验的 cache/reasoning usage 细分；stream delta 不重复携带完整 partial message，terminal event 携带权威 final/aborted message。
-- 原因：当前 Agent Loop 只观察内容、用量和终态；其余字段属于 Pi 的多 Provider、路由、Session/UI、诊断或费用生态。第 02 课若出现真实 partial snapshot 消费者，或第 04 课核对 DeepSeek 后出现新的 usage/trace 需求，再用证据扩展内部协议。
+- 原因：当前 Agent Loop 只观察内容、用量和终态；其余字段属于 Pi 的多 Provider、路由、Session/UI、诊断或费用生态。第 02 课核对后没有发现 pi-go 第一阶段需要完整 partial snapshot 的消费者；第 04 课若核对 DeepSeek 后出现新的 usage/trace 需求，再用证据扩展内部协议。
+
+### D26. Partial assistant 不属于正式 transcript
+
+- 日期：2026-07-16
+- 决定：第一阶段正式 transcript 只追加 terminal final/aborted assistant message，不保存、持久化或暴露可查询的完整 partial assistant view。如何把 formation events 提供给本地终端、未来 TUI 或日志，等课程处理真实展示过程时再讨论，不在第 02 课建立 event sink。
+- 原因：冻结 Pi 的低层 loop 会把 partial 临时放进私有 working context，但高层 `Agent.state.messages` 只在 `message_end` 追加 terminal message，并用独立 `streamingMessage` 服务 UI。pi-go 第一期是 headless Runtime，没有必须查询完整 partial snapshot 的消费者；把权威 transcript 与临时展示状态分开可以避免半成品 text、thinking 或 tool-call 参数成为下一轮上下文事实。
+
+### D27. RunResult 携带数据，Go error 表达调用终态
+
+- 日期：2026-07-16
+- 决定：第 02 课使用 `Agent.Run(ctx, userInput) (RunResult, error)`；`RunResult` 第一阶段携带 Agent 当前完整 transcript 的快照，不增加 `Outcome` 或内嵌 `Error` 字段。正常完成返回 nil error；Provider/stream failure 返回非 nil error；取消返回可用 `errors.Is` 识别的 context cause。所有路径都尽可能把 terminal 或合成的 final/error/aborted assistant message 追加到 Agent transcript 后再返回。
+- 原因：`AssistantMessage.StopReason` 已保存模型响应事实，Go error 负责调用者控制流；再增加 Run outcome 会制造第三份可能漂移的终态分类。失败时同时返回 result 和 error 可以保留 transcript 现场，又符合 Go 调用方对错误与取消的处理习惯。
+
+### D28. Agent 保留同一对话的全部消息
+
+- 日期：2026-07-16
+- 决定：只要仍是同一个 Agent 对话，每条新 user message、每条 terminal assistant message 和每条 tool result 都按顺序追加，任何后续 Provider call 都收到完整 transcript；收到新 user message 不会清空旧消息。开始新对话必须显式创建新 Agent 或使用未来明确设计的 reset/session boundary。Agent 拒绝并发 Run，避免共享 transcript 发生交错写入。
+- 原因：原始目标、模型已采取的动作和工具观察共同构成后续推理上下文；丢弃前文会让复杂任务失去目标连续性。冻结 Pi 也由高层 `Agent._state.messages` 跨 prompt 保存历史，低层 loop 再把新 prompt、assistant 和 tool results 追加到完整 context。
+
+### D29. Transcript snapshot 必须深复制
+
+- 日期：2026-07-16
+- 决定：Agent 在接收 Provider terminal message、创建 Provider Request 和返回 `RunResult.Transcript` 这三个所有权边界深复制 AI message；调用方或 Provider 不能通过嵌套 `AssistantMessage.Content`、`ToolCall.Arguments` 或 tool schema JSON 反向修改 Agent 的权威 transcript。复制规则由拥有消息结构的 `internal/ai` 统一提供，Faux 与 Agent 不分别维护重复实现。
+- 原因：只复制 `[]ai.Message` 外层仍会共享嵌套 slice 和 `json.RawMessage` backing array，不能兑现 snapshot 语义，还可能在并发观察时形成 data race。边界深复制让 ownership 明确；其成本相对完整模型请求的遍历、序列化和网络调用可忽略。
+
+### D30. 预取消发生在 Run acceptance point 之前
+
+- 日期：2026-07-16
+- 决定：`Agent.Run(ctx, userInput)` 在同一个锁内先拒绝已有 active Run，再检查 `context.Cause(ctx)`；若 context 此时已经取消，Run 未被接受，不追加 user 或 aborted assistant，不调用 Provider，并返回当前稳定 transcript snapshot 与 context cause。若检查通过，设置 active 并追加 user 构成 Run acceptance point；此后到 terminal settlement 之前发生的取消属于已开始的 Run，保留 user，并最终只追加一条 aborted assistant。
+- 原因：Pi 高层 `Agent.prompt()` 不接收外部 signal，而是在 prompt 被接受后创建内部 `AbortController`，所以没有完全对应的预取消调用；Pi 低层则会在 Provider 观察 signal 前把 prompt 加入 context。pi-go 需要同时遵守 Go 的预取消 context 不启动副作用惯例，以及 Pi 对已接受 prompt 保留 user 与 aborted assistant 的行为。
+
+### D31. 每个 Provider turn 只在一个位置追加 terminal assistant
+
+- 日期：2026-07-16
+- 决定：每次 Provider call 的 stream consumer 在正常 terminal、Provider error/aborted terminal、terminal 前 EOF 和非 EOF receive error 的所有路径上只计算一对 `(terminal AssistantMessage, error)`，不直接修改 Agent；Turn/Run coordinator 在该次调用的唯一位置深复制并追加该 assistant。第一条有效 `DoneEvent` 或 `ErrorEvent` 构成该 Provider turn 的 terminal settlement point，之后发生的取消不追溯修改这条已经完成的 assistant；若同一次 `Receive()` 同时返回有效 terminal event 与 error，terminal event 优先。没有有效 terminal 时，raw stream failure 在 context 已取消时合成 aborted，否则合成 error；nil stream 作为协议错误合成 error assistant。第 02 课一个 Run 只有一个 Turn，所以暂时表现为每个 Run 追加一次；第 03 课一个 Run 可有多个 Turn，每个 Turn 各追加一次 terminal assistant。
+- 原因：把 transcript 写入分散在 terminal、error、cancel 和 deferred cleanup 分支会产生缺失或重复 assistant。Provider stream 已绑定 context，Agent 等待 `Receive()` 真正收敛，不用额外 goroutine 与 `ctx.Done()` 竞争后提前返回，以免遗留仍在读取网络的工作。
 
 ## 变更记录
 
@@ -160,8 +196,16 @@
 - 2026-07-15：增加证据驱动的学习原则、先讲后问顺序和 `run_start/run_end` 课程术语。
 - 2026-07-15：移除课程专用 `internal/contract`；冻结基线仅保存在文档。
 - 2026-07-15：取消当前阶段的外部调用承诺；`cmd/pi-go` 仅用于本地运行与验收。
-- 2026-07-15：第一期收敛为单目录、单任务的最小 coding loop；Goal Runtime、Session、完整 lifecycle/subscription、Manager 和外部集成移至二期。
+- 2026-07-15：第一期收敛为单目录、单 active task 的最小 coding loop；Goal Runtime、持久化 Session、完整 lifecycle/subscription、Manager 和外部集成移至二期。
 - 2026-07-15：确定屏障式工具调度、错误继续、取消 settlement、`os.Root` 文件边界、DeepSeek 数据外发和固定 bug-fix 验收。
 - 2026-07-16：根据冻结 Pi `Context` 与 coding-agent system prompt 证据，明确 workspace/cwd 说明进入稳定 system prompt，不建立独立 `WorkspaceContext` AI 协议字段。
 - 2026-07-16：学习者确认原始 task 只作为 transcript 首条 user message，不在 Provider Request 中建立第二份 `Task`；第一阶段完整 transcript 是单一事实源。
 - 2026-07-16：学习者确认第一阶段 `AssistantMessage` 的最小字段与删减范围；partial snapshot 和 Provider/模型诊断元数据按真实消费者延后。
+- 2026-07-16：核对 Pi 的低层 working context、高层 Agent state 和 TUI 消费链后，确认 partial assistant 不进入正式 transcript；第 02 课不设计 event sink，流式观察和终端/TUI 展示留到出现真实消费者时讨论。
+- 2026-07-16：学习者确认第 02 课使用 `RunResult + error`，不增加重复的 Run outcome；terminal assistant 留在 transcript，正常、失败和取消由 nil/non-nil error 与 context cause 区分。
+- 2026-07-16：纠正“Phase 1 可使用 Run-local disposable transcript”的弱化推导；Agent 持有同一对话的完整内存 transcript，顺序 Run 的新 user input 继续追加，Provider 始终看到全部历史。
+- 2026-07-16：学习者确认 Provider Request、Provider terminal message 和 `RunResult.Transcript` 在 Agent 所有权边界深复制，外部不能通过嵌套 slice 或 JSON bytes 反向修改权威 transcript。
+- 2026-07-16：学习者确认预取消 context 在 Run acceptance point 前返回且不修改 transcript；acceptance point 后、terminal settlement 前取消则保留 user，并只产生一条 aborted assistant。
+- 2026-07-16：学习者继续进入实现前收尾，确认已接受 Run 的全部退出路径统一返回一条 terminal assistant，由外层 Run 在唯一位置写入 transcript；第一条有效 terminal event 是 settlement point。
+- 2026-07-16：第 02 课实现与测试完成；补充锁定同一次 Receive 同返 terminal event 与 error 时 terminal 优先，以及 nil stream 合成协议错误 assistant。
+- 2026-07-16：学习者确认第 02 课无需继续讲解，要求完整性审查、补齐测试后提交并 push 到 `main`，随后开始第 03 课。

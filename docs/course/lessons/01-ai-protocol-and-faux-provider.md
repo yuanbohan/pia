@@ -325,7 +325,7 @@ Faux 可以先用无后台 goroutine 的 slice-backed stream：每次 `Receive` 
 
 `Usage` 第一版建议只存 `InputTokens` 和 `OutputTokens`，用方法派生 `TotalTokens()`，避免在当前语义下保存可漂移的重复总数；cache 和 reasoning 细分等第 04 课重新核对 DeepSeek 官方协议后再决定。Faux 默认可使用零值或测试显式脚本值，不复制 Pi 的随机 token 估算。
 
-关于 stream partial snapshot 的复查：Pi 每个内容事件都携带完整 partial message；pi-go 当前 headless 范围没有需要完整 partial snapshot 的 UI 消费者。Provider 负责累计并在 terminal event 交付权威 final/aborted message，Agent event sink 可以观察 delta，因此当前仍建议不在每个 delta 中复制 partial message。若第 02 课事件契约出现真实消费者，再以该消费者为证据调整。
+关于 stream partial snapshot 的复查：Pi 每个内容事件都携带完整 partial message；pi-go 当前 headless 范围没有需要完整 partial snapshot 的 UI 消费者。Provider 负责累计并在 terminal event 交付权威 final/aborted message，因此当前仍建议不在每个 delta 中复制 partial message。第 02 课后来确认不设计 Agent event sink；等本地入口出现真实展示消费者时，再以该消费者为证据决定观察协议。
 
 - 学习者确认：2026-07-16 接受第一阶段 `AssistantMessage` 只保留 `Content`、`Usage`、`StopReason` 和 `ErrorMessage`，并接受本节列出的字段删减与推迟范围。
 
@@ -459,7 +459,7 @@ Faux 不执行任何 tool；第 02/03 课的 Agent 读取 terminal assistant mes
 - 已验证的真实消费者：Pi Provider adapter 在构造流式 message 时维护有序 content blocks；Pi Proxy 为减少网络流量会移除每个事件携带的完整 `partial`，客户端随后使用 `contentIndex` 把 text、thinking 或 tool-call delta 写回正确的 `partial.content` 位置。这里的 `contentIndex` 是流式内容重建坐标，而不是 Agent 决策字段。
 - pi-go 当前实现：事件没有重复携带完整 partial snapshot，`ContentIndex` 目前仍暴露在通用 `ai.Event` 上；Faux 内部用它校验 block 生命周期，并在取消时组装 received-so-far 内容。尚未实现的 Agent Loop 没有已经证明的业务用途。
 - 学习者方向：第一阶段如果始终只有 Provider/stream 实现需要 block 坐标，应优先把该坐标封装在实现内部，不向 Agent 或其他外部消费者暴露无用协议细节。
-- 暂不定案：不在第 01 课仅凭“当前 Agent 不使用”立即删除字段。第 02 课实现 Agent event sink 时检查是否存在真实增量事件消费者，第 04 课实现 DeepSeek SSE 映射时检查是否只有 adapter 内部需要路由。若两处都不需要外部 block 坐标，再把 `ContentIndex` 收回 Provider 私有状态；若观察者确实需要独立重建多个 blocks，则保留或改成由真实消费者驱动的更明确标识。
+- 暂不定案：不在第 01 课仅凭“当前 Agent 不使用”立即删除字段。第 02 课已确认基础 transcript loop 不实现 Agent event sink；第 04 课实现 DeepSeek SSE 映射时检查是否只有 adapter 内部需要路由，后续本地入口设计流式展示时再检查观察者是否需要 block 坐标。若两处都不需要外部坐标，再把 `ContentIndex` 收回 Provider 私有状态；若观察者确实需要独立重建多个 blocks，则保留或改成由真实消费者驱动的更明确标识。
 
 ### 01-L 收尾确认：错误边界、所有权与完整调用链
 
@@ -479,7 +479,7 @@ Faux 不执行任何 tool；第 02/03 课的 Agent 读取 terminal assistant mes
 - `internal/ai/faux/provider_test.go`
 - `docs/course/lessons/01-ai-protocol-and-faux-provider.md`
 
-以上 Go 文件和测试均已创建；根 README、课程总纲、决策记录和计划中开课前发现的 `Task`/`WorkspaceContext` 冲突也已同步修正。第 01 课仍等待学习者结合实际代码确认理解。
+以上 Go 文件和测试均已创建并随第 01 课提交；根 README、课程总纲、决策记录和计划中开课前发现的 `Task`/`WorkspaceContext` 冲突也已同步修正。
 
 ## 提交记录
 

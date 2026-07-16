@@ -37,7 +37,7 @@ type Provider struct {
 func New(steps ...Step) (*Provider, error) {
 	clonedSteps := make([]Step, len(steps))
 	for index, step := range steps {
-		events, err := cloneEvents(step.Events)
+		events, err := ai.CloneEvents(step.Events)
 		if err != nil {
 			return nil, fmt.Errorf("faux step %d: %w", index, err)
 		}
@@ -53,7 +53,7 @@ func New(steps ...Step) (*Provider, error) {
 // Stream records a request snapshot and consumes the next scripted Step.
 func (p *Provider) Stream(ctx context.Context, request ai.Request) ai.Stream {
 	p.mu.Lock()
-	p.requests = append(p.requests, cloneRequest(request))
+	p.requests = append(p.requests, ai.CloneRequest(request))
 
 	var events []ai.Event
 	if p.nextStep >= len(p.steps) {
@@ -74,7 +74,7 @@ func (p *Provider) Requests() []ai.Request {
 
 	requests := make([]ai.Request, len(p.requests))
 	for index, request := range p.requests {
-		requests[index] = cloneRequest(request)
+		requests[index] = ai.CloneRequest(request)
 	}
 	return requests
 }
@@ -120,7 +120,7 @@ func (s *stream) Receive() (ai.Event, error) {
 		s.terminal = true
 	}
 
-	cloned, err := cloneEvent(event)
+	cloned, err := ai.CloneEvent(event)
 	if err != nil {
 		s.terminal = true
 		return nil, err
@@ -169,7 +169,7 @@ func (c *partialCollector) observe(event ai.Event) {
 	case ai.ToolCallEndEvent:
 		block := c.blocks[event.ContentIndex]
 		block.ended = true
-		block.toolCall = cloneToolCall(event.ToolCall)
+		block.toolCall = ai.CloneToolCall(event.ToolCall)
 	}
 }
 
@@ -269,7 +269,7 @@ func validateStep(step Step) error {
 				return fmt.Errorf("tool-call end event %d arguments do not match deltas", index)
 			}
 			block.ended = true
-			block.toolCall = cloneToolCall(event.ToolCall)
+			block.toolCall = ai.CloneToolCall(event.ToolCall)
 		case ai.DoneEvent:
 			if !started {
 				return fmt.Errorf("done event requires a start event")
@@ -368,7 +368,7 @@ func assembledContent(blocks map[int]*blockState) []ai.AssistantContent {
 			content = append(content, ai.ThinkingContent{Thinking: block.text.String()})
 		case blockKindToolCall:
 			if block.ended {
-				content = append(content, cloneToolCall(block.toolCall))
+				content = append(content, ai.CloneToolCall(block.toolCall))
 			}
 		}
 	}
@@ -402,143 +402,4 @@ func providerErrorEvent(message string) ai.ErrorEvent {
 		StopReason:   ai.StopReasonError,
 		ErrorMessage: message,
 	}}
-}
-
-func cloneEvents(events []ai.Event) ([]ai.Event, error) {
-	cloned := make([]ai.Event, len(events))
-	for index, event := range events {
-		copy, err := cloneEvent(event)
-		if err != nil {
-			return nil, fmt.Errorf("event %d: %w", index, err)
-		}
-		cloned[index] = copy
-	}
-	return cloned, nil
-}
-
-func cloneEvent(event ai.Event) (ai.Event, error) {
-	if event == nil {
-		return nil, fmt.Errorf("event is nil")
-	}
-	value := reflect.ValueOf(event)
-	if value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return nil, fmt.Errorf("event %T is nil", event)
-		}
-		event = value.Elem().Interface().(ai.Event)
-	}
-
-	switch event := event.(type) {
-	case ai.StartEvent,
-		ai.TextStartEvent,
-		ai.TextDeltaEvent,
-		ai.TextEndEvent,
-		ai.ThinkingStartEvent,
-		ai.ThinkingDeltaEvent,
-		ai.ThinkingEndEvent,
-		ai.ToolCallStartEvent,
-		ai.ToolCallDeltaEvent:
-		return event, nil
-	case ai.ToolCallEndEvent:
-		event.ToolCall = cloneToolCall(event.ToolCall)
-		return event, nil
-	case ai.DoneEvent:
-		event.Message = cloneAssistantMessage(event.Message)
-		return event, nil
-	case ai.ErrorEvent:
-		event.Message = cloneAssistantMessage(event.Message)
-		return event, nil
-	default:
-		return nil, fmt.Errorf("unsupported event %T", event)
-	}
-}
-
-func cloneRequest(request ai.Request) ai.Request {
-	cloned := ai.Request{SystemPrompt: request.SystemPrompt}
-	if request.Messages != nil {
-		cloned.Messages = make([]ai.Message, len(request.Messages))
-		for index, message := range request.Messages {
-			cloned.Messages[index] = cloneMessage(message)
-		}
-	}
-	if request.Tools != nil {
-		cloned.Tools = make([]ai.ToolSchema, len(request.Tools))
-		for index, tool := range request.Tools {
-			cloned.Tools[index] = tool
-			cloned.Tools[index].Parameters = bytes.Clone(tool.Parameters)
-		}
-	}
-	return cloned
-}
-
-func cloneMessage(message ai.Message) ai.Message {
-	switch message := message.(type) {
-	case ai.UserMessage:
-		return message
-	case *ai.UserMessage:
-		if message == nil {
-			return message
-		}
-		return *message
-	case ai.AssistantMessage:
-		return cloneAssistantMessage(message)
-	case *ai.AssistantMessage:
-		if message == nil {
-			return message
-		}
-		return cloneAssistantMessage(*message)
-	case ai.ToolResultMessage:
-		return message
-	case *ai.ToolResultMessage:
-		if message == nil {
-			return message
-		}
-		return *message
-	default:
-		return message
-	}
-}
-
-func cloneAssistantMessage(message ai.AssistantMessage) ai.AssistantMessage {
-	cloned := message
-	if message.Content != nil {
-		cloned.Content = make([]ai.AssistantContent, len(message.Content))
-		for index, content := range message.Content {
-			cloned.Content[index] = cloneAssistantContent(content)
-		}
-	}
-	return cloned
-}
-
-func cloneAssistantContent(content ai.AssistantContent) ai.AssistantContent {
-	switch content := content.(type) {
-	case ai.TextContent:
-		return content
-	case *ai.TextContent:
-		if content == nil {
-			return content
-		}
-		return *content
-	case ai.ThinkingContent:
-		return content
-	case *ai.ThinkingContent:
-		if content == nil {
-			return content
-		}
-		return *content
-	case ai.ToolCall:
-		return cloneToolCall(content)
-	case *ai.ToolCall:
-		if content == nil {
-			return content
-		}
-		return cloneToolCall(*content)
-	default:
-		return content
-	}
-}
-
-func cloneToolCall(toolCall ai.ToolCall) ai.ToolCall {
-	toolCall.Arguments = bytes.Clone(toolCall.Arguments)
-	return toolCall
 }

@@ -1,0 +1,713 @@
+package agent_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/yuanbohan/pi-go/internal/agent"
+	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pi-go/internal/ai/faux"
+)
+
+func TestNewRequiresProvider(t *testing.T) {
+	t.Parallel()
+
+	if _, err := agent.New(agent.Config{}); err == nil {
+		t.Fatal("New() error = nil, want missing-provider error")
+	}
+}
+
+func TestRunSendsCompleteRequestAndReturnsTerminalTranscript(t *testing.T) {
+	t.Parallel()
+
+	message := ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			ai.ThinkingContent{Thinking: "inspect first"},
+			ai.TextContent{Text: "done"},
+		},
+		Usage:      ai.Usage{InputTokens: 7, OutputTokens: 4},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := newFaux(t, assistantStep(message))
+	runtime := newAgent(t, provider, "stable system prompt")
+
+	result, err := runtime.Run(context.Background(), "inspect the project")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	wantTranscript := []ai.Message{
+		ai.UserMessage{Content: "inspect the project"},
+		message,
+	}
+	if !reflect.DeepEqual(result.Transcript, wantTranscript) {
+		t.Fatalf("Run() transcript = %#v, want %#v", result.Transcript, wantTranscript)
+	}
+
+	requests := provider.Requests()
+	if got, want := len(requests), 1; got != want {
+		t.Fatalf("len(Requests()) = %d, want %d", got, want)
+	}
+	wantRequest := ai.Request{
+		SystemPrompt: "stable system prompt",
+		Messages: []ai.Message{
+			ai.UserMessage{Content: "inspect the project"},
+		},
+	}
+	if !reflect.DeepEqual(requests[0], wantRequest) {
+		t.Fatalf("Provider request = %#v, want %#v", requests[0], wantRequest)
+	}
+}
+
+func TestRunTreatsEmptyAssistantAsNormalCompletion(t *testing.T) {
+	t.Parallel()
+
+	message := ai.AssistantMessage{StopReason: ai.StopReasonStop}
+	provider := newFaux(t, faux.Step{Events: []ai.Event{
+		ai.StartEvent{},
+		ai.DoneEvent{Message: message},
+	}})
+	runtime := newAgent(t, provider, "")
+
+	result, err := runtime.Run(context.Background(), "respond if needed")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := result.Transcript[1], ai.Message(message); !reflect.DeepEqual(got, want) {
+		t.Fatalf("terminal message = %#v, want %#v", got, want)
+	}
+}
+
+func TestRunTreatsLengthStopAsNormalCompletion(t *testing.T) {
+	t.Parallel()
+
+	message := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "truncated answer"}},
+		StopReason: ai.StopReasonLength,
+	}
+	provider := newFaux(t, assistantStep(message))
+	runtime := newAgent(t, provider, "system")
+
+	result, err := runtime.Run(context.Background(), "answer within the limit")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := result.Transcript[1], ai.Message(message); !reflect.DeepEqual(got, want) {
+		t.Fatalf("terminal message = %#v, want %#v", got, want)
+	}
+}
+
+func TestSequentialRunsKeepHistoryAndReturnIndependentSnapshots(t *testing.T) {
+	t.Parallel()
+
+	first := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "first answer"}},
+		StopReason: ai.StopReasonStop,
+	}
+	second := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := newFaux(t, assistantStep(first), assistantStep(second))
+	runtime := newAgent(t, provider, "system")
+
+	firstResult, err := runtime.Run(context.Background(), "first question")
+	if err != nil {
+		t.Fatalf("first Run() error = %v", err)
+	}
+	returnedAssistant := firstResult.Transcript[1].(ai.AssistantMessage)
+	returnedAssistant.Content[0] = ai.TextContent{Text: "caller mutation"}
+
+	secondResult, err := runtime.Run(context.Background(), "second question")
+	if err != nil {
+		t.Fatalf("second Run() error = %v", err)
+	}
+	wantTranscript := []ai.Message{
+		ai.UserMessage{Content: "first question"},
+		first,
+		ai.UserMessage{Content: "second question"},
+		second,
+	}
+	if !reflect.DeepEqual(secondResult.Transcript, wantTranscript) {
+		t.Fatalf("second Run() transcript = %#v, want %#v", secondResult.Transcript, wantTranscript)
+	}
+
+	requests := provider.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("len(Requests()) = %d, want %d", got, want)
+	}
+	wantSecondRequest := []ai.Message{
+		ai.UserMessage{Content: "first question"},
+		first,
+		ai.UserMessage{Content: "second question"},
+	}
+	if !reflect.DeepEqual(requests[1].Messages, wantSecondRequest) {
+		t.Fatalf("second Provider messages = %#v, want %#v", requests[1].Messages, wantSecondRequest)
+	}
+}
+
+func TestProviderCannotMutateAgentTranscriptThroughRequest(t *testing.T) {
+	t.Parallel()
+
+	provider := &requestMutatingProvider{message: ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "answer"}},
+		StopReason: ai.StopReasonStop,
+	}}
+	runtime := newAgent(t, provider, "system")
+
+	result, err := runtime.Run(context.Background(), "original user input")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := result.Transcript[0], (ai.UserMessage{Content: "original user input"}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("user message after Provider mutation = %#v, want %#v", got, want)
+	}
+}
+
+func TestProviderCannotMutateNestedTranscriptContentThroughRequest(t *testing.T) {
+	t.Parallel()
+
+	first := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "first answer"}},
+		StopReason: ai.StopReasonStop,
+	}
+	second := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := &nestedRequestMutatingProvider{responses: []ai.AssistantMessage{first, second}}
+	runtime := newAgent(t, provider, "system")
+
+	if _, err := runtime.Run(context.Background(), "first question"); err != nil {
+		t.Fatalf("first Run() error = %v", err)
+	}
+	result, err := runtime.Run(context.Background(), "second question")
+	if err != nil {
+		t.Fatalf("second Run() error = %v", err)
+	}
+	if got, want := result.Transcript[1], ai.Message(first); !reflect.DeepEqual(got, want) {
+		t.Fatalf("stored first assistant = %#v, want %#v", got, want)
+	}
+}
+
+func TestProviderTerminalMutationCannotAffectAgentTranscript(t *testing.T) {
+	t.Parallel()
+
+	arguments := []byte(`{"path":"main.go"}`)
+	message := ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.ToolCall{
+			ID:        "call-1",
+			Name:      "read",
+			Arguments: arguments,
+		}},
+		StopReason: ai.StopReasonToolUse,
+	}
+	runtime := newAgent(t, staticProvider{stream: &sliceStream{events: []ai.Event{
+		ai.DoneEvent{Message: message},
+	}}}, "system")
+
+	if _, err := runtime.Run(context.Background(), "inspect"); err == nil {
+		t.Fatal("Run() error = nil, want tool-loop-unavailable error")
+	}
+	arguments[9] = 'X'
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := runtime.Run(ctx, "not accepted")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("snapshot Run() error = %v, want context.Canceled", err)
+	}
+	terminal := result.Transcript[1].(ai.AssistantMessage)
+	call := terminal.Content[0].(ai.ToolCall)
+	if got, want := string(call.Arguments), `{"path":"main.go"}`; got != want {
+		t.Fatalf("stored tool arguments = %q, want %q", got, want)
+	}
+}
+
+func TestRunAppendsProviderErrorTerminalExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	message := ai.AssistantMessage{
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "upstream unavailable",
+	}
+	provider := newFaux(t, faux.Step{Events: []ai.Event{
+		ai.ErrorEvent{Message: message},
+	}})
+	runtime := newAgent(t, provider, "system")
+
+	result, err := runtime.Run(context.Background(), "try once")
+	if err == nil || !strings.Contains(err.Error(), "upstream unavailable") {
+		t.Fatalf("Run() error = %v, want upstream error", err)
+	}
+	want := []ai.Message{
+		ai.UserMessage{Content: "try once"},
+		message,
+	}
+	if !reflect.DeepEqual(result.Transcript, want) {
+		t.Fatalf("Run() transcript = %#v, want exactly %#v", result.Transcript, want)
+	}
+}
+
+func TestPreCanceledRunDoesNotMutateTranscriptOrCallProvider(t *testing.T) {
+	t.Parallel()
+
+	provider := newFaux(t, assistantStep(ai.AssistantMessage{StopReason: ai.StopReasonStop}))
+	runtime := newAgent(t, provider, "system")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := runtime.Run(ctx, "not accepted")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if len(result.Transcript) != 0 {
+		t.Fatalf("Run() transcript = %#v, want unchanged empty transcript", result.Transcript)
+	}
+	if got := len(provider.Requests()); got != 0 {
+		t.Fatalf("len(Requests()) = %d, want 0", got)
+	}
+}
+
+func TestCancelAfterAcceptanceWaitsForReceiveAndAppendsOneAbortedTerminal(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	cancelObserved := make(chan struct{})
+	settle := make(chan struct{})
+	provider := &settlingCancelProvider{
+		started:        started,
+		cancelObserved: cancelObserved,
+		settle:         settle,
+	}
+	runtime := newAgent(t, provider, "system")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cause := errors.New("operator stopped the run")
+	type runReturn struct {
+		result agent.RunResult
+		err    error
+	}
+	returned := make(chan runReturn, 1)
+	go func() {
+		result, err := runtime.Run(ctx, "accepted input")
+		returned <- runReturn{result: result, err: err}
+	}()
+
+	<-started
+	cancel(cause)
+	<-cancelObserved
+	select {
+	case got := <-returned:
+		t.Fatalf("Run() returned before Receive settled: %#v", got)
+	default:
+	}
+	close(settle)
+	got := <-returned
+	if !errors.Is(got.err, cause) {
+		t.Fatalf("Run() error = %v, want cancellation cause", got.err)
+	}
+	if gotLen, want := len(got.result.Transcript), 2; gotLen != want {
+		t.Fatalf("len(Transcript) = %d, want %d", gotLen, want)
+	}
+	terminal, ok := got.result.Transcript[1].(ai.AssistantMessage)
+	if !ok {
+		t.Fatalf("terminal = %T, want ai.AssistantMessage", got.result.Transcript[1])
+	}
+	if terminal.StopReason != ai.StopReasonAborted {
+		t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonAborted)
+	}
+}
+
+func TestRunPreservesProviderAbortedTerminalAndContextCause(t *testing.T) {
+	t.Parallel()
+
+	message := ai.AssistantMessage{
+		Content:      []ai.AssistantContent{ai.TextContent{Text: "received so far"}},
+		StopReason:   ai.StopReasonAborted,
+		ErrorMessage: "provider observed cancellation",
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cause := errors.New("operator stopped the run")
+	runtime := newAgent(t, staticProvider{stream: &terminalWithErrorStream{
+		event: ai.ErrorEvent{Message: message},
+		err:   cause,
+		beforeReturn: func() {
+			cancel(cause)
+		},
+	}}, "system")
+
+	result, err := runtime.Run(ctx, "inspect")
+	if !errors.Is(err, cause) {
+		t.Fatalf("Run() error = %v, want cancellation cause", err)
+	}
+	if got, want := result.Transcript[1], ai.Message(message); !reflect.DeepEqual(got, want) {
+		t.Fatalf("terminal message = %#v, want Provider terminal %#v", got, want)
+	}
+}
+
+func TestRunSynthesizesErrorWhenStreamEndsBeforeTerminal(t *testing.T) {
+	t.Parallel()
+
+	runtime := newAgent(t, staticProvider{stream: eofStream{}}, "system")
+
+	result, err := runtime.Run(context.Background(), "broken stream")
+	if err == nil || !strings.Contains(err.Error(), "before terminal") {
+		t.Fatalf("Run() error = %v, want missing-terminal error", err)
+	}
+	if got, want := len(result.Transcript), 2; got != want {
+		t.Fatalf("len(Transcript) = %d, want %d", got, want)
+	}
+	terminal := result.Transcript[1].(ai.AssistantMessage)
+	if terminal.StopReason != ai.StopReasonError {
+		t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonError)
+	}
+}
+
+func TestRunSynthesizesErrorForNonEOFReceiveFailure(t *testing.T) {
+	t.Parallel()
+
+	receiveErr := errors.New("connection reset")
+	runtime := newAgent(t, staticProvider{stream: errorStream{err: receiveErr}}, "system")
+
+	result, err := runtime.Run(context.Background(), "broken stream")
+	if !errors.Is(err, receiveErr) {
+		t.Fatalf("Run() error = %v, want wrapped receive error", err)
+	}
+	terminal := result.Transcript[1].(ai.AssistantMessage)
+	if terminal.StopReason != ai.StopReasonError {
+		t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonError)
+	}
+	if !strings.Contains(terminal.ErrorMessage, "connection reset") {
+		t.Fatalf("terminal ErrorMessage = %q, want receive failure", terminal.ErrorMessage)
+	}
+}
+
+func TestRunSynthesizesProtocolErrorForInvalidTerminal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		event ai.Event
+	}{
+		{
+			name: "done with error reason",
+			event: ai.DoneEvent{Message: ai.AssistantMessage{
+				StopReason: ai.StopReasonError,
+			}},
+		},
+		{
+			name: "error with stop reason",
+			event: ai.ErrorEvent{Message: ai.AssistantMessage{
+				StopReason: ai.StopReasonStop,
+			}},
+		},
+		{
+			name:  "nil event without error",
+			event: nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			runtime := newAgent(t, staticProvider{stream: &sliceStream{
+				events: []ai.Event{test.event},
+			}}, "system")
+
+			result, err := runtime.Run(context.Background(), "invalid response")
+			if err == nil || !strings.Contains(err.Error(), "provider protocol") {
+				t.Fatalf("Run() error = %v, want protocol error", err)
+			}
+			terminal := result.Transcript[1].(ai.AssistantMessage)
+			if terminal.StopReason != ai.StopReasonError {
+				t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonError)
+			}
+		})
+	}
+}
+
+func TestRunSynthesizesErrorWhenProviderReturnsNilStream(t *testing.T) {
+	t.Parallel()
+
+	runtime := newAgent(t, staticProvider{}, "system")
+
+	result, err := runtime.Run(context.Background(), "broken provider")
+	if err == nil || !strings.Contains(err.Error(), "nil stream") {
+		t.Fatalf("Run() error = %v, want nil-stream protocol error", err)
+	}
+	if got, want := len(result.Transcript), 2; got != want {
+		t.Fatalf("len(Transcript) = %d, want %d", got, want)
+	}
+	terminal := result.Transcript[1].(ai.AssistantMessage)
+	if terminal.StopReason != ai.StopReasonError {
+		t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonError)
+	}
+}
+
+func TestTerminalEventWinsWhenReceiveAlsoReturnsCancellation(t *testing.T) {
+	t.Parallel()
+
+	message := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "settled"}},
+		StopReason: ai.StopReasonStop,
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cause := errors.New("late cancellation")
+	runtime := newAgent(t, staticProvider{stream: &terminalWithErrorStream{
+		event: ai.DoneEvent{Message: message},
+		err:   cause,
+		beforeReturn: func() {
+			cancel(cause)
+		},
+	}}, "system")
+
+	result, err := runtime.Run(ctx, "finish this turn")
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil after terminal settlement", err)
+	}
+	want := []ai.Message{
+		ai.UserMessage{Content: "finish this turn"},
+		message,
+	}
+	if !reflect.DeepEqual(result.Transcript, want) {
+		t.Fatalf("Run() transcript = %#v, want %#v", result.Transcript, want)
+	}
+}
+
+func TestConcurrentRunIsRejectedWithoutAppendingSecondInput(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := &blockingProvider{started: started, release: release}
+	runtime := newAgent(t, provider, "system")
+	firstReturned := make(chan agent.RunResult, 1)
+	go func() {
+		result, _ := runtime.Run(context.Background(), "first input")
+		firstReturned <- result
+	}()
+	<-started
+
+	type secondReturn struct {
+		result agent.RunResult
+		err    error
+	}
+	secondReturned := make(chan secondReturn, 1)
+	go func() {
+		result, err := runtime.Run(context.Background(), "second input")
+		secondReturned <- secondReturn{result: result, err: err}
+	}()
+	select {
+	case second := <-secondReturned:
+		if !errors.Is(second.err, agent.ErrRunActive) {
+			t.Fatalf("second Run() error = %v, want ErrRunActive", second.err)
+		}
+		if len(second.result.Transcript) != 0 {
+			t.Fatalf("second Run() transcript = %#v, want zero result", second.result.Transcript)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second Run() blocked instead of returning ErrRunActive")
+	}
+
+	close(release)
+	first := <-firstReturned
+	want := []ai.Message{
+		ai.UserMessage{Content: "first input"},
+		provider.message(),
+	}
+	if !reflect.DeepEqual(first.Transcript, want) {
+		t.Fatalf("first Run() transcript = %#v, want %#v", first.Transcript, want)
+	}
+}
+
+func newAgent(t *testing.T, provider ai.Provider, systemPrompt string) *agent.Agent {
+	t.Helper()
+	runtime, err := agent.New(agent.Config{
+		Provider:     provider,
+		SystemPrompt: systemPrompt,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	return runtime
+}
+
+func newFaux(t *testing.T, steps ...faux.Step) *faux.Provider {
+	t.Helper()
+	provider, err := faux.New(steps...)
+	if err != nil {
+		t.Fatalf("faux.New() error = %v", err)
+	}
+	return provider
+}
+
+func assistantStep(message ai.AssistantMessage) faux.Step {
+	events := []ai.Event{ai.StartEvent{}}
+	for index, content := range message.Content {
+		switch content := content.(type) {
+		case ai.TextContent:
+			events = append(events,
+				ai.TextStartEvent{ContentIndex: index},
+				ai.TextDeltaEvent{ContentIndex: index, Delta: content.Text},
+				ai.TextEndEvent{ContentIndex: index, Text: content.Text},
+			)
+		case ai.ThinkingContent:
+			events = append(events,
+				ai.ThinkingStartEvent{ContentIndex: index},
+				ai.ThinkingDeltaEvent{ContentIndex: index, Delta: content.Thinking},
+				ai.ThinkingEndEvent{ContentIndex: index, Thinking: content.Thinking},
+			)
+		default:
+			panic(fmt.Sprintf("unsupported test content %T", content))
+		}
+	}
+	events = append(events, ai.DoneEvent{Message: message})
+	return faux.Step{Events: events}
+}
+
+type sliceStream struct {
+	events []ai.Event
+	next   int
+}
+
+func (s *sliceStream) Receive() (ai.Event, error) {
+	if s.next >= len(s.events) {
+		return nil, io.EOF
+	}
+	event := s.events[s.next]
+	s.next++
+	return event, nil
+}
+
+type requestMutatingProvider struct {
+	message ai.AssistantMessage
+}
+
+func (p *requestMutatingProvider) Stream(_ context.Context, request ai.Request) ai.Stream {
+	request.Messages[0] = ai.UserMessage{Content: "provider mutation"}
+	return &sliceStream{events: []ai.Event{
+		ai.StartEvent{},
+		ai.DoneEvent{Message: p.message},
+	}}
+}
+
+type nestedRequestMutatingProvider struct {
+	responses []ai.AssistantMessage
+	next      int
+}
+
+func (p *nestedRequestMutatingProvider) Stream(_ context.Context, request ai.Request) ai.Stream {
+	if p.next > 0 {
+		previous := request.Messages[1].(ai.AssistantMessage)
+		previous.Content[0] = ai.TextContent{Text: "provider nested mutation"}
+	}
+	message := p.responses[p.next]
+	p.next++
+	return &sliceStream{events: []ai.Event{
+		ai.StartEvent{},
+		ai.DoneEvent{Message: message},
+	}}
+}
+
+type settlingCancelProvider struct {
+	started        chan struct{}
+	cancelObserved chan struct{}
+	settle         chan struct{}
+	once           sync.Once
+}
+
+func (p *settlingCancelProvider) Stream(ctx context.Context, _ ai.Request) ai.Stream {
+	p.once.Do(func() { close(p.started) })
+	return &settlingCancelStream{
+		ctx:            ctx,
+		cancelObserved: p.cancelObserved,
+		settle:         p.settle,
+	}
+}
+
+type settlingCancelStream struct {
+	ctx            context.Context
+	cancelObserved chan struct{}
+	settle         chan struct{}
+	once           sync.Once
+}
+
+func (s *settlingCancelStream) Receive() (ai.Event, error) {
+	<-s.ctx.Done()
+	s.once.Do(func() { close(s.cancelObserved) })
+	<-s.settle
+	return nil, s.ctx.Err()
+}
+
+type staticProvider struct {
+	stream ai.Stream
+}
+
+func (p staticProvider) Stream(context.Context, ai.Request) ai.Stream {
+	return p.stream
+}
+
+type eofStream struct{}
+
+func (eofStream) Receive() (ai.Event, error) {
+	return nil, io.EOF
+}
+
+type errorStream struct {
+	err error
+}
+
+func (s errorStream) Receive() (ai.Event, error) {
+	return nil, s.err
+}
+
+type terminalWithErrorStream struct {
+	event        ai.Event
+	err          error
+	beforeReturn func()
+}
+
+func (s *terminalWithErrorStream) Receive() (ai.Event, error) {
+	s.beforeReturn()
+	return s.event, s.err
+}
+
+type blockingProvider struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *blockingProvider) Stream(context.Context, ai.Request) ai.Stream {
+	p.once.Do(func() { close(p.started) })
+	return &blockingStream{release: p.release, message: p.message()}
+}
+
+func (p *blockingProvider) message() ai.AssistantMessage {
+	return ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "done"}},
+		StopReason: ai.StopReasonStop,
+	}
+}
+
+type blockingStream struct {
+	release chan struct{}
+	message ai.AssistantMessage
+	done    bool
+}
+
+func (s *blockingStream) Receive() (ai.Event, error) {
+	if s.done {
+		return nil, io.EOF
+	}
+	<-s.release
+	s.done = true
+	return ai.DoneEvent{Message: s.message}, nil
+}

@@ -48,7 +48,7 @@ product_contract_source: ce-plan-bootstrap
 
 - R4. Go Agent Loop 必须保留 Pi 的 user、assistant、tool call、tool result、stop reason 和多轮 transcript 核心语义。
 - R5. 系统必须提供可脚本化 Faux Provider，使模型流、工具循环、错误和取消在无网络、无密钥的环境中确定性验证。
-- R14. Run 入口接收一次原始用户任务并将它转换成 transcript 的首条 user message；每次 Provider 调用必须收到包含 workspace/cwd 说明的稳定 system prompt、完整有序 transcript 和当前 tool schemas，不增加独立 task 或 workspace context AI 协议字段。第一阶段不实现自动压缩、摘要、恢复或跨 Session 上下文。
+- R14. Agent 的第一次 Run 把原始用户任务转换成 transcript 首条 user message；同一 Agent 后续 Run 把新 user input 追加到已有历史。每次 Provider 调用必须收到包含 workspace/cwd 说明的稳定 system prompt、截至当前的完整有序 transcript 和当前 tool schemas，不增加独立 task 或 workspace context AI 协议字段。第一阶段不实现自动压缩、摘要、持久化恢复或跨 Session 上下文。
 
 **工具循环**
 
@@ -63,7 +63,7 @@ product_contract_source: ce-plan-bootstrap
 - R10. `cmd/pi-go` 必须接收一个工作目录和任务 prompt，呈现运行事件并返回进程结果；其输入输出不构成公共 SDK 或稳定外部协议。
 - R17. 第一阶段最终验收必须使用仓库内固定 prompt、固定小型 Go bug-fix fixture、不可修改文件哈希和生产文件变更 allowlist，要求 Agent 自主读取代码、修改实现、运行测试并让原本失败的测试通过。
 - R18. Runtime 必须明确提示工作目录内容和 tool results 会发送给 DeepSeek；第一阶段要求操作者在启动前自行确认 workspace 可披露，Runtime 只显示披露提示，不实现确认或审批交互。transcript 只驻留内存且没有通用 secret detector 或 redactor。
-- R19. Run 取消必须停止新的 Provider 调用和工具阶段，取消并等待所有已启动的 stream、工具和 bash 进程组收敛，然后只发出一次最终 canceled Run 事件并返回非成功结果。
+- R19. Run 取消必须停止新的 Provider 调用和工具阶段，取消并等待所有已启动的 stream、工具和 bash 进程组收敛，然后返回明确的 canceled 非成功结果。观察通道的最终事件和 settlement 语义等本地命令需要展示运行过程时再定义。
 
 ### Key Flows
 
@@ -93,7 +93,7 @@ product_contract_source: ce-plan-bootstrap
 - TUI、主题、按键、命令提示和 slash command UI。
 - 多 Provider 矩阵；真实 Provider 只实现 DeepSeek。
 - Goal Runtime、结构化 plan/progress/replan/done/blocked 状态机；第一阶段由模型决定是否继续调用工具，由外部测试判断任务是否成功。
-- Session 创建、持久化、恢复、自动 compaction、跨任务上下文和多 active run 管理。
+- Session 创建、持久化、恢复、自动 compaction、跨 Session 上下文和多 active run 管理；Agent 当前进程内的完整对话 transcript 不属于该推迟范围。
 - Steering、follow-up、continue、完整 listener subscription 生命周期和 Agent Manager。
 - 公共 Go SDK、gRPC、IM 适配、多用户、多仓库、worktree 与 GitHub issue/PR 管理。
 - 权限审批、trust/yolo 配置矩阵和真正 sandbox；本地命令以当前用户权限运行，文件工具路径边界、凭据不向子进程传播、取消、超时和输出限制仍是强制安全不变量。
@@ -131,20 +131,25 @@ product_contract_source: ce-plan-bootstrap
 - KTD8. 第一阶段没有审批或 trust 策略系统；`read`、`write`、`edit` 受 workspace root 限制，bash 只保证从 workspace 启动并仍可访问当前用户资源。bash 使用最小 allowlist 环境加显式非敏感配置，Provider 凭据不通过 env、argv 或 tool config 传播；这不是对恶意 bash 的 secret isolation。（session-settled: user-directed — chosen over per-action approval: 长任务不能被审批循环阻断，完整权限策略延后）
 - KTD10. 每课是文档、代码、测试和讨论记录的共同边界，只有学习者明确要求后才 commit。（session-settled: user-directed — chosen over automatic course commits: 学习者需要理解和调整节奏）
 - KTD12. 第一轮课程冻结 Pi commit 和 package version；上游升级通过显式决策处理，不静默改变基线。
-- KTD13. Provider 对 Agent 暴露可取消的 pull/receive stream；Agent 对观察者使用等待完成的 event sink。并行 worker 只向 Run-owned coordinator 提交 outcome，只有 coordinator 串行调用 sink，避免 concurrent/reentrant handler。
+- KTD13. Provider 对 Agent 暴露可取消的 pull/receive stream。Agent event sink、串行投递和 observer settlement 等本地 headless 入口需要展示运行过程时再定义，不进入基础 transcript loop。
 - KTD14. Tool 对模型暴露 JSON Schema，并用自身的 Go 解码与校验逻辑保护执行；初始版本不实现通用 JSON Schema evaluator。
 - KTD16. 第一阶段 bash 进程树管理只支持 macOS 和 Linux；Windows 的进程模型与取消语义延后单独设计。
-- KTD17. Headless Agent Runtime 与未来 Agent Manager 分层；第一阶段只有单目录、单任务的本地 Runtime。（session-settled: user-approved — chosen over building multi-tenant orchestration into the loop: 先掌握和验证 Agent 核心）
-- KTD18. 第一阶段只实现基础 transcript，不做 Session、恢复或自动上下文整理。（session-settled: user-directed — chosen over production-grade context management: 先验证最小多轮 loop）
+- KTD17. Headless Agent Runtime 与未来 Agent Manager 分层；第一阶段只有单目录、单 active Run 的本地 Runtime。（session-settled: user-approved — chosen over building multi-tenant orchestration into the loop: 先掌握和验证 Agent 核心）
+- KTD18. Agent 保存同一对话的完整有序内存 transcript，顺序 Run 的新 user input 继续追加；第一阶段不做 Session 持久化、恢复或自动上下文整理。（session-settled: user-directed — chosen over weakening transcript ownership because the acceptance command starts with one task: 小阶段仍保留完整 Agent 设计）
 - KTD19. 工具调度使用屏障式分段：连续 `CanRunParallel` 调用并行，其他调用逐个成为串行屏障，阶段之间保持模型源顺序。（session-settled: user-approved — chosen over Pi default whole-batch parallel and whole-batch sequential fallback: 保留只读并行，同时避免 read/write/bash 竞态）
 - KTD20. `CanRunParallel` 是工具显式声明且默认 false；第一阶段只有 `read` 为 true，`write`、`edit`、`bash` 和未知工具均为 false。
 - KTD21. 普通工具错误不触发 fail-fast；结果作为模型观察继续同批后续阶段，只有 Run context 取消才停止。（session-settled: user-directed — chosen over skipping the remaining batch after any error: 避免调度器猜测依赖并保持 Pi 的恢复方式）
 - KTD22. 固定 fixture 和 prompt 可以供学习者在仓库外手动比较 Pi 与 pi-go，但项目不实现任何比较或评分模块。（session-settled: user-directed — chosen over an in-repo eval module: 比较属于后续独立 benchmark 活动）
 - KTD23. 四个 coding tools 操作同一个 Run-pinned workspace；工具只返回原子能力的模型可用结果，不增加 `run_tests` 等 workflow tool。后一个阶段可以观察前一个阶段已完成的文件副作用。
 - KTD24. 完整接收且不含 tool calls 的 assistant response 即正常 loop completion，即使文本为空；provider/stream failure、Run cancellation 和 acceptance deadline 是不同终态。CLI 报告 loop 终态，fixture harness 独立判断 coding task 是否成功。
-- KTD25. Run cancellation 停止新工作，取消所有已启动 child contexts，等待 stream、tool workers、event sink 和 bash process group 收敛后再发出唯一最终事件。已启动调用保留 completed 或 canceled result，未启动调用不制造 synthetic result。
+- KTD25. Run cancellation 停止新工作，取消所有已启动 child contexts，等待 stream、tool workers 和 bash process group 收敛后返回 canceled result。已启动调用保留 completed 或 canceled result，未启动调用不制造 synthetic result；observer settlement 留到 event sink 设计时定义。
 - KTD26. Go `os.Root` 是第一阶段文件工具的 workspace boundary primitive；workspace 在 Run 开始时打开，read/create/overwrite/edit/replace 都通过 root-relative 方法完成，不使用易受 symlink TOCTOU 影响的“检查绝对路径后再普通 open”。
 - KTD27. 发送给模型的 transcript 只驻留内存；read 和 bash 在内容进入 transcript、event preview 或 Provider request 前完成大小限制。默认事件呈现 metadata、状态和有界 preview，不提供通用 secret redaction。
+- KTD28. `Agent.Run(ctx, userInput)` 返回 Agent 当前完整 transcript 的快照与 Go error，不增加重复 Run outcome；正常完成返回 nil error，Provider/stream failure 返回非 nil error，取消保留 context cause，terminal 或合成 assistant message 留在 Agent transcript。
+- KTD29. 同一 Agent 的每条新 user message、terminal assistant 和 tool result 都追加到已有 transcript；后续 Provider call 发送完整历史。新对话通过新 Agent 或显式 reset/session boundary 开始，Agent 拒绝并发 Run。
+- KTD30. Provider terminal message、Provider Request 和 `RunResult.Transcript` 在 Agent 所有权边界深复制；调用方和 Provider 不能通过嵌套 content slice、tool-call arguments 或 tool schema JSON 反向修改 Agent transcript。clone 规则由 `internal/ai` 统一拥有并供 Faux、Agent 复用。
+- KTD31. 同一锁内先拒绝 active Run，再检查 context，并以设置 active 加追加 user 作为 Run acceptance point；预取消在该点前不修改 transcript、不调用 Provider、不产生 aborted assistant，越过该点后到 terminal settlement 前的取消保留 user 并只产生一条 aborted assistant。
+- KTD32. 每次 Provider call 的 stream consumer 在所有退出路径只返回 `(terminal AssistantMessage, error)`；Turn/Run coordinator 在该次调用的唯一位置深复制并追加该消息。第一条有效 terminal event 是该 Turn 的 settlement point，之后的取消不追溯这条 assistant；同一次 `Receive()` 同返有效 terminal event 与 error 时 terminal 优先。terminal 前 raw stream failure 依据 context cause 合成 aborted 或 error assistant，nil stream 合成协议错误 assistant；Agent 等待绑定 context 的 `Receive()` 真正收敛而不遗留竞争 goroutine。第 02 课一个 Run 只有一个 Turn，第 03 课多 Turn Run 对每次 Provider call 重复同一规则。
 
 ### High-Level Technical Design
 
@@ -252,16 +257,16 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Test scenarios:** 文本增量、reasoning 增量、tool-call argument 分片、正常结束、provider error、context cancel、脚本耗尽和重复读取结束状态。
 - **Verification:** 测试不访问网络，脚本输入产生稳定、可比较的事件序列。
 
-### U3. Implement One Provider Turn and Transcript Assembly
+### U3. Implement One Provider Turn and Agent Transcript Assembly
 
-- **Goal:** 完成 user message → provider stream → assistant message → transcript 的一次 Provider turn，并建立明确的正常、失败和取消终态。
-- **Requirements:** R4、R5、R14、R19；F2；KTD6、KTD13、KTD18、KTD24、KTD25。
+- **Goal:** 完成 user message → provider stream → assistant message → Agent transcript 的一次 Provider turn，证明顺序 Run 保留完整历史，并建立明确的正常、失败和取消终态。
+- **Requirements:** R4、R5、R14、R19；F2；KTD6、KTD18、KTD24、KTD25、KTD28、KTD29、KTD30、KTD31、KTD32。
 - **Dependencies:** U2。
-- **Files:** `internal/agent/loop.go`、`internal/agent/events.go`、`internal/agent/types.go`、`internal/agent/loop_test.go`、`docs/course/lessons/02-agent-loop-and-transcript.md`。
-- **Approach:** 本单元只实现无工具的一次 Provider turn 和基础 event sink；Run 开始时把原始 task 转换成首条 user message，每次 Provider 请求包含已组装 workspace/cwd 说明的稳定 system prompt、当前有序 transcript 和 tool schemas，不增加独立 task 或 workspace context 字段。完整 response 无 tool calls 时正常结束，包括空文本；不加入 Session、steering、follow-up 或 compaction。
-- **Execution note:** 先锁定 transcript 和事件顺序，再实现 loop。
-- **Test scenarios:** 单轮文本、空文本正常结束、reasoning 与 text 混合、完整 Provider request 字段、provider error、stream cancel、event sink 延迟、Run cancel 等待 sink 返回、唯一最终事件且位于最后。
-- **Verification:** 每条退出路径产生一致的 assistant message 和明确终态；取消只在已启动 stream 与 sink settlement 后返回且没有遗留 goroutine。
+- **Files:** `internal/ai/clone.go`、`internal/ai/clone_test.go`、`internal/ai/faux/provider.go`、`internal/agent/loop.go`、`internal/agent/types.go`、`internal/agent/loop_test.go`、`docs/course/lessons/02-agent-loop-and-transcript.md`。
+- **Approach:** 本单元实现有状态 Agent 与无工具的一次 Provider turn；`Agent.Run()` 在同一个锁内拒绝 active Run、检查预取消 context，并以设置 active 加追加新 user input 作为 acceptance point。每次 Provider 请求包含已组装 workspace/cwd 说明的稳定 system prompt、截至当前的完整 transcript 和 tool schemas，不增加独立 task 或 workspace context 字段。Provider terminal message、Provider Request 和 `RunResult.Transcript` 在所有权边界深复制，并由 `internal/ai` 统一提供 clone 规则。完整 response 无 tool calls 时正常结束，包括空文本；不加入 Agent event sink、运行过程展示、Session 持久化、steering、follow-up 或 compaction。
+- **Execution note:** 先锁定 Agent transcript 所有权、顺序 Run 历史和 Run 返回结果，再实现 loop。
+- **Test scenarios:** 单轮文本、空文本正常结束、reasoning 与 text 混合、同一 Agent 两次顺序 Run 的第二次 request 包含 `[user1, assistant1, user2]`、并发 Run 拒绝、预取消不修改 transcript 且不调用 Provider、acceptance point 后取消保留 user 和唯一 aborted assistant、完整 Provider request 字段、provider error、stream cancel、Run cancel 等待已启动 stream 收敛、明确的 canceled result，以及修改 Provider Request、Provider terminal message 或 RunResult 的嵌套 slice/JSON bytes 都不能反向修改 Agent transcript。
+- **Verification:** 每条退出路径产生一致的 assistant message 和明确 Run 结果；取消只在已启动 stream settlement 后返回且没有遗留 goroutine。
 
 ### U4. Implement Tool Contract and Error Semantics
 
@@ -277,13 +282,13 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 ### U5. Implement Barrier-Based Staged Scheduling
 
 - **Goal:** 在保持源顺序和安全屏障的前提下并行执行连续只读工具。
-- **Requirements:** R15、R16、R19；AE2、AE5、AE6；KTD13、KTD19-KTD21、KTD25。
+- **Requirements:** R15、R16、R19；AE2、AE5、AE6；KTD19-KTD21、KTD25。
 - **Dependencies:** U4。
 - **Files:** `internal/agent/tool.go`、`internal/agent/loop.go`、`internal/agent/loop_test.go`、`docs/course/lessons/03-tool-loop-and-staged-scheduling.md`。
-- **Approach:** Tool 通过默认 false 的能力标记声明是否可并行；一次线性扫描把连续 parallel-safe calls 组成阶段，非并行工具各自成为屏障。并行 worker 只提交 outcome，Run-owned coordinator 串行派发 event；result slots 保持 transcript 源顺序。
+- **Approach:** Tool 通过默认 false 的能力标记声明是否可并行；一次线性扫描把连续 parallel-safe calls 组成阶段，非并行工具各自成为屏障。并行 worker 只提交 outcome；result slots 保持 transcript 源顺序。观察事件和 sink 等本地入口出现展示需求时再接入。
 - **Execution note:** 先用受控阻塞工具证明并发度、完成顺序和 transcript 顺序，再实现调度扫描。
-- **Test scenarios:** 全 read 并行、read-read-write-read-read 分成三个阶段、连续 write/edit/bash 严格串行、B 先完成但 transcript 保持 A/B、event sink 最大并发度为一、sink 延迟不改变 transcript、并行 read 单个失败或 child timeout 后其余完成且下一阶段继续、Run cancel 取消并等待已启动 workers 且未开始阶段不执行。
-- **Verification:** `go test -race ./...` 通过；事件完成顺序、sink 串行性、transcript 源顺序和 cancellation settlement 分别满足测试契约。
+- **Test scenarios:** 全 read 并行、read-read-write-read-read 分成三个阶段、连续 write/edit/bash 严格串行、B 先完成但 transcript 保持 A/B、并行 read 单个失败或 child timeout 后其余完成且下一阶段继续、Run cancel 取消并等待已启动 workers 且未开始阶段不执行。
+- **Verification:** `go test -race ./...` 通过；transcript 源顺序和 cancellation settlement 分别满足测试契约。
 
 ### U8. Implement DeepSeek Provider
 
@@ -311,10 +316,10 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Goal:** 让操作者用一个目录和一条 prompt 启动 Agent，并在固定 fixture 上完成真实 bug fix。
 - **Requirements:** R10、R17-R19；F2；AE7；KTD2、KTD4、KTD6、KTD17、KTD22-KTD25、KTD27。
 - **Dependencies:** U3-U5、U8、U9。
-- **Files:** `internal/coding/prompt.go`、`internal/coding/runtime.go`、`internal/coding/runtime_test.go`、`cmd/pi-go/main.go`、`cmd/pi-go/main_test.go`、`testdata/acceptance/bugfix/task.txt`、`testdata/acceptance/bugfix/`、`docs/course/lessons/06-headless-coding-task.md`、`README.md`。
-- **Approach:** 本地入口装配 DeepSeek、内存 transcript 和四个 coding tools。固定 Go fixture 的 `NormalizeTags` starter 实现不能满足“trim、删除空项、按首次出现顺序去重”的既有测试；checked-in prompt 要求定位并修复 bug、运行测试且不修改测试文件。真实验收把 regular-file-only fixture 复制到 checkout 外的 disposable temp root，隔离 HOME/TMPDIR/Go caches，设置最小环境、外部 deadline、immutable hashes、target allowlist 和相邻 canary。
+- **Files:** `internal/agent/events.go`、`internal/agent/loop.go`、`internal/agent/loop_test.go`、`internal/coding/prompt.go`、`internal/coding/runtime.go`、`internal/coding/runtime_test.go`、`cmd/pi-go/main.go`、`cmd/pi-go/main_test.go`、`testdata/acceptance/bugfix/task.txt`、`testdata/acceptance/bugfix/`、`docs/course/lessons/06-headless-coding-task.md`、`README.md`。
+- **Approach:** 本地入口装配 DeepSeek、内存 transcript 和四个 coding tools；在出现真实终端展示需求时设计基础 Agent event sink、串行投递和有界输出，不实现 TUI 状态。固定 Go fixture 的 `NormalizeTags` starter 实现不能满足“trim、删除空项、按首次出现顺序去重”的既有测试；checked-in prompt 要求定位并修复 bug、运行测试且不修改测试文件。真实验收把 regular-file-only fixture 复制到 checkout 外的 disposable temp root，隔离 HOME/TMPDIR/Go caches，设置最小环境、外部 deadline、immutable hashes、target allowlist 和相邻 canary。
 - **Execution note:** 先建立失败 fixture 和不可修改的验收断言，再组装 Runtime；真实模型运行只在离线契约测试全部通过后进行。
-- **Test scenarios:** fixture 初始测试失败、Faux 多轮 read/edit/bash 后通过、每轮 request context 完整、CLI help 和运行启动明确显示 DeepSeek data-egress 边界、无效 workspace、缺少 DeepSeek key、zero-tool assistant response 正常结束、provider failure 与用户取消返回不同非成功终态、acceptance deadline、真实 DeepSeek 在 final mutation 后运行成功 bash test、独立测试通过、immutable hashes 不变、fixture diff 只含 allowlist、相邻 canary 不变、无遗留进程。
+- **Test scenarios:** fixture 初始测试失败、Faux 多轮 read/edit/bash 后通过、每轮 request context 完整、基础 event sink 顺序和 settlement、CLI 有界流式输出、help 和运行启动明确显示 DeepSeek data-egress 边界、无效 workspace、缺少 DeepSeek key、zero-tool assistant response 正常结束、provider failure 与用户取消返回不同非成功终态、acceptance deadline、真实 DeepSeek 在 final mutation 后运行成功 bash test、独立测试通过、immutable hashes 不变、fixture diff 只含 allowlist、相邻 canary 不变、无遗留进程。
 - **Verification:** structured trace 包含 read、edit 或 write、final mutation 后成功 bash test 和 loop terminal reason；同一 checked-in prompt 可以手动交给 Pi 和 pi-go。fixture diff 和 canary 只验证验收目录效果，不宣称 OS-wide containment，也不生成比较分数或 eval 文件。
 
 ---

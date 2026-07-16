@@ -4,7 +4,7 @@
 
 pi-go is a learning-driven Go semantic port of Pi's core coding loop. Preserve observable behavior rather than TypeScript file or API shape.
 
-Phase 1 is a DeepSeek-first, headless coding agent for one task in one workspace. It includes the AI protocol, Faux and DeepSeek providers, the generic model/tool loop, coding tools, and a local acceptance command. Goal Runtime, Session persistence, TUI, public SDK, network RPC, IM adapters, multi-tenant Agent Manager, worktree/GitHub management, and additional providers are deferred.
+Phase 1 is a DeepSeek-first, headless coding agent for one workspace and one active task at a time. The Agent keeps the complete ordered in-memory transcript across sequential user inputs; the local acceptance command exercises one initial coding task. Phase 1 includes the AI protocol, Faux and DeepSeek providers, the generic model/tool loop, coding tools, and a local acceptance command. Goal Runtime, Session persistence, TUI, public SDK, network RPC, IM adapters, multi-tenant Agent Manager, worktree/GitHub management, and additional providers are deferred.
 
 ## Course Workflow
 
@@ -19,6 +19,7 @@ Phase 1 is a DeepSeek-first, headless coding agent for one task in one workspace
 - Teach course material directly in the conversation and keep only necessary course records, code, and tests in the repository. Do not generate separate HTML lesson artifacts unless the learner explicitly asks for one.
 - Actively challenge learner proposals and the instructor's own prior proposals against the frozen Pi source, documentation, tests, and explicit project constraints. Agreement is not evidence.
 - Keep learner hypotheses, verified Pi contracts, candidate Go mechanisms, and settled pi-go decisions explicitly separated. Do not promote a suggestion into architecture merely because it sounds reasonable.
+- Keep lesson scope small without weakening the core technical design. A phase may postpone providers, fields, loop branches, persistence, or UI, but must not choose a disposable ownership or API model that contradicts the intended Agent architecture merely because the current lesson exercises fewer cases.
 - When new evidence invalidates an earlier course conclusion, state the correction directly and update the durable record before implementation.
 - Record lesson-specific discussion in its lesson document and durable architecture decisions in `docs/course/decisions.md`.
 - Do not advance to the next lesson until the learner confirms understanding.
@@ -30,12 +31,13 @@ Phase 1 is a DeepSeek-first, headless coding agent for one task in one workspace
 - Keep unstable implementation packages under `internal/`; do not create a public SDK without a new decision.
 - Keep `internal/ai` independent; concrete providers depend on `ai`; `internal/agent` may depend on `ai`; coding tools implement contracts owned by `agent`; the local coding composition root assembles Agent, DeepSeek, and tools.
 - Keep Agent Runtime separate from the future Agent Manager and IM adapters.
-- Keep Phase 1 to the model/tool loop. Do not add Goal Runtime, Session state, compaction, steering, follow-up, or subscription lifecycle merely to prepare for later phases.
+- Keep Phase 1 to the model/tool loop. Do not add Goal Runtime, Session persistence/recovery, compaction, steering, follow-up, or subscription lifecycle merely to prepare for later phases. The Agent-owned ordered in-memory transcript is core loop state, not deferred Session infrastructure.
 - Treat `cmd/pi-go` as a local execution and acceptance entrypoint, not a stable external integration contract. Defer gRPC and public SDK design until real external callers are in scope.
 - Use a Faux Provider for deterministic Agent tests before real DeepSeek calls.
-- Send every Provider call the stable system prompt, ordered in-memory transcript, and current tool schemas. Build workspace/cwd context into the stable system prompt, and represent the original task once as the transcript's initial user message; do not add separate Provider request fields for workspace context or task. Do not persist or compact transcript in Phase 1.
+- Let the Agent own one ordered in-memory transcript across sequential `Run` calls. Each new user input is appended; every Provider call receives the stable system prompt, the complete transcript so far, and current tool schemas; assistant messages and tool results are appended rather than replacing prior context. Build workspace/cwd context into the stable system prompt, and do not add separate Provider request fields for workspace context or task. Starting a new conversation requires a new Agent or an explicit reset boundary; never clear history merely because another user message arrived. Do not persist or compact transcript in Phase 1.
+- Return a snapshot of the Agent's complete transcript together with an idiomatic Go error: completed loop returns nil error, Provider/stream failure returns a non-nil error, and cancellation preserves the context cause. Keep the terminal final/error/aborted assistant message in the Agent transcript; do not add a duplicate Run outcome field in Phase 1.
 - Schedule consecutive explicitly parallel-safe tools as one parallel stage and every other tool as a serial barrier. Only `read` is parallel-safe in Phase 1; the default is false.
-- Serialize awaited event delivery through the Run-owned coordinator even when tool workers run concurrently. Preserve completion order for events and model source order for transcript results.
+- Preserve model source order for transcript results even when tool workers run concurrently. Defer the Agent event sink and terminal/TUI streaming display contract until the local headless entrypoint needs observable progress; do not add it to the basic transcript loop merely as future preparation.
 - Use `os.Root` for file-tool workspace containment. Bash starts in the workspace with a minimal environment but is not sandboxed and may access other resources available to the current user.
 - Do not propagate Provider credentials to tool environments, argv, tool configuration, transcript, events, logs, or errors.
 - Make DeepSeek data egress explicit: operators must choose a workspace whose selected contents and tool results may be sent to the Provider. Phase 1 shows a warning but has no approval flow.

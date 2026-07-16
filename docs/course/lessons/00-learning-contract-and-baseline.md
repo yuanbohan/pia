@@ -6,7 +6,7 @@
 
 开课记录：学习者于 2026-07-15 明确要求开始第 00 课。
 
-后续范围同步：第 00 课提交后，学习者把第一期收敛为单目录、单任务的最小 coding loop。本文保留 listener、subscription、active Run 和 Session 的源码学习记录，但完整生命周期、订阅 API、Goal Runtime 和 Session 实现已经移至二期；旧课次指向已按新课程地图修正。
+后续范围同步：第 00 课提交后，学习者把第一期收敛为单目录、单 active task 的最小 coding loop。第 02 课进一步澄清，Agent 仍保留同一对话的完整内存 transcript 并支持顺序 user input；推迟的是持久化 Session 和多 active Run 管理。本文保留 listener、subscription、active Run 和 Session 的源码学习记录，但完整生命周期、订阅 API、Goal Runtime 和 Session 实现已经移至二期；旧课次指向已按新课程地图修正。
 
 ## 为什么先上这一课
 
@@ -239,7 +239,7 @@ pi-go 只验证自身，按责任使用三类测试：
 
 - 日期：2026-07-15
 - 原结论：headless 描述没有 TUI 的 Agent Runtime，不等于最终的多用户 Agent Manager；这个术语判断仍然成立。
-- 后续范围修正：第一期 Runtime 只负责单目录、单任务的 Provider/tool loop、内存 transcript 和 coding tools，不实现 Goal Runtime 或可恢复 Session。
+- 后续范围修正：第一期 Runtime 只负责单目录、单 active Run 的 Provider/tool loop、Agent-owned 完整内存 transcript 和 coding tools，不实现 Goal Runtime 或可恢复 Session。
 - 二期边界：Agent Manager 再负责用户、仓库、Session、并发、worktree 和 IM 路由；外部调用协议也等真实调用方出现后设计。
 
 ### 练习 1：识别产品契约
