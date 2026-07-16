@@ -48,7 +48,7 @@ product_contract_source: ce-plan-bootstrap
 
 - R4. Go Agent Loop 必须保留 Pi 的 user、assistant、tool call、tool result、stop reason 和多轮 transcript 核心语义。
 - R5. 系统必须提供可脚本化 Faux Provider，使模型流、工具循环、错误和取消在无网络、无密钥的环境中确定性验证。
-- R14. 每次 Provider 调用必须收到稳定 system prompt、原始用户任务、完整有序 transcript、当前 tool schemas 和 workspace/cwd 约束；第一阶段不实现自动压缩、摘要、恢复或跨 Session 上下文。
+- R14. Run 入口接收一次原始用户任务并将它转换成 transcript 的首条 user message；每次 Provider 调用必须收到包含 workspace/cwd 说明的稳定 system prompt、完整有序 transcript 和当前 tool schemas，不增加独立 task 或 workspace context AI 协议字段。第一阶段不实现自动压缩、摘要、恢复或跨 Session 上下文。
 
 **工具循环**
 
@@ -68,7 +68,7 @@ product_contract_source: ce-plan-bootstrap
 ### Key Flows
 
 - F1. 课程闭环：选择当前课 → 阅读 Pi → 讲解与讨论 → 完成本课适用的 Go 实现和测试 → 验证 → 记录结论 → 理解确认 → 学习者要求 commit → 下一课。第 00 课按 R1 的基线例外执行。
-- F2. coding task：组装 system prompt、用户任务、完整 transcript、tool schemas 与 workspace context → 调用模型 → 执行工具阶段 → 把 tool results 加入 transcript → 再次调用模型 → 完整 assistant response 不含 tool calls 时结束 Run → 外部验收测试独立判断代码结果。
+- F2. coding task：把用户任务转换成首条 user message，组装包含 workspace/cwd 说明的 system prompt、完整 transcript 与 tool schemas → 调用模型 → 执行工具阶段 → 把 tool results 加入 transcript → 再次调用模型 → 完整 assistant response 不含 tool calls 时结束 Run → 外部验收测试独立判断代码结果。
 
 ### Acceptance Examples
 
@@ -258,7 +258,7 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Requirements:** R4、R5、R14、R19；F2；KTD6、KTD13、KTD18、KTD24、KTD25。
 - **Dependencies:** U2。
 - **Files:** `internal/agent/loop.go`、`internal/agent/events.go`、`internal/agent/types.go`、`internal/agent/loop_test.go`、`docs/course/lessons/02-agent-loop-and-transcript.md`。
-- **Approach:** 本单元只实现无工具的一次 Provider turn 和基础 event sink；每次请求包含稳定 system prompt、原始 task、当前有序 transcript、tool schemas 和 workspace context。完整 response 无 tool calls 时正常结束，包括空文本；不加入 Session、steering、follow-up 或 compaction。
+- **Approach:** 本单元只实现无工具的一次 Provider turn 和基础 event sink；Run 开始时把原始 task 转换成首条 user message，每次 Provider 请求包含已组装 workspace/cwd 说明的稳定 system prompt、当前有序 transcript 和 tool schemas，不增加独立 task 或 workspace context 字段。完整 response 无 tool calls 时正常结束，包括空文本；不加入 Session、steering、follow-up 或 compaction。
 - **Execution note:** 先锁定 transcript 和事件顺序，再实现 loop。
 - **Test scenarios:** 单轮文本、空文本正常结束、reasoning 与 text 混合、完整 Provider request 字段、provider error、stream cancel、event sink 延迟、Run cancel 等待 sink 返回、唯一最终事件且位于最后。
 - **Verification:** 每条退出路径产生一致的 assistant message 和明确终态；取消只在已启动 stream 与 sink settlement 后返回且没有遗留 goroutine。
@@ -271,7 +271,7 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Files:** `internal/agent/tool.go`、`internal/agent/validation.go`、`internal/agent/loop.go`、`internal/agent/loop_test.go`、`docs/course/lessons/03-tool-loop-and-staged-scheduling.md`。
 - **Approach:** Tool 同时提供模型可见 schema 和 Go 参数解码校验；未知工具、非法参数、execute error、单工具 timeout 和非零 bash exit 都形成 call-local error tool result。单工具 timeout 使用 Run context 的 child context；模型因长度截断的 tool calls 全部失败且不执行。
 - **Execution note:** 从顺序执行写出失败测试，先证明 tool result 能驱动下一轮，再接入并行阶段。
-- **Test scenarios:** 成功调用、未知工具、非法 JSON、参数语义错误、execute error、单工具 timeout 不取消 Run、截断消息不执行、普通错误后同批后续调用继续、下一轮 Provider 收到完整有序 transcript 和未变化的 task/tool/workspace context、模型从 edit failure 恢复。
+- **Test scenarios:** 成功调用、未知工具、非法 JSON、参数语义错误、execute error、单工具 timeout 不取消 Run、截断消息不执行、普通错误后同批后续调用继续、下一轮 Provider 收到以同一原始 user message 开始的完整有序 transcript、未变化的 tool schemas 和包含同一 workspace/cwd 说明的 system prompt、模型从 edit failure 恢复。
 - **Verification:** 非取消批次中的每个 tool call 都得到同 ID 的 tool result；普通错误不崩溃、不产生 terminal Run reason，也不阻止下一轮模型恢复。
 
 ### U5. Implement Barrier-Based Staged Scheduling

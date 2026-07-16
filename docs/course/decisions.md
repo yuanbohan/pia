@@ -79,7 +79,7 @@
 ### D13. 第一期只保留内存 transcript
 
 - 日期：2026-07-15
-- 决定：每次 Provider 调用收到稳定 system prompt、原始 task、完整有序 transcript、当前 tool schemas 和 workspace context。第一期不持久化 transcript，不实现 checkpoint、恢复、自动 compaction、摘要或跨 Session 上下文。
+- 决定：Run 入口接收一次原始 task 并将它转换成 transcript 的首条 user message；每次 Provider 调用收到包含 workspace/cwd 说明的稳定 system prompt、完整有序 transcript 和当前 tool schemas，不增加独立 `Task` 或 `WorkspaceContext` AI 协议字段。第一期不持久化 transcript，不实现 checkpoint、恢复、自动 compaction、摘要或跨 Session 上下文。
 - 原因：基础多轮上下文已经足以验证 coding loop；持久化和压缩会引入版本、恢复和敏感数据存储契约，必须由二期真实需求驱动。
 
 ### D14. 第一轮 bash 进程树支持 macOS 和 Linux
@@ -148,6 +148,12 @@
 - 决定：运行前明确提示 system prompt、task、模型选择的文件内容、命令和 tool output 会发送给 DeepSeek；操作者自行选择可披露 workspace，Runtime 不增加确认或审批交互。read/bash 内容在进入 transcript、Provider request 或 event preview 前完成大小限制；默认事件只呈现 metadata、状态和有界 preview。第一期没有通用 secret detector 或 redactor。
 - 原因：操作者必须理解真实数据边界；减少重复输出能降低额外泄漏，但不能被描述为阻止模型看到完成任务所需的 tool results。
 
+### D25. 第一阶段 AssistantMessage 只保留 Loop 可观察字段
+
+- 日期：2026-07-16
+- 决定：`AssistantMessage` 第一阶段只保留有序 content blocks、token usage、stop reason 和 error message。暂不加入 api/provider/model、response ID/model、diagnostics、timestamp、cost 或未核验的 cache/reasoning usage 细分；stream delta 不重复携带完整 partial message，terminal event 携带权威 final/aborted message。
+- 原因：当前 Agent Loop 只观察内容、用量和终态；其余字段属于 Pi 的多 Provider、路由、Session/UI、诊断或费用生态。第 02 课若出现真实 partial snapshot 消费者，或第 04 课核对 DeepSeek 后出现新的 usage/trace 需求，再用证据扩展内部协议。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -156,3 +162,6 @@
 - 2026-07-15：取消当前阶段的外部调用承诺；`cmd/pi-go` 仅用于本地运行与验收。
 - 2026-07-15：第一期收敛为单目录、单任务的最小 coding loop；Goal Runtime、Session、完整 lifecycle/subscription、Manager 和外部集成移至二期。
 - 2026-07-15：确定屏障式工具调度、错误继续、取消 settlement、`os.Root` 文件边界、DeepSeek 数据外发和固定 bug-fix 验收。
+- 2026-07-16：根据冻结 Pi `Context` 与 coding-agent system prompt 证据，明确 workspace/cwd 说明进入稳定 system prompt，不建立独立 `WorkspaceContext` AI 协议字段。
+- 2026-07-16：学习者确认原始 task 只作为 transcript 首条 user message，不在 Provider Request 中建立第二份 `Task`；第一阶段完整 transcript 是单一事实源。
+- 2026-07-16：学习者确认第一阶段 `AssistantMessage` 的最小字段与删减范围；partial snapshot 和 Provider/模型诊断元数据按真实消费者延后。

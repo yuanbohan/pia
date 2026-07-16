@@ -13,6 +13,10 @@ Phase 1 is a DeepSeek-first, headless coding agent for one task in one workspace
 - Only enter a lesson when the learner explicitly asks to start that lesson.
 - For each implementation lesson, proceed through explanation, discussion, implementation, tests, and documentation. Lesson 00 is the documented module/baseline exception and intentionally has no Runtime package.
 - Teach each concept before asking the learner to predict or answer: define the terms, trace the relevant Pi path, and work through at least one concrete example before an understanding check.
+- Keep every lesson explanation-led and progressive. Exercises and questions are secondary checks, not substitutes for teaching the material clearly.
+- Connect explanations to the frozen Pi source and, once implementation begins, to the actual pi-go code being written; explain what each relevant type, function, and test is responsible for as it is introduced.
+- Pause on genuinely uncertain or difficult points, discuss the evidence and trade-offs with the learner, and confirm understanding before settling the design or continuing implementation. Do not turn the course into a sequence of quizzes.
+- Teach course material directly in the conversation and keep only necessary course records, code, and tests in the repository. Do not generate separate HTML lesson artifacts unless the learner explicitly asks for one.
 - Actively challenge learner proposals and the instructor's own prior proposals against the frozen Pi source, documentation, tests, and explicit project constraints. Agreement is not evidence.
 - Keep learner hypotheses, verified Pi contracts, candidate Go mechanisms, and settled pi-go decisions explicitly separated. Do not promote a suggestion into architecture merely because it sounds reasonable.
 - When new evidence invalidates an earlier course conclusion, state the correction directly and update the durable record before implementation.
@@ -29,7 +33,7 @@ Phase 1 is a DeepSeek-first, headless coding agent for one task in one workspace
 - Keep Phase 1 to the model/tool loop. Do not add Goal Runtime, Session state, compaction, steering, follow-up, or subscription lifecycle merely to prepare for later phases.
 - Treat `cmd/pi-go` as a local execution and acceptance entrypoint, not a stable external integration contract. Defer gRPC and public SDK design until real external callers are in scope.
 - Use a Faux Provider for deterministic Agent tests before real DeepSeek calls.
-- Send every Provider call the stable system prompt, original task, ordered in-memory transcript, current tool schemas, and workspace context. Do not persist or compact transcript in Phase 1.
+- Send every Provider call the stable system prompt, ordered in-memory transcript, and current tool schemas. Build workspace/cwd context into the stable system prompt, and represent the original task once as the transcript's initial user message; do not add separate Provider request fields for workspace context or task. Do not persist or compact transcript in Phase 1.
 - Schedule consecutive explicitly parallel-safe tools as one parallel stage and every other tool as a serial barrier. Only `read` is parallel-safe in Phase 1; the default is false.
 - Serialize awaited event delivery through the Run-owned coordinator even when tool workers run concurrently. Preserve completion order for events and model source order for transcript results.
 - Use `os.Root` for file-tool workspace containment. Bash starts in the workspace with a minimal environment but is not sandboxed and may access other resources available to the current user.

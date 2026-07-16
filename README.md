@@ -12,5 +12,6 @@
 - [设计决策](docs/course/decisions.md)
 - [完整实施计划](docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md)
 - [第 0 课：学习契约与基线](docs/course/lessons/00-learning-contract-and-baseline.md)
+- [第 1 课：AI 协议与 Faux Provider](docs/course/lessons/01-ai-protocol-and-faux-provider.md)
 
-当前进度：第 00 课已提交，第 01 课“AI 协议与 Faux Provider”待学习者明确要求后开始。仓库暂时只有 `go.mod` 和课程文档，没有占位 Go package。
+当前进度：第 00 课和第 01 课“AI 协议与 Faux Provider”已完成并提交；下一课是第 02 课“单次 Provider Turn 与 transcript”。
