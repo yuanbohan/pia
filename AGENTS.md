@@ -50,6 +50,7 @@ Phase 1 is a DeepSeek-first, headless coding agent for one workspace and one act
 - Prefer idiomatic Go behavior over mechanical TypeScript translation.
 - Pass `context.Context` through cancellable model, tool, process, and persistence operations.
 - Avoid speculative interfaces and helpers; introduce abstractions only when the current lesson establishes their responsibility.
+- Add code comments when an evidence-backed, non-obvious adjustment would otherwise be hard for later readers to understand; explain why the behavior is necessary and its observable consequence. Do not turn guesses into comments: ground them in verified source behavior, protocol documentation, tests, or a recorded decision.
 - Keep default tests offline and independent of API keys or paid services.
 - Use explicit opt-in integration tests for real providers.
 - After Go changes, run `gofmt` on changed files, `go test ./...`, and `go vet ./...`.
