@@ -16,5 +16,6 @@
 - [第 2 课：单次 Provider Turn 与 transcript](docs/course/lessons/02-agent-loop-and-transcript.md)
 - [第 3 课：多轮 Tool Loop 与屏障式调度](docs/course/lessons/03-tool-loop-and-staged-scheduling.md)
 - [第 4 课：OpenAI-Compatible DeepSeek Provider](docs/course/lessons/04-deepseek-provider.md)
+- [第 5 课：Coding Tools 与 Workspace 边界](docs/course/lessons/05-coding-tools.md)
 
-当前进度：第 00 至 03 课已提交；第 04 课“OpenAI-Compatible DeepSeek Provider”代码与离线验证完成，待学习者理解确认。
+当前进度：第 00 至 04 课已提交；第 05 课“Coding Tools 与 Workspace 边界”实现中，`read` 子阶段已经完成并经学习者确认，下一步进入 `write`。

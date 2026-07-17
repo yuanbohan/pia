@@ -101,8 +101,8 @@ flowchart LR
 | 01 | AI 协议与 Faux Provider | 消息、内容块、stream、Provider 接口和脚本 Provider | 已提交 |
 | 02 | 单次 Provider Turn 与 transcript | 一次模型流、assistant message、request context 和 Run 终态 | 已提交 |
 | 03 | 多轮 Tool Loop 与屏障式调度 | schema、参数校验、tool results、错误继续、只读并行和串行屏障 | 已提交 |
-| 04 | DeepSeek Provider | OpenAI-compatible 消息转换、SSE、reasoning、tool calls、usage 和错误映射 | 待理解确认 |
-| 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 待开始 |
+| 04 | DeepSeek Provider | OpenAI-compatible 消息转换、SSE、reasoning、tool calls、usage 和错误映射 | 已提交 |
+| 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 实现中（`read` 已完成） |
 | 06 | Headless coding task | 本地入口和固定 Go bug-fix 验收 | 待开始 |
 
 原计划中的 Agent 生命周期、subscription、steering/follow-up、Goal Runtime 和 Session 课程保留为二期候选，不占用第一期课次。第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于第一期必须实现。
