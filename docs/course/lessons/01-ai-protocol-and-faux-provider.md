@@ -475,11 +475,12 @@ Faux 不执行任何 tool；第 02/03 课的 Agent 读取 terminal assistant mes
 - `internal/ai/message.go`
 - `internal/ai/model.go`
 - `internal/ai/stream.go`
-- `internal/ai/faux/provider.go`
-- `internal/ai/faux/provider_test.go`
+- `internal/ai/provider.go`
+- `internal/ai/provider/faux/provider.go`
+- `internal/ai/provider/faux/provider_test.go`
 - `docs/course/lessons/01-ai-protocol-and-faux-provider.md`
 
-以上 Go 文件和测试均已创建并随第 01 课提交；根 README、课程总纲、决策记录和计划中开课前发现的 `Task`/`WorkspaceContext` 冲突也已同步修正。
+以上 Go 文件和测试均已创建并随第 01 课提交；Faux 的实现路径在第 04 课建立 Provider 归类目录时从 `internal/ai/faux/` 移至 `internal/ai/provider/faux/`，`ai.Provider` 也从 `model.go` 拆到同包的 `provider.go`，协议和行为不变。根 README、课程总纲、决策记录和计划中开课前发现的 `Task`/`WorkspaceContext` 冲突也已同步修正。
 
 ## 提交记录
 

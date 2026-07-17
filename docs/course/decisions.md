@@ -209,6 +209,20 @@
 - 决定：`stop`、`length`、`toolUse` 是合法 Done reason；content 中存在完整 calls 才进入后续分支，不能只看 reason。`stop + calls` 可执行，`length + calls` 全部生成 truncation error results 而不执行，`toolUse + no calls` 是 Provider protocol error。空或重复 tool-call ID 会让原 terminal 被 synthetic error assistant 替代；ID 有效时，空 tool name、未知工具、非法 JSON、参数语义错误和 Tool execution error 都是 call-local error result。Provider error/aborted terminal 中的 calls 不执行，只生成 not-executed settlement results。
 - 原因：call ID 决定 transcript 是否能可靠配对，属于 Provider 协议完整性；工具名、arguments 和执行失败属于单次调用可由模型观察和恢复的错误。stop reason 可能与 content 不完全一致，content 的完整结构才是能否执行或闭合的直接事实。
 
+### D35. DeepSeek 使用薄 Provider 层复用 OpenAI-compatible Chat Completions 协议
+
+- 日期：2026-07-17
+- 决定：具体 Provider 实现统一归类到 `internal/ai/provider/`；其中完整包名 `provider/openaicompatible` 负责当前 DeepSeek 所需的 Chat Completions request/message 编码、HTTP/SSE、reasoning、tool-call 分片、usage 和 finish-reason 映射，`provider/deepseek` 只负责 DeepSeek 配置、认证、endpoint 安全约束和兼容 profile，`provider/faux` 保存确定性实现。consumer-owned `ai.Provider` 接口仍与 `Request`、`Stream` 一起留在模型无关 `internal/ai`，Agent 只依赖该端口。第一期不移植 Pi 的 Provider registry、模型目录、动态刷新、凭据存储、lazy module 或多 API dispatch，也不宣称兼容所有 OpenAI-compatible 服务。线协议层使用标准库 `net/http` 和可注入 client/transport，不引入 OpenAI SDK。
+- Pi 证据：冻结 Pi 的 `deepseekProvider()` 只向 `createProvider()` 注册 DeepSeek 的 base URL、认证、模型元数据与共享 `openAICompletionsApi()`；消息转换和流解析位于 `packages/ai/src/api/openai-completions.ts`。
+- 原因：DeepSeek 当前使用 OpenAI-compatible Chat Completions 线协议，把协议转换全部写进 DeepSeek 包会混合可复用 wire semantics 与厂商配置；用目录归类具体实现能让依赖方向可见。把小接口移进 `provider` 子包会迫使 Agent 为同一个 AI 协议同时依赖两个包，而复制 Pi 的完整 Provider 生态则超出单 Provider 第一期范围。
+
+### D36. OpenAI-compatible stream 由 pull parser 显式完成 settlement
+
+- 日期：2026-07-17
+- 决定：`Provider.Stream()` 只创建绑定 context 的 stream 状态，首次 `Receive()` 发起一次 HTTP 请求，后续 `Receive()` 按需解析 SSE，不启动后台 goroutine，也不自动重试。成功 terminal 同时要求有效 `finish_reason` 和 `[DONE]`；usage chunk 可在 finish reason 后到达，因此只在 `[DONE]` 后产生 `DoneEvent`。tool calls 按 wire `index` 聚合；最终 arguments 即使不是合法 JSON，也作为 raw call 交给 Agent 形成 call-local error，只有无法可靠配对的 index/ID/name 才是 Provider protocol error。
+- 取消语义：finish reason 前取消只保留已形成的 text/reasoning，不保留没有 wire completion 证据的 tool call；finish reason 后、`[DONE]` 前取消可以保留完整 calls，Agent 再按既有规则追加 not-executed settlements。HTTP 错误体最多读取 64 KiB，单个 SSE event 最多 1 MiB；API key、headers 和完整 request 不进入错误。第一阶段 `Usage` 继续只保存 input/output，DeepSeek completion tokens 已包含 reasoning，当前没有 cache/reasoning 分项消费者。
+- 原因：直接 pull parsing 与现有 `ai.Stream` 一致，避免隐藏 goroutine、SDK retry 和第二套终态；finish reason 表达模型停止原因，`[DONE]` 表达传输闭合，两者不能互相替代。raw invalid arguments 属于模型可观察的单次调用错误，不应升级为整个 Provider turn 失败。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -232,3 +246,7 @@
 - 2026-07-17：学习者接受第 03 课 Tool retry 结论；Agent 不自动重试 tool call，模型负责从 error tool result 恢复，后端内部重试必须有明确的瞬时错误证据。
 - 2026-07-17：冻结 Pi 的 orphaned tool-call request 修复暴露出旧取消契约与完整 transcript 复用的冲突；学习者选择方案 2，pi-go 在 Agent transcript 中为 canceled/not-executed 调用追加明确 settlement results，并要求后续真实 DeepSeek 验证特别覆盖该分歧。
 - 2026-07-17：第 03 课实现 review 发现 Provider aborted assistant 可以保留已完成 tool calls，而第 01/02 课的旧表述只约束了 assistant exactly-once。学习者确认扩展方案 2：失败 Turn 不执行这些 calls，但在唯一 terminal assistant 后追加同 ID not-executed results，并同步修正旧课程记录。
+- 2026-07-17：学习者明确开始继续课程并进入第 04 课；确认参考冻结 Pi 的 Provider/API 分层，以薄 DeepSeek 层复用最小 OpenAI-compatible Chat Completions 协议层，不扩建多 Provider registry。
+- 2026-07-17：学习者提出统一 Provider 目录；确定 `internal/ai/provider/` 只归类 Faux、OpenAI-compatible 与 DeepSeek 实现，consumer-owned `ai.Provider` 仍留在 `internal/ai`，并记录这与 Pi 大 Provider runtime abstraction 的差别。
+- 2026-07-17：学习者确认用标准库 `net/http` 实现已讲解的完整消息映射，并将共享线协议包定名为 Go 惯例下的完整名称 `provider/openaicompatible`；不要求沿用 Pi 的 `openai-completions` 命名。
+- 2026-07-17：学习者确认 pull-based SSE parser、finish reason 加 `[DONE]` 双 settlement、tool-call 分片边界、零自动重试、64 KiB HTTP 错误体、1 MiB SSE event 和最小 usage 语义；第 04 课进入实现。

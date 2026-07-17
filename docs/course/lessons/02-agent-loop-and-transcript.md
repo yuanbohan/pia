@@ -220,7 +220,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
 - `internal/agent/types.go`
 - `internal/agent/loop.go`
 - `internal/agent/loop_test.go`
-- `internal/ai/faux/provider.go`（改为复用统一 clone 规则）
+- `internal/ai/provider/faux/provider.go`（改为复用统一 clone 规则；第 04 课从旧路径移入 Provider 归类目录）
 - `docs/course/lessons/02-agent-loop-and-transcript.md`
 
 测试已锁定单轮文本、空文本、`length` 正常结束、thinking/text 混合、同一 Agent 顺序两次 Run 保留完整历史、并发 Run 拒绝、完整 Provider request、Provider error/aborted、nil stream、terminal 前 EOF、非 EOF receive failure、stream cancel、非法 terminal reason、取消等待已启动 stream 收敛、terminal 与取消同返时 terminal 优先、明确的 Run 返回结果，以及外部修改 Provider request、Provider terminal message 或 RunResult 的嵌套 snapshot 不能反向修改 Agent transcript。默认测试只使用 Faux Provider，不访问网络或 Provider key。

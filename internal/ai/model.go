@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"context"
 	"encoding/json"
 )
 
@@ -18,9 +17,4 @@ type ToolSchema struct {
 	Name        string
 	Description string
 	Parameters  json.RawMessage
-}
-
-// Provider starts one response stream bound to ctx.
-type Provider interface {
-	Stream(ctx context.Context, request Request) Stream
 }

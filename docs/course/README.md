@@ -101,7 +101,7 @@ flowchart LR
 | 01 | AI 协议与 Faux Provider | 消息、内容块、stream、Provider 接口和脚本 Provider | 已提交 |
 | 02 | 单次 Provider Turn 与 transcript | 一次模型流、assistant message、request context 和 Run 终态 | 已提交 |
 | 03 | 多轮 Tool Loop 与屏障式调度 | schema、参数校验、tool results、错误继续、只读并行和串行屏障 | 已提交 |
-| 04 | DeepSeek Provider | SSE、reasoning、tool calls、usage 和错误映射 | 待开始 |
+| 04 | DeepSeek Provider | OpenAI-compatible 消息转换、SSE、reasoning、tool calls、usage 和错误映射 | 实现中 |
 | 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 待开始 |
 | 06 | Headless coding task | 本地入口和固定 Go bug-fix 验收 | 待开始 |
 
@@ -129,9 +129,11 @@ flowchart LR
 pi-go/
 ├── cmd/pi-go/                 # 本地运行与固定验收入口
 ├── internal/
-│   ├── ai/                    # 消息、Provider stream 和通用模型协议
-│   │   ├── faux/              # 确定性脚本 Provider
-│   │   └── deepseek/          # 第一种真实 Provider
+│   ├── ai/                    # 消息、ai.Provider、stream 和通用模型协议
+│   │   └── provider/          # 具体 Provider 实现的归类目录，不是 registry
+│   │       ├── faux/          # 确定性脚本 Provider
+│   │       ├── openaicompatible/ # Chat Completions 线协议
+│   │       └── deepseek/      # DeepSeek 配置和兼容 profile
 │   ├── agent/                 # 通用模型与工具循环
 │   └── coding/                # prompt、workspace、Runtime 装配和 coding tools
 ├── testdata/                  # Provider fixtures 和固定 coding acceptance fixture

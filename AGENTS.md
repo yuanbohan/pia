@@ -30,7 +30,7 @@ Phase 1 is a DeepSeek-first, headless coding agent for one workspace and one act
 ## Architecture Constraints
 
 - Keep unstable implementation packages under `internal/`; do not create a public SDK without a new decision.
-- Keep `internal/ai` independent; concrete providers depend on `ai`; `internal/agent` may depend on `ai`; coding tools implement contracts owned by `agent`; the local coding composition root assembles Agent, DeepSeek, and tools.
+- Keep `internal/ai` independent and keep the consumer-owned `ai.Provider` interface beside `Request` and `Stream`. Group concrete implementations under `internal/ai/provider/`; `provider/faux`, `provider/openaicompatible`, and `provider/deepseek` depend inward on `ai`. Do not turn the organizational `provider/` directory into a Pi-style registry or move the small Provider port out of `ai`. `internal/agent` may depend on `ai`; coding tools implement contracts owned by `agent`; the local coding composition root assembles Agent, DeepSeek, and tools.
 - Keep Agent Runtime separate from the future Agent Manager and IM adapters.
 - Keep Phase 1 to the model/tool loop. Do not add Goal Runtime, Session persistence/recovery, compaction, steering, follow-up, or subscription lifecycle merely to prepare for later phases. The Agent-owned ordered in-memory transcript is core loop state, not deferred Session infrastructure.
 - Treat `cmd/pi-go` as a local execution and acceptance entrypoint, not a stable external integration contract. Defer gRPC and public SDK design until real external callers are in scope.

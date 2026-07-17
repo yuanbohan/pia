@@ -123,7 +123,7 @@ product_contract_source: ce-plan-bootstrap
 
 - KTD1. 以可观察行为为移植边界，使用 Go 原生并发和取消机制，不复制 TypeScript API 形状。（session-settled: user-approved — chosen over line-by-line translation: 目标是掌握并验证 Pi 核心设计）
 - KTD2. 当前代码放入 `internal/`，由 `cmd/pi-go` 提供本地运行和验收入口，不做 SDK-first。（session-settled: user-directed — chosen over SDK-first: 核心接口需要随课程校正）
-- KTD3. 首个真实 Provider 只实现 DeepSeek，Provider 接口保持可替换。（session-settled: user-directed — chosen over a multi-provider matrix: 先验证核心 loop）
+- KTD3. 首个真实 Provider 只实现 DeepSeek，consumer-owned `ai.Provider` 接口保持在模型无关 `internal/ai`；具体实现归类到 `internal/ai/provider/`，其中 DeepSeek 薄层复用最小 OpenAI-compatible Chat Completions 线协议层。（session-settled: user-directed — chosen over a multi-provider matrix or Pi-style registry: 先验证核心 loop）
 - KTD4. 不移植 TUI，只保留 Runtime 的本地 headless 运行、可观察事件和结果。（session-settled: user-directed — chosen over porting CLI/TUI behavior: UI 不决定 coding 目标能否完成）
 - KTD5. Faux Provider 先于 DeepSeek，用脚本响应锁定模型流、工具循环和 transcript 语义。
 - KTD6. 第一阶段不实现 Goal Runtime；通用 Agent Loop 只负责模型与工具循环，任务成功由外部验收判断。（session-settled: user-directed — chosen over building plan/replan/done state now: 当前只验证 coding loop 能否完成任务）
@@ -162,11 +162,12 @@ flowchart TB
     CLI[cmd/pi-go\nlocal task entry] --> CODING[internal/coding\nprompt and workspace]
     CODING --> AGENT[internal/agent\nmodel and tool loop]
     CODING --> TOOLS[read / write / edit / bash]
-    CODING --> DEEPSEEK[internal/ai/deepseek]
+    CODING --> DEEPSEEK[internal/ai/provider/deepseek]
     AGENT --> AI[internal/ai\nmessages and provider stream]
     TOOLS --> AGENT
-    FAUX[internal/ai/faux] --> AI
-    DEEPSEEK --> AI
+    FAUX[internal/ai/provider/faux] --> AI
+    DEEPSEEK --> OPENAI_COMPAT[internal/ai/provider/openaicompatible\nChat Completions wire protocol]
+    OPENAI_COMPAT --> AI
 ```
 
 一次 Run 的核心序列为：
@@ -253,7 +254,7 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Goal:** 建立模型无关消息、内容块、usage、stop reason、流事件和可脚本 Provider。
 - **Requirements:** R4、R5、R14；KTD3、KTD5、KTD13。
 - **Dependencies:** U1。
-- **Files:** `internal/ai/message.go`、`internal/ai/model.go`、`internal/ai/stream.go`、`internal/ai/faux/provider.go`、`internal/ai/faux/provider_test.go`、`docs/course/lessons/01-ai-protocol-and-faux-provider.md`。
+- **Files:** `internal/ai/message.go`、`internal/ai/model.go`、`internal/ai/provider.go`、`internal/ai/stream.go`、`internal/ai/provider/faux/provider.go`、`internal/ai/provider/faux/provider_test.go`、`docs/course/lessons/01-ai-protocol-and-faux-provider.md`。
 - **Approach:** 从 Pi `packages/ai/src/types.ts` 和 stream contract 提取通用类型；Faux Provider 使用脚本事件，不加入 DeepSeek 专用字段。根 README、课程总纲和决策记录已在开课前对齐本计划，不把文档清理混入第 01 课实现。
 - **Execution note:** 先用测试定义事件流和取消语义，再实现 Faux Provider。
 - **Test scenarios:** 文本增量、reasoning 增量、tool-call argument 分片、正常结束、provider error、context cancel、脚本耗尽和重复读取结束状态。
@@ -264,7 +265,7 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Goal:** 完成 user message → provider stream → assistant message → Agent transcript 的一次 Provider turn，证明顺序 Run 保留完整历史，并建立明确的正常、失败和取消终态。
 - **Requirements:** R4、R5、R14、R19；F2；KTD6、KTD18、KTD24、KTD25、KTD28、KTD29、KTD30、KTD31、KTD32。
 - **Dependencies:** U2。
-- **Files:** `internal/ai/clone.go`、`internal/ai/clone_test.go`、`internal/ai/faux/provider.go`、`internal/agent/loop.go`、`internal/agent/types.go`、`internal/agent/loop_test.go`、`docs/course/lessons/02-agent-loop-and-transcript.md`。
+- **Files:** `internal/ai/clone.go`、`internal/ai/clone_test.go`、`internal/ai/provider/faux/provider.go`、`internal/agent/loop.go`、`internal/agent/types.go`、`internal/agent/loop_test.go`、`docs/course/lessons/02-agent-loop-and-transcript.md`。
 - **Approach:** 本单元实现有状态 Agent 与无工具的一次 Provider turn；`Agent.Run()` 在同一个锁内拒绝 active Run、检查预取消 context，并以设置 active 加追加新 user input 作为 acceptance point。每次 Provider 请求包含已组装 workspace/cwd 说明的稳定 system prompt、截至当前的完整 transcript 和 tool schemas，不增加独立 task 或 workspace context 字段。Provider terminal message、Provider Request 和 `RunResult.Transcript` 在所有权边界深复制，并由 `internal/ai` 统一提供 clone 规则。完整 response 无 tool calls 时正常结束，包括空文本；不加入 Agent event sink、运行过程展示、Session 持久化、steering、follow-up 或 compaction。
 - **Execution note:** 先锁定 Agent transcript 所有权、顺序 Run 历史和 Run 返回结果，再实现 loop。
 - **Test scenarios:** 单轮文本、空文本正常结束、reasoning 与 text 混合、同一 Agent 两次顺序 Run 的第二次 request 包含 `[user1, assistant1, user2]`、并发 Run 拒绝、预取消不修改 transcript 且不调用 Provider、acceptance point 后取消保留 user 和唯一 aborted assistant、完整 Provider request 字段、provider error、stream cancel、Run cancel 等待已启动 stream 收敛、明确的 canceled result，以及修改 Provider Request、Provider terminal message 或 RunResult 的嵌套 slice/JSON bytes 都不能反向修改 Agent transcript。这里的“唯一”只计 assistant；第 03 课负责失败 terminal 中 tool calls 的 result closure。
@@ -292,13 +293,13 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Test scenarios:** 全 read 并行、read-read-write-read-read 分成三个阶段、连续 write/edit/bash 严格串行、B 先完成但 transcript 保持 A/B、并行 read 单个失败或 child timeout 后其余完成且下一阶段继续；Run cancel 停止启动后续阶段、取消并等待已启动 workers，为 completed/canceled/not-executed 调用按源顺序追加同 ID settlement results；取消后同一 Agent 的下一次 Run 直接发送完整配对历史，不依赖 Provider 层 orphan repair。
 - **Verification:** `go test -race ./...` 通过；transcript 源顺序和 cancellation settlement 分别满足测试契约。
 
-### U8. Implement DeepSeek Provider
+### U8. Implement OpenAI-Compatible DeepSeek Provider
 
-- **Goal:** 把 DeepSeek SSE 映射到通用 AI stream，并支持 reasoning 与 tool calls。
+- **Goal:** 参考冻结 Pi 的 Provider/API 分层，把 OpenAI-compatible Chat Completions 消息和 SSE 映射到通用 AI stream，再用薄 DeepSeek 配置层提供认证、endpoint 与兼容语义。
 - **Requirements:** R8；KTD3、KTD13。
 - **Dependencies:** U2。课程顺序位于 U3-U5 之后，但 Provider package 不导入 Agent。
-- **Files:** `internal/ai/deepseek/client.go`、`internal/ai/deepseek/stream.go`、`internal/ai/deepseek/convert.go`、`internal/ai/deepseek/client_test.go`、`internal/ai/deepseek/stream_test.go`、`testdata/deepseek/`、`docs/course/lessons/04-deepseek-provider.md`。
-- **Approach:** HTTP transport 可注入；先用本地 SSE fixture 验证协议，再提供显式 opt-in 的真实 smoke test。模型 ID 和 endpoint 来自运行配置。
+- **Files:** `internal/ai/provider/openaicompatible/client.go`、`internal/ai/provider/openaicompatible/convert.go`、`internal/ai/provider/openaicompatible/stream.go`、`internal/ai/provider/openaicompatible/client_test.go`、`internal/ai/provider/openaicompatible/stream_test.go`、`internal/ai/provider/deepseek/provider.go`、`internal/ai/provider/deepseek/provider_test.go`、`testdata/deepseek/`、`docs/course/lessons/04-deepseek-provider.md`。
+- **Approach:** 只抽取当前 DeepSeek 真正使用的 OpenAI-compatible Chat Completions 线协议，不移植 Pi 的 Provider registry、模型目录、动态刷新、认证存储或多 API dispatch。使用标准库 `net/http` 和可注入 client/transport，显式控制 SSE、取消、错误上限和零自动重试；DeepSeek 层冻结兼容 profile 并校验 endpoint/认证，模型 ID 和 endpoint 来自运行配置。先用本地 SSE fixture 验证协议，再提供显式 opt-in 的真实 smoke test。
 - **Test scenarios:** 文本、reasoning、分片 tool arguments、多 tool calls、usage、HTTP error、malformed SSE、context cancel、远程明文 endpoint 被拒绝、本地测试 endpoint 显式放行；assistant tool calls 后跟显式 completed/canceled/not-executed tool results 和新 user message 时能够直接序列化，不静默插入或删除历史消息。
 - **Verification:** 离线 fixture 全通过；有凭据时 smoke test 完成文本和 tool-call 响应，并额外验证一份取消后已显式闭合 tool calls 的历史能够继续请求 DeepSeek，日志和事件不包含 API key。
 
@@ -382,6 +383,12 @@ Pi 与 pi-go 的人工对比在本仓库外进行，不属于 `go test ./...`、
 ### Frozen Pi Source Paths
 
 - `packages/ai/src/types.ts`
+- `packages/ai/src/models.ts`
+- `packages/ai/src/providers/deepseek.ts`
+- `packages/ai/src/providers/deepseek.models.ts`
+- `packages/ai/src/api/openai-completions.lazy.ts`
+- `packages/ai/src/api/openai-completions.ts`
+- `packages/ai/src/api/transform-messages.ts`
 - `packages/agent/src/types.ts`
 - `packages/agent/src/agent-loop.ts`
 - `packages/agent/src/agent.ts`
