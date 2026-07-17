@@ -14,5 +14,6 @@
 - [第 0 课：学习契约与基线](docs/course/lessons/00-learning-contract-and-baseline.md)
 - [第 1 课：AI 协议与 Faux Provider](docs/course/lessons/01-ai-protocol-and-faux-provider.md)
 - [第 2 课：单次 Provider Turn 与 transcript](docs/course/lessons/02-agent-loop-and-transcript.md)
+- [第 3 课：多轮 Tool Loop 与屏障式调度](docs/course/lessons/03-tool-loop-and-staged-scheduling.md)
 
-当前进度：第 00 至 02 课已提交；下一课是第 03 课“多轮 Tool Loop 与屏障式调度”。
+当前进度：第 00 至 03 课已提交；下一课是第 04 课“DeepSeek Provider”。

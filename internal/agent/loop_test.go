@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -208,12 +209,19 @@ func TestProviderTerminalMutationCannotAffectAgentTranscript(t *testing.T) {
 		}},
 		StopReason: ai.StopReasonToolUse,
 	}
-	runtime := newAgent(t, staticProvider{stream: &sliceStream{events: []ai.Event{
-		ai.DoneEvent{Message: message},
-	}}}, "system")
+	provider := &responseProvider{messages: []ai.AssistantMessage{
+		message,
+		{Content: []ai.AssistantContent{ai.TextContent{Text: "done"}}, StopReason: ai.StopReasonStop},
+	}}
+	runtime := newAgentWithTools(t, provider, "system", &testTool{
+		definition: agent.ToolDefinition{Schema: toolSchema("read"), CanRunParallel: true},
+		execute: func(context.Context, json.RawMessage) (string, error) {
+			return "file contents", nil
+		},
+	})
 
-	if _, err := runtime.Run(context.Background(), "inspect"); err == nil {
-		t.Fatal("Run() error = nil, want tool-loop-unavailable error")
+	if _, err := runtime.Run(context.Background(), "inspect"); err != nil {
+		t.Fatalf("Run() error = %v", err)
 	}
 	arguments[9] = 'X'
 
@@ -563,6 +571,12 @@ func assistantStep(message ai.AssistantMessage) faux.Step {
 				ai.ThinkingStartEvent{ContentIndex: index},
 				ai.ThinkingDeltaEvent{ContentIndex: index, Delta: content.Thinking},
 				ai.ThinkingEndEvent{ContentIndex: index, Thinking: content.Thinking},
+			)
+		case ai.ToolCall:
+			events = append(events,
+				ai.ToolCallStartEvent{ContentIndex: index, ID: content.ID, Name: content.Name},
+				ai.ToolCallDeltaEvent{ContentIndex: index, Delta: string(content.Arguments)},
+				ai.ToolCallEndEvent{ContentIndex: index, ToolCall: content},
 			)
 		default:
 			panic(fmt.Sprintf("unsupported test content %T", content))

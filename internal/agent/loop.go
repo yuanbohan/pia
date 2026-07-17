@@ -9,43 +9,96 @@ import (
 	"github.com/yuanbohan/pi-go/internal/ai"
 )
 
-// Run appends one user input and completes one Provider turn.
+// Run appends one user input and continues Provider turns until the model no
+// longer requests tools or the Run reaches a Provider/cancellation failure.
 func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
-	request, earlyResult, err := a.beginRun(ctx, userInput)
+	earlyResult, err := a.beginRun(ctx, userInput)
 	if err != nil {
 		return earlyResult, err
 	}
 	defer a.endRun()
 
-	stream := a.provider.Stream(ctx, request)
-	message, runErr := receiveAssistant(ctx, stream)
-	return a.appendTerminalAndSnapshot(message), runErr
+	continuingAfterTools := false
+	for {
+		if continuingAfterTools {
+			if cause := context.Cause(ctx); cause != nil {
+				return a.snapshot(), cause
+			}
+		}
+
+		request := a.requestSnapshot()
+		message, turnErr := receiveAssistant(ctx, a.provider.Stream(ctx, request))
+		a.appendAssistant(message)
+		calls := toolCalls(message)
+		if turnErr != nil {
+			if len(calls) > 0 {
+				a.appendToolResults(failedTurnToolResults(calls, message.StopReason))
+			}
+			return a.snapshot(), turnErr
+		}
+
+		if len(calls) == 0 {
+			return a.snapshot(), nil
+		}
+
+		var results []ai.ToolResultMessage
+		var runErr error
+		if message.StopReason == ai.StopReasonLength {
+			results = truncatedToolResults(calls)
+		} else {
+			results, runErr = a.executeToolBatch(ctx, calls)
+		}
+		a.appendToolResults(results)
+		if runErr != nil {
+			return a.snapshot(), runErr
+		}
+		continuingAfterTools = true
+	}
 }
 
-func (a *Agent) beginRun(ctx context.Context, userInput string) (ai.Request, RunResult, error) {
+func (a *Agent) beginRun(ctx context.Context, userInput string) (RunResult, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	if a.active {
-		return ai.Request{}, RunResult{}, ErrRunActive
+		return RunResult{}, ErrRunActive
 	}
 	if cause := context.Cause(ctx); cause != nil {
-		return ai.Request{}, RunResult{Transcript: ai.CloneMessages(a.transcript)}, cause
+		return RunResult{Transcript: ai.CloneMessages(a.transcript)}, cause
 	}
 
 	a.active = true
 	a.transcript = append(a.transcript, ai.UserMessage{Content: userInput})
-	request := ai.CloneRequest(ai.Request{
-		SystemPrompt: a.systemPrompt,
-		Messages:     a.transcript,
-	})
-	return request, RunResult{}, nil
+	return RunResult{}, nil
 }
 
-func (a *Agent) appendTerminalAndSnapshot(message ai.AssistantMessage) RunResult {
+func (a *Agent) requestSnapshot() ai.Request {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return ai.CloneRequest(ai.Request{
+		SystemPrompt: a.systemPrompt,
+		Messages:     a.transcript,
+		Tools:        a.toolSchemas,
+	})
+}
+
+func (a *Agent) appendAssistant(message ai.AssistantMessage) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.transcript = append(a.transcript, ai.CloneAssistantMessage(message))
+}
+
+func (a *Agent) appendToolResults(results []ai.ToolResultMessage) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, result := range results {
+		a.transcript = append(a.transcript, result)
+	}
+}
+
+func (a *Agent) snapshot() RunResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return RunResult{Transcript: ai.CloneMessages(a.transcript)}
 }
 
@@ -97,19 +150,22 @@ func receiveAssistant(ctx context.Context, stream ai.Stream) (ai.AssistantMessag
 
 func assistantFromDone(message ai.AssistantMessage) (ai.AssistantMessage, error) {
 	switch message.StopReason {
-	case ai.StopReasonStop, ai.StopReasonLength:
-		if hasToolCall(message) {
-			return message, errors.New("agent: provider requested a tool before the tool loop is available")
+	case ai.StopReasonStop, ai.StopReasonLength, ai.StopReasonToolUse:
+		if err := validateToolCallProtocol(message); err != nil {
+			return assistantFromProtocolError(err.Error())
 		}
 		return message, nil
-	case ai.StopReasonToolUse:
-		return message, errors.New("agent: provider requested a tool before the tool loop is available")
 	default:
 		return assistantFromProtocolError(fmt.Sprintf("done event has invalid stop reason %q", message.StopReason))
 	}
 }
 
 func assistantFromErrorEvent(ctx context.Context, message ai.AssistantMessage) (ai.AssistantMessage, error) {
+	if message.StopReason == ai.StopReasonError || message.StopReason == ai.StopReasonAborted {
+		if err := validateToolCallProtocol(message); err != nil {
+			return assistantFromProtocolError(err.Error())
+		}
+	}
 	switch message.StopReason {
 	case ai.StopReasonError:
 		if message.ErrorMessage == "" {
@@ -155,14 +211,4 @@ func assistantFromProtocolError(message string) (ai.AssistantMessage, error) {
 		StopReason:   ai.StopReasonError,
 		ErrorMessage: err.Error(),
 	}, err
-}
-
-func hasToolCall(message ai.AssistantMessage) bool {
-	for _, content := range message.Content {
-		switch content.(type) {
-		case ai.ToolCall, *ai.ToolCall:
-			return true
-		}
-	}
-	return false
 }

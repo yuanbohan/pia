@@ -79,8 +79,8 @@ Provider 不拥有 transcript，也不能替 Agent 追加历史。它只读取�
 - 每次模型调用从当前 context 构造 `Context { systemPrompt, messages, tools }`，没有独立 task 或 workspace context 字段。
 - Pi 在低层 assistant stream 开始时把 partial assistant message 放入私有 working context，随后用新的 partial snapshot 替换最后一条，terminal 时再替换成 final message。
 - Pi 高层 `Agent.state.messages` 不保存 partial：`message_start/message_update` 只更新独立的 `streamingMessage`，`message_end` 才把 terminal message 追加到正式 transcript。coding-agent TUI 通过事件中的 partial snapshot 刷新显示，Session 也只在 `message_end` 持久化消息。
-- pi-go 第一阶段没有需要查询完整 partial snapshot 的消费者，因此正式 transcript 只追加 terminal final/aborted assistant message，不维护可查询的 Run-owned partial view。第 02 课不设计 event sink；本地终端或未来 TUI 如何流式观察和展示，后续按真实消费者需求讨论。
-- Pi 在 provider error 或 aborted assistant message 后结束当前 Turn 和整个 Run，不执行工具；完整接收且不含 tool calls 的 assistant response 正常结束，即使文本为空。
+- pi-go 第一阶段没有需要查询完整 partial snapshot 的消费者，因此正式 transcript 对每个 Provider turn 只追加一条 terminal final/aborted assistant message，不维护可查询的 Run-owned partial view。第 03 课补充的 tool-result settlement 不是第二条 assistant：若 error/aborted assistant 中保留了已完成但未执行的 tool calls，Agent 会在其后追加同 ID `not executed` results，使权威 transcript 保持配对。第 02 课不设计 event sink；本地终端或未来 TUI 如何流式观察和展示，后续按真实消费者需求讨论。
+- Pi 在 provider error 或 aborted assistant message 后结束当前 Turn 和整个 Run，不执行工具；完整接收且不含 tool calls 的 assistant response 正常结束，即使文本为空。pi-go 同样不执行失败 Turn 中的调用，但第 03 课有意不复制 Pi 的 request-time orphan repair，而是在 Agent transcript 中显式追加非执行型 settlement results。
 - pi-go 使用 `run_start/run_end` 表达一次 Run 的边界；引用 Pi 源码时仍保留原名 `agent_start/agent_end`。
 
 ## Partial assistant 的讨论结论
@@ -159,7 +159,7 @@ pi-go 明确增加 Go API 边界：
 已有 active Run -> ErrRunActive，不观察半完成 transcript
 无 active Run、ctx 已取消 -> Run 未接受，transcript 不变，不产生 aborted assistant
 ctx 有效 -> 在同一个锁内设置 active 并追加 user，构成 acceptance point
-acceptance point 后、terminal settlement 前取消 -> 保留 user，只追加一条 aborted assistant
+acceptance point 后、terminal settlement 前取消 -> 保留 user，只追加一条 aborted assistant；若其中有已完成 tool calls，随后追加 not-executed results
 ```
 
 context 检查与 active/user 状态转换在同一个短临界区完成。若 context 在检查通过后立刻取消，该 Run 已越过 acceptance point，按已开始取消处理。
@@ -177,8 +177,10 @@ ErrorEvent(aborted)               -> Provider aborted assistant + context cause/
 terminal 前 EOF / receive error    -> synthetic aborted 或 error assistant + error
                                       |
                                       v
-                  append exactly once for this Provider turn
+                  append assistant exactly once for this Provider turn
 ```
+
+这里的 exactly once 只约束 assistant 写入。第 03 课加入 Tool Loop 后，如果 error/aborted terminal 携带取消前已经组装完成的 tool calls，协调层不会执行它们，但会在这条唯一 assistant 后追加同 ID 的 `not executed` tool-result messages。这样既保留 Provider terminal 事实，也不依赖下一次 Provider request 临时修复 orphaned calls。
 
 第一条有效 `DoneEvent` 或 `ErrorEvent` 是这次 Provider turn 的 terminal settlement point；之后发生的 context cancel 不追溯修改已经完成的 assistant。若 Provider 尚未给出 terminal 而 raw stream failure 发生，Agent 以 `context.Cause(ctx)` 是否存在决定合成 aborted 还是 error assistant。
 
@@ -208,6 +210,8 @@ func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
 - `receiveAssistant` 只把正常、Provider error/aborted、nil stream、terminal 前 EOF、receive error 和取消收敛成 `(AssistantMessage, error)`，不接触 Agent。
 - `appendTerminalAndSnapshot` 是越过 acceptance point 后的唯一 terminal 写入点；它在一个锁内深复制并追加 assistant，再返回完整 transcript deep-clone snapshot。
 - `defer a.endRun()` 只释放 active 状态，不追加消息，因此成功、失败或取消分支不会通过 cleanup 再写第二条 assistant。
+
+跨课修正：上面是第 02 课无工具阶段的实现结构。第 03 课把 coordinator 扩展为多 Turn loop，并将“唯一 terminal 写入点”保留为“每个 Provider turn 的 assistant 只追加一次”。当失败 terminal 自身含完整 tool calls 时，assistant 之后还会追加非执行型 settlement results；这不会增加 assistant 数量，也不会调用 Tool。
 
 ## 本课实现范围
 

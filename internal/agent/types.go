@@ -15,6 +15,7 @@ var ErrRunActive = errors.New("agent: run already active")
 type Config struct {
 	Provider     ai.Provider
 	SystemPrompt string
+	Tools        []Tool
 }
 
 // RunResult is an ownership-independent snapshot taken when Run returns.
@@ -29,6 +30,8 @@ type Agent struct {
 
 	provider     ai.Provider
 	systemPrompt string
+	tools        map[string]registeredTool
+	toolSchemas  []ai.ToolSchema
 	transcript   []ai.Message
 }
 
@@ -37,8 +40,14 @@ func New(config Config) (*Agent, error) {
 	if config.Provider == nil {
 		return nil, errors.New("agent: provider is required")
 	}
+	tools, toolSchemas, err := freezeTools(config.Tools)
+	if err != nil {
+		return nil, err
+	}
 	return &Agent{
 		provider:     config.Provider,
 		systemPrompt: config.SystemPrompt,
+		tools:        tools,
+		toolSchemas:  toolSchemas,
 	}, nil
 }

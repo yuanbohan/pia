@@ -199,11 +199,11 @@ type Stream interface {
 ### 01-A 理解确认：取消发生在未完成 tool call 中途
 
 - 场景：stream 已发出 `toolcall_start` 和不完整的 `toolcall_delta('{"path":')`，随后 Run 被取消。
-- 学习者判断：不能执行 `read`；Run 应停止，只保留 aborted assistant message。
-- 课程结论：核心判断正确。没有 `toolcall_end` 就没有完整、可执行的 tool call，因此不能开始 `read`，也不生成 tool result。
+- 学习者判断：不能执行 `read`；Run 应停止，只保留一条 aborted assistant message。
+- 课程结论：核心判断正确。没有 `toolcall_end` 就没有完整、可执行的 tool call，因此不能开始 `read`，这个未完成调用也不会进入 aborted assistant 或生成 tool result。“只保留一条 aborted assistant”约束的是 assistant 不能重复追加，不代表该 assistant 中其他已完成 tool calls 永远不能追加非执行型 settlement results。
 - 关键修正：取消是 cooperative cancellation request，不是立即清空状态或回滚。Provider、已启动工具和事件处理仍需观察取消并完成清理，Run 只有在这些工作 settlement 后才真正结束。
 - Pi 源码事实：Faux stream 在中途取消时发出 terminal `error(reason=aborted)`；其中的 final assistant message 可以保留取消前已经形成的 partial content。Agent Loop 用该 final message 替换正在形成的 partial message，将它保留在当前内存 context，然后以 aborted 结束而不进入工具执行。
-- pi-go 已定边界：取消后不启动新的 Provider 调用或工具阶段，等待所有已启动工作收敛，再产生唯一 canceled Run 终态。取消不撤销此前已经完成的文件副作用。
+- pi-go 已定边界：取消后不启动新的 Provider 调用或工具阶段，等待所有已启动工作收敛，再产生唯一 canceled Run 终态。取消不撤销此前已经完成的文件副作用。第 03 课补充确认：若 aborted assistant 保留了取消前已经组装完成、但尚未执行的 tool calls，Agent 在这唯一一条 assistant 后为它们追加同 ID 的 `not executed` error results，再返回取消原因；这些 result 只闭合 transcript，不表示执行过工具。
 
 ### 01-A 补充讲解：Faux 在 Agent 中的位置
 
@@ -366,10 +366,10 @@ Faux 需要区分两类耗尽：Provider 已没有下一次 scripted response �
 - 学习者反馈：接受 aborted message 丢弃未完成 tool call 的建议，但不确定 partial text/thinking 指什么。
 - 术语澄清：partial 不是新的 content 类型，只是取消前已通过若干 delta 收到的字符串前缀。例如预期完整文本是 `I found the bug in main.go`，取消前只收到 `I found the bug`，后者就是 received-so-far partial text。
 - final 表达：aborted assistant message 仍使用普通 `TextContent`/`ThinkingContent` 保存这些字符串，并由 message 级 `StopReasonAborted` 表明整个响应未完整结束；不增加每个 block 的 partial flag。
-- 与 tool call 的区别：任意 text/thinking 前缀都是合法字符串，可以安全保存但不能当作完整回答；tool-call argument 前缀可能不是合法 JSON，不能构造成完整、可执行 `ToolCall`，所以未到 `ToolCallEnd` 的 block 从 final aborted content 中丢弃。
+- 与 tool call 的区别：任意 text/thinking 前缀都是合法字符串，可以安全保存但不能当作完整回答；tool-call argument 前缀可能不是合法 JSON，不能构造成完整、可执行 `ToolCall`，所以未到 `ToolCallEnd` 的 block 从 final aborted content 中丢弃。已经到达 `ToolCallEnd` 的调用可以保留在 aborted assistant 中，但因 Provider turn 已失败而绝不执行；第 03 课的 Agent 会为它追加 `not executed` settlement result，避免后续 transcript 出现 orphaned call。
 - Pi 对照：冻结 Pi 的 Faux 在 text/thinking delta 时持续把 chunk 追加到 partial message，取消时用当前 partial 构造 aborted message。pi-go 保留该 received-so-far 语义，同时对未完成结构化 tool call 采用更严格的丢弃规则。
 
-- 学习者确认：2026-07-16 理解 partial 是取消前 received-so-far 的字符串前缀，并接受 aborted final message 保留 partial text/thinking 与已完成 tool calls、丢弃未完成 tool call 的处理。
+- 学习者确认：2026-07-16 理解 partial 是取消前 received-so-far 的字符串前缀，并接受 aborted final message 保留 partial text/thinking 与已完成 tool calls、丢弃未完成 tool call 的处理。2026-07-17 在第 03 课实现审查中补充确认：保留已完成 tool call 不等于执行它；Agent 通过后续同 ID `not executed` result 显式闭合该调用，同时仍只追加一条 aborted assistant。
 
 ### 01-I 讲解：测试优先与 Faux API 边界
 
