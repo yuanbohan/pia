@@ -298,10 +298,11 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Goal:** 参考冻结 Pi 的 Provider/API 分层，把 OpenAI-compatible Chat Completions 消息和 SSE 映射到通用 AI stream，再用薄 DeepSeek 配置层提供认证、endpoint 与兼容语义。
 - **Requirements:** R8；KTD3、KTD13。
 - **Dependencies:** U2。课程顺序位于 U3-U5 之后，但 Provider package 不导入 Agent。
-- **Files:** `internal/ai/provider/openaicompatible/client.go`、`internal/ai/provider/openaicompatible/convert.go`、`internal/ai/provider/openaicompatible/stream.go`、`internal/ai/provider/openaicompatible/client_test.go`、`internal/ai/provider/openaicompatible/stream_test.go`、`internal/ai/provider/deepseek/provider.go`、`internal/ai/provider/deepseek/provider_test.go`、`testdata/deepseek/`、`docs/course/lessons/04-deepseek-provider.md`。
-- **Approach:** 只抽取当前 DeepSeek 真正使用的 OpenAI-compatible Chat Completions 线协议，不移植 Pi 的 Provider registry、模型目录、动态刷新、认证存储或多 API dispatch。使用标准库 `net/http` 和可注入 client/transport，显式控制 SSE、取消、错误上限和零自动重试；DeepSeek 层冻结兼容 profile 并校验 endpoint/认证，模型 ID 和 endpoint 来自运行配置。先用本地 SSE fixture 验证协议，再提供显式 opt-in 的真实 smoke test。
+- **Files:** `internal/ai/provider/openaicompatible/request.go`、`internal/ai/provider/openaicompatible/provider.go`、`internal/ai/provider/openaicompatible/stream.go` 及其离线测试，`internal/ai/provider/deepseek/provider.go`、`provider_test.go`、`provider_integration_test.go`，以及 `docs/course/lessons/04-deepseek-provider.md`。
+- **Approach:** 只抽取当前 DeepSeek 真正使用的 OpenAI-compatible Chat Completions 线协议，不移植 Pi 的 Provider registry、模型目录、动态刷新、认证存储或多 API dispatch。使用标准库 `net/http` 和可注入 client/transport，显式控制 SSE、取消、错误上限且不实现 Provider-level retry；redirect 继续服从注入 client 的标准策略。DeepSeek 层冻结兼容 profile 并校验 endpoint/认证，模型 ID 和 endpoint 来自运行配置。先用本地 SSE fixture 验证协议，再提供显式 opt-in 的真实 smoke test。
 - **Test scenarios:** 文本、reasoning、分片 tool arguments、多 tool calls、usage、HTTP error、malformed SSE、context cancel、远程明文 endpoint 被拒绝、本地测试 endpoint 显式放行；assistant tool calls 后跟显式 completed/canceled/not-executed tool results 和新 user message 时能够直接序列化，不静默插入或删除历史消息。
 - **Verification:** 离线 fixture 全通过；有凭据时 smoke test 完成文本和 tool-call 响应，并额外验证一份取消后已显式闭合 tool calls 的历史能够继续请求 DeepSeek，日志和事件不包含 API key。
+- **Execution note:** OpenAI-compatible 与薄 DeepSeek 层已完成；离线测试覆盖完整历史转换、pull SSE、reasoning、交错多 tool calls、usage-after-finish、双 terminal、错误/取消 settlement、大小上限、凭据 redaction 和 endpoint policy。3xx 不做特殊处理，其真实影响留待后续有证据时独立验证。真实测试使用 `integration` build tag 与独立环境开关，未 opt-in 时不读取 key 或联网。当前状态为待学习者理解确认。
 
 ### U9. Implement Coding Tools and Workspace Boundary
 

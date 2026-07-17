@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-实现中。
+待理解确认。
 
 开课记录：第 03 课已于 2026-07-17 完成并提交到 `main`。学习者随后明确要求继续推动课程，并确认第 04 课采用 OpenAI-compatible 方式接入 DeepSeek，参考冻结 Pi 的 Provider 抽象。课程先讲清 Provider/API 分层、消息回放和 SSE settlement，再进入实现。
 
@@ -168,7 +168,7 @@ HTTP 2xx + text/event-stream
 
 - 学习者提议把 Provider 相关实现和抽象归类到 `internal/ai/provider/`，并要求记录与 Pi 的差别。
 - 课程结论：采用该目录归类具体实现，但不把 consumer-owned `ai.Provider` 移出 `internal/ai`。Agent 继续只依赖模型无关 `ai`；Faux 已迁移到 `provider/faux`，后续 OpenAI-compatible 与 DeepSeek 分别位于 `provider/openaicompatible` 和 `provider/deepseek`。
-- 学习者于 2026-07-17 确认理解该边界。目录重排后 `go test ./...`、`go vet ./...` 与 `go test -race ./...` 均通过，尚未提交。
+- 学习者于 2026-07-17 确认理解该边界。目录重排后 `go test ./...`、`go vet ./...` 与 `go test -race ./...` 均通过，并按学习者要求在 `main` 本地提交为 `e97c2ac`；本课收尾时学习者另行授权与实现统一 push。
 
 ### 04-B：消息映射、实现机制与完整包名确认
 
@@ -181,12 +181,34 @@ HTTP 2xx + text/event-stream
 ### 04-C：SSE 组装与错误边界确认
 
 - `Provider.Stream()` 只创建 pull stream 状态；第一次 `Receive()` 发起一次绑定 context 的 HTTP 请求，后续调用按需解析 SSE，不使用后台 goroutine 或自动重试。
+- 第一阶段不为 3xx 增加特殊逻辑或专门测试，完全服从注入 `http.Client` 的标准 redirect policy。这里的“零自动重试”只指 Provider 不自行 retry；redirect 对请求体、凭据传播和最终 SSE 的影响等出现真实证据后单独验证。
 - 成功 terminal 同时要求有效 `finish_reason` 和 `[DONE]`。usage chunk 可以在 finish reason 后到达，因此 `DoneEvent` 只能在 `[DONE]` 后携带最终 usage 发出。
 - tool calls 按 wire `index` 聚合。最终 arguments 即使不是合法 JSON，也保留为 `json.RawMessage` 交给 Agent 形成 call-local error；缺少可靠 index、ID 或 name 才形成 Provider protocol error。
 - finish reason 前取消不保留没有完成证据的 tool calls；finish reason 后、`[DONE]` 前取消可保留已完整组装的 calls，再由 Agent 追加 not-executed results。
 - 第一阶段 `Usage` 不扩展 cache/reasoning 分项；HTTP 错误体上限为 64 KiB，单个 SSE event 上限为 1 MiB，错误不包含 API key、headers 或完整 request。
 - 学习者于 2026-07-17 确认以上边界并要求继续，第 04 课进入测试先行实现。
 
-## 实现入口
+### 04-D：测试先行实现记录
 
-当前没有阻塞实现的未决设计。先写 request conversion 测试并观察缺少 package 的红灯，再按文本、reasoning、tool calls、usage、HTTP/SSE failure 和 cancellation 逐层实现，不先堆出一个只能跑 happy path 的 client。
+- request conversion 测试先因缺少 `buildRequestPayload`/`Profile` 红灯，再实现 system、完整 transcript、tool schemas、reasoning replay 和内部字段隔离。
+- Provider startup 测试先因缺少 `Config/New/responseStream` 红灯，再实现 stable config 校验、`Stream()` 时深复制 request、首次 `Receive()` 发请求和终止后永久 `io.EOF`。
+- SSE 测试先在占位 parser 上整体红灯，再实现无 goroutine 的按需 SSE reader、1 MiB event 上限、content block 源顺序、按 wire index 聚合交错 tool calls、usage-after-finish 和 `[DONE]` settlement。
+- cancellation fixture 分别覆盖 finish reason 前后：前者 terminal 只保留 text/reasoning，后者保留完成 calls，供 Agent 追加 not-executed results。malformed final arguments 保持 raw，缺失 index/ID/name 才升级为 Provider error。
+- `provider/deepseek` 只验证 key/model、远程 HTTPS 与显式 loopback HTTP override，并冻结当前 DeepSeek profile；它直接返回共享实现背后的 `ai.Provider`，没有第二套 Provider 类型或 registry。
+
+默认测试全部离线。真实兼容测试同时要求 build tag 和运行时开关，因此普通 `go test ./...` 不会读取 `DEEPSEEK_API_KEY`：
+
+```bash
+PI_GO_RUN_DEEPSEEK_SMOKE=1 \
+DEEPSEEK_API_KEY=... \
+DEEPSEEK_MODEL=... \
+go test -tags=integration ./internal/ai/provider/deepseek -run TestDeepSeekSmoke -v
+```
+
+真实 smoke 依次验证文本响应、tool call，以及一份 aborted assistant 后已有同 ID not-executed tool result 的完整历史可以继续请求。没有显式 opt-in 和凭据时只编译并 skip，不把未执行的真实请求记成通过证据。
+
+3xx redirect 不是本课观察到的 DeepSeek 或冻结 Pi 行为，因此当前没有实现或 fixture。若真实 endpoint 后续出现 redirect，再单独记录 status、目标 host、method/body/header 变化与最终 SSE 行为后决定是否需要策略。
+
+## 当前实现结果
+
+本课代码与离线验证已完成，当前没有阻塞设计问题；状态进入“待理解确认”。根据课程规则，在学习者确认前不进入第 05 课，也不会为本课自动 commit 或 push。

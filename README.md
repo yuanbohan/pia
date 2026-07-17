@@ -17,4 +17,4 @@
 - [第 3 课：多轮 Tool Loop 与屏障式调度](docs/course/lessons/03-tool-loop-and-staged-scheduling.md)
 - [第 4 课：OpenAI-Compatible DeepSeek Provider](docs/course/lessons/04-deepseek-provider.md)
 
-当前进度：第 00 至 03 课已提交；第 04 课“OpenAI-Compatible DeepSeek Provider”实现中。
+当前进度：第 00 至 03 课已提交；第 04 课“OpenAI-Compatible DeepSeek Provider”代码与离线验证完成，待学习者理解确认。
