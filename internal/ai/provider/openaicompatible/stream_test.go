@@ -408,7 +408,7 @@ func receiveToEOF(t *testing.T, stream ai.Stream) []ai.Event {
 	var events []ai.Event
 	for count := 0; count < 100; count++ {
 		event, err := stream.Receive()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return events
 		}
 		if err != nil {

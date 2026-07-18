@@ -3,6 +3,7 @@ package deepseek
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -65,7 +66,7 @@ data: [DONE]
 	var done ai.DoneEvent
 	for {
 		event, receiveErr := stream.Receive()
-		if receiveErr == io.EOF {
+		if errors.Is(receiveErr, io.EOF) {
 			break
 		}
 		if receiveErr != nil {

@@ -454,9 +454,7 @@ func (reader *sseReader) readData() (string, error) {
 				if !found {
 					value = ""
 				}
-				if strings.HasPrefix(value, " ") {
-					value = value[1:]
-				}
+				value = strings.TrimPrefix(value, " ")
 				if field == "data" {
 					data = append(data, value)
 				}

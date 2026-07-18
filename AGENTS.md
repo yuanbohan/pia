@@ -52,7 +52,9 @@ Phase 1 is a DeepSeek-first, headless coding agent for one workspace and one act
 - Before adding a new module, review the current project structure as a whole: dependency direction, package ownership, filenames, file cohesion, and how the new responsibility will interact with later confirmed work. Do not assume the layout chosen for an earlier, smaller implementation is still the clearest layout.
 - If that review indicates a package move, package split, directory restructuring, meaningful file rename, or other structural refactor, present the evidence, intended boundaries, migration impact, and proposed layout to the learner before making the structural change.
 - Keep each package centered on one cohesive responsibility and keep dependencies pointing inward according to the project's established architecture. Do not use a package as a dumping ground for unrelated helpers merely because it already exists.
+- Apply Clean Architecture as a project-specific dependency-direction and ownership discipline. Do not impose fixed `entities`, `usecases`, or `adapters` directory layers when the current design does not need them.
 - Keep each file focused on a coherent part of its package responsibility. Split a file when independent protocol, orchestration, platform, persistence, or utility concerns have accumulated; do not split files solely to meet an arbitrary line-count target.
+- Keep non-test Go source files at or below 1,000 lines. Test files may exceed this ceiling when they remain cohesive. Treat the limit as a review backstop: split by responsibility rather than mechanically slicing a file.
 - Put shared code in a common package only after current, concrete consumers establish the shared responsibility. A generic name such as `utils` does not justify moving unrelated code together; keep feature-specific behavior beside its feature until reuse and ownership are proven.
 - Prefer consumer-owned, narrow interfaces and concrete types. Introduce an interface only when a current boundary needs substitution, testing, or dependency inversion; do not create speculative interfaces for possible future implementations.
 - Make resource ownership and lifecycle explicit. Constructors validate required dependencies; the creator closes owned resources; borrowed resources are not closed by consumers; every goroutine, stream, file, timer, and child process has a deterministic settlement path.
@@ -70,7 +72,8 @@ Phase 1 is a DeepSeek-first, headless coding agent for one workspace and one act
 - Add code comments when an evidence-backed, non-obvious adjustment would otherwise be hard for later readers to understand; explain why the behavior is necessary and its observable consequence. Do not turn guesses into comments: ground them in verified source behavior, protocol documentation, tests, or a recorded decision.
 - Keep default tests offline and independent of API keys or paid services.
 - Use explicit opt-in integration tests for real providers.
-- After Go changes, run `gofmt` on changed files, `go test ./...`, and `go vet ./...`.
+- Keep `.golangci.yml` limited to explicit, high-signal checks. Resolve every lint finding; use a narrowly scoped `//nolint` only when necessary and include an English explanation.
+- After Go changes, run `make check`; it formats Go files, runs `go vet ./...`, runs `go test ./...`, and runs `golangci-lint`.
 - Run `go test -race ./...` after concurrency, cancellation, or process-management changes.
 
 ## Git Safety

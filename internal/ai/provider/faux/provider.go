@@ -104,6 +104,7 @@ func (s *stream) Receive() (ai.Event, error) {
 
 	if s.ctx.Err() != nil {
 		s.terminal = true
+		//nolint:nilerr // Cancellation is a terminal event; the next Receive reports EOF.
 		return ai.ErrorEvent{Message: s.partial.abortedMessage()}, nil
 	}
 

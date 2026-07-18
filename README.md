@@ -18,4 +18,18 @@
 - [第 4 课：OpenAI-Compatible DeepSeek Provider](docs/course/lessons/04-deepseek-provider.md)
 - [第 5 课：Coding Tools 与 Workspace 边界](docs/course/lessons/05-coding-tools.md)
 
+## 本地开发检查
+
+项目使用 Go 1.26 和 golangci-lint v2。日常改动完成后运行：
+
+```bash
+make check
+```
+
+该命令依次格式化 Go 代码，并运行 `go vet ./...`、`go test ./...` 和 `golangci-lint run ./...`。涉及并发、取消或子进程管理时，额外运行：
+
+```bash
+make race
+```
+
 当前进度：第 00 至 04 课已提交；第 05 课“Coding Tools 与 Workspace 边界”实现中，`read` 子阶段已经完成并经学习者确认，下一步进入 `write`。

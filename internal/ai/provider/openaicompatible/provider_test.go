@@ -189,7 +189,7 @@ func TestProviderReportsRequestConversionFailureWithoutHTTP(t *testing.T) {
 
 	for attempt := 0; attempt < 2; attempt++ {
 		event, err = stream.Receive()
-		if err != io.EOF || event != nil {
+		if !errors.Is(err, io.EOF) || event != nil {
 			t.Fatalf("Receive() after terminal = (%T, %v), want (nil, io.EOF)", event, err)
 		}
 	}
