@@ -228,7 +228,7 @@
 - 日期：2026-07-17
 - 共同边界：`internal/coding.Workspace` 拥有规范化 host path 和一个共享 `*os.Root`；文件工具只借用 root，组合层在全部调用收敛后关闭。严格 JSON object 解码归入 `internal/coding/tools/toolargs`，workspace-relative path 规范化归入 `internal/coding/tools/fileutil`，具体分页、编码和输出语义留在 `internal/coding/tools/read`。路径最多 4096 bytes，拒绝绝对/逃逸路径以及任何 `..` component；不能先 clean `alias/../file`，因为较早 component 是 symlink 时会改变实际目标。
 - `read` 契约：参数体最多 8192 bytes，输入为 `path`、可选 1-based `offset` 和可选 `limit`；同一页最多 2000 个完整行或 50 KiB 实际内容。完整行保留终止换行，尾部换行不产生空 continuation page。结果固定返回规范化相对路径、实际行范围、内容与 EOF/next-offset 状态，不暴露 host absolute path，也不为总行数继续扫描整文件。
-- 文件与编码：所有 I/O 通过 root-relative handle；macOS/Linux 以 nonblocking read-only 方式取得 candidate，再对实际 opened handle 校验 regular-file，因此 FIFO 不会在校验前等待 writer，path replacement 也不能造成“检查 A、读取 B”。该行为由互斥 `go:build` 文件限定到已验证的平台；其他平台暂用普通 `Open` 保持包可构建，仍在打开成功后校验 regular-file，但不承诺无 writer FIFO 的非阻塞打开，也不扩展第一阶段的平台支持范围。本次返回页包含非法 UTF-8 时形成 call-local error，不使用 replacement character；未返回内容不为整文件编码判断而额外扫描。
+- 文件与编码：所有 I/O 通过 root-relative handle；`fileutil.OpenRegularFile` 在 macOS/Linux 以 nonblocking read-only 方式取得 candidate，再对实际 opened handle 校验 regular-file，因此 FIFO 不会在校验前等待 writer，path replacement 也不能造成“检查 A、读取 B”。该行为由互斥 `go:build` 文件限定到已验证的平台；其他平台暂用普通 `Open` 保持包可构建，仍在打开成功后校验 regular-file，但不承诺无 writer FIFO 的非阻塞打开，也不扩展第一阶段的平台支持范围。本次返回页包含非法 UTF-8 时形成 call-local error，不使用 replacement character；未返回内容不为整文件编码判断而额外扫描。
 - 有界性：选中单行超过 50 KiB 时立即报错并停止读取，不 drain 剩余行；offset 跳过的任一单行也受相同限制，不能用 seek-by-line 绕过边界。参数/path 上限同时约束标准库错误可能回显的模型输入，使失败结果也保持有界。`read` 无可变 call state，依赖 `os.Root` 的并发安全并声明 `CanRunParallel=true`。
 - Pi 分歧：冻结 Pi 的默认 operations 使用 `fsAccess(R_OK)` 后直接 `fsReadFile`，没有 regular-file/FIFO 校验、nonblocking open 或相应 FIFO 测试；因此它不是用 pi-go 的 opened-handle 方案解决该问题。冻结 Pi 还允许绝对路径和可清理的 `..`、整文件读入后 `split/join`、非法 UTF-8 replacement、总行数提示、图片/UI/remote operations，并在首行超限时提示 bash fallback。pi-go 第一期选择 root containment、实际 handle 校验、macOS/Linux FIFO 非阻塞拒绝、精确文本视图和流式有界输出，不移植这些能力，也不建议通过 bash 绕过文件工具边界。
 - 原因：Agent 后续会把 read result 直接写入 transcript，并用其中的原文驱动 exact edit；路径、内容、错误和并发行为都必须在进入模型前可预测、有界且与磁盘对象一致。只抽取已有真实消费者的聚焦 helper，避免为尚未讨论的工具建立猜测性接口。
@@ -248,8 +248,19 @@
 - 日期：2026-07-18
 - 决定：具体工具分别位于 `internal/coding/tools/read`、`write`，后续已经确认的 `edit`、`bash` 实现时沿用同一布局，但不提前创建空 package。每个 package 对外提供自己的 `Tool` 与 `New(*os.Root)`；包内参数、结果和 helper 使用短而准确的名称，不再用工具名前缀解决同包冲突。
 - 文件边界：模型协议与编排放在 `tool.go`；只有职责独立时才拆出分页、平台打开等实现文件。测试按模型协议、workspace boundary 和具体平台对象分组；同一工具可使用自己的 `helpers_test.go`，但测试 helper 不进入生产共享 package，也不跨工具 package 隐式共享。跨工具测试只通过公开构造器和可观察结果组合工具。
-- 共享 package 边界：`internal/coding/tools/toolargs` 只保存 coding tools 已复用的严格 JSON 参数解码；`internal/coding/tools/fileutil` 只保存 workspace-relative path 和普通文件替换原语。它们暂不上移 `internal/agent`：Agent 层只拥有 `Tool.Execute(ctx, json.RawMessage)` 契约，当前没有使用 decoder；只有出现非 coding 工具复用同一契约，并确认它是 Agent 工具实现的稳定公共责任时，才讨论上移。read 分页、输出格式、平台 candidate open 与测试 fixture 均保留在拥有它们的 package。
+- 共享 package 边界：`internal/coding/tools/toolargs` 只保存 coding tools 已复用的严格 JSON 参数解码；`internal/coding/tools/fileutil` 保存 workspace-relative path、opened-handle regular-file 校验和普通文件替换提交。它们暂不上移 `internal/agent`：Agent 层只拥有 `Tool.Execute(ctx, json.RawMessage)` 契约，当前没有使用 decoder 或文件原语；只有出现非 coding 工具复用同一契约，并确认它是 Agent 工具实现的稳定公共责任时，才讨论上移。read 分页、edit 匹配策略、模型结果和测试 fixture 均保留在拥有它们的 package。
 - 修正原因：只实现 `read` 时，扁平 package 尚未显露足够拆分证据；加入 `write` 后已经需要工具名前缀、混合不同工具测试，并出现 `write_test.go` 调用 `read_test.go` helper 的隐式依赖。此前“没有证据继续拆 package”的结论因此失效；按工具拆包让未来 `edit`、`bash` 加入时保持依赖和文件责任清晰，同时不引入 speculative interface 或空扩展点。
+
+- 第二次修正：只有 `read` 使用 nonblocking candidate open 时，平台文件保留在 `read` package 符合最小共享原则；`edit` 加入后也必须在可能阻塞的 FIFO 打开之后校验实际 handle，第二个真实消费者已经成立，因此将聚焦的 `OpenRegularFile` 与互斥平台 open 文件迁入 `fileutil`。这不是建立通用 filesystem abstraction，具体分页和匹配仍不共享。
+
+### D40. edit 保留多段原文件匹配，但第一期只执行精确替换
+
+- 日期：2026-07-18
+- 模型协议：输入为 workspace-relative `path` 和非空 `edits[]`，每项使用 `oldText`/`newText`；`oldText` 非空且必须在原始文件中恰好出现一次，`newText` 可以为空。全部位置都基于同一原文件快照，重叠区域拒绝；只有所有项通过后才构造完整新内容，因此任一失败不会部分应用。目标必须是已经存在的 UTF-8 regular file，成功结果只返回规范化路径和 block count。
+- 提交与调度：先固定 resolved parent，再用共享 `OpenRegularFile` 读取实际 handle，并通过 `ReplaceRegularFile` 在同一 parent root 内提交完整替换。最终 symlink/特殊文件、取消和 rename commit point 沿用 D38；`edit` 保持默认串行屏障，不复制冻结 Pi 的进程级 per-path mutation queue。
+- Pi 证据与分歧：冻结 Pi commit 的主协议同样是 `edits[]`，所有项在原文件上匹配、要求唯一且不重叠，并在写入前完成整组校验；但其 exact 失败后会进行空白、Unicode 与行结束符 fuzzy normalization，还兼容旧单编辑参数和字符串化 `edits`，生成 TUI preview/diff/patch，支持可替换 operations，并由 mutation queue 后直接 `writeFile`。pi-go 第一期不移植这些扩展。
+- fuzzy 延后原因：精确失败保留原文件并允许模型重新读取恢复，模糊误匹配却可能提交非预期修改。normalization 后唯一性、offset 映射、原字节保留、CRLF/BOM 和多编辑组合需要单独设计及大量测试；学习者确认它是出现真实需求后的一次独立工作，不能因为冻结 Pi 已实现就顺带加入当前 exact mutation contract。
+- 选择原因：`edits[]` 是冻结源码已经证明的核心可观察协议，保留它避免先建立马上废弃的单编辑 schema；fuzzy、UI、remote operations 和额外队列则没有第一期消费者。这个边界同时满足 semantic port、当前计划的“精确且可验证”以及不为未发现需求过度设计的约束。
 
 ## 变更记录
 
@@ -285,3 +296,6 @@
 - 2026-07-18：学习者确认 `write` 只负责普通文件完整内容，其他文件系统对象由 bash 显式处理；完成固定 parent root、同目录临时文件替换、最终 symlink/特殊文件拒绝、取消清理、UTF-8 byte count 和 outside-canary 竞态测试。
 - 2026-07-18：加入 `write` 后重新审查 coding tools 结构，学习者确认按工具拆为 `read`/`write` 子 package；私有 helper 去掉多余工具前缀，测试 helper 不再跨工具隐式共享，并记录共享 package 只接纳已证明复用的责任。
 - 2026-07-18：学习者重新审查参数解码归属，确认暂不因为潜在通用性上移到 `internal/agent`；集中 `utils` 拆为 coding-owned `toolargs` 与 `fileutil`，待出现真实跨领域消费者后再讨论上移。
+- 2026-07-18：重新核对冻结 Pi 后纠正“单个精确替换”的课程预览；学习者选择保留 `edits[]`、原文件匹配、唯一性、overlap 与全有或全无，但第一期不引入 fuzzy fallback。
+- 2026-07-18：学习者确认 fuzzy matching 涉及 normalization、位置映射和大量组合测试，应在真实需求出现后作为独立工作推进；代码和文档必须保留该延后原因。加入 `edit` 同时让 opened-handle regular-file 校验形成第二个真实消费者，因此从 `read` 迁入聚焦的 `fileutil` 原语。
+- 2026-07-18：`edit` 完成测试先行实现和审查；多段原文件匹配、唯一性、overlap、失败不落盘、普通文件替换、workspace/symlink/FIFO 边界、取消和 read 可见性测试通过。审查将重复 occurrence 检测收敛为最多寻找两个位置，避免为非唯一诊断扫描全部高度重复内容。

@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-实现中；`read` 子阶段已经完成并提交，`write` 子阶段的设计、代码、测试和文档已经完成，下一步在学习者确认后进入 `edit`。
+实现中；`read` 子阶段已经完成并提交，`write` 与 `edit` 子阶段的设计、代码、测试和文档已经完成；下一步在学习者确认后进入 `bash`。
 
 开课记录：第 04 课已经完成、提交并 push 到 `main`。学习者确认第 05 课主要进入具体 Tool 实现，并要求按 `read`、`write`、`edit`、`bash` 一个个讲解和推进；本课先对齐共同 Tool 契约与 workspace 所有权，再逐个完成解释、讨论、实现和测试。
 
@@ -146,6 +146,30 @@ Successfully wrote 7 bytes to nested/hello.txt
 
 最初只实现 `read` 时，扁平 `tools` package 尚未形成明确冲突；加入 `write` 后重新按完整课程结构审查，已经出现三个具体信号：工具私有符号需要 `read`/`write` 前缀才能共存、不同工具的协议与平台测试混在同一 package、`write_test.go` 还隐式调用 `read_test.go` 的 helper。学习者确认后将工具拆为 `tools/read` 与 `tools/write` 子 package，构造 API 收敛为各包的 `New`，私有 helper 去掉工具名前缀；测试 helper 只在所属工具 package 内共享，`write → read` 只通过两个工具的公开行为做集成验证。后续 `edit`、`bash` 遵循同一布局，但不提前创建空 package。
 
-这次修正不是按行数机械拆分：`read/page.go`、按平台行为命名的 `open_nonblocking.go`/`open_portable.go`、模型协议 `tool.go` 各自承担独立责任；FIFO 专属测试也使用 `fifo_test.go`，而不是笼统的 `nonregular_test.go`。依赖保持为 `read/write -> toolargs + fileutil`，工具 package 之间没有生产依赖；`toolargs` 只保存 coding tools 当前共用的严格参数解码，`fileutil` 只保存 workspace path 与普通文件替换原语。两者都不接纳 read 分页、结果格式或测试 helper，也不引入 filesystem interface、base tool、registry 或尚未需要的 `edit`/`bash` 空 package。
+这次修正不是按行数机械拆分：在 `write` 子阶段当时，`read/page.go`、按平台行为命名的 `read/open_nonblocking.go`/`open_portable.go`、模型协议 `tool.go` 各自承担独立责任；FIFO 专属测试也使用 `fifo_test.go`，而不是笼统的 `nonregular_test.go`。当时依赖保持为 `read/write -> toolargs + fileutil`，工具 package 之间没有生产依赖；`toolargs` 只保存 coding tools 当前共用的严格参数解码，`fileutil` 只保存 workspace path 与普通文件替换原语。加入 `edit` 后 opened-handle regular-file 打开形成第二个真实消费者，因此平台 open 文件随后按 05-C 的记录迁入 `fileutil`；read 分页、结果格式和测试 helper 仍未进入共享 package，也没有引入 filesystem interface、base tool、registry 或尚未需要的 `bash` 空 package。
 
 按工具拆包并将共享责任收敛为 `toolargs`/`fileutil` 后，`gofmt`、`go test ./...`、`go vet ./...`、`go test -race ./...` 与 `git diff --check` 全部通过；read/final/ancestor symlink swap 测试分别重复 20 次、取消清理测试重复 100 次也通过。简化与代码审查没有剩余 actionable finding。`write` 子阶段实现已经完成，仍需学习者确认后才进入 `edit`。
+
+## 05-C：`edit` 设计讨论
+
+最初的课程预览把冻结 Pi 的 `edit` 简化成了单个唯一精确替换；重新核对固定 commit 后确认该表述不完整。冻结实现的模型协议是 `path + edits[]`，每项包含 `oldText` 与 `newText`。所有编辑都在同一份原文件上定位，每个 `oldText` 必须唯一，区域不能重叠；任一项失败都不会写入，成功时再统一应用。冻结 Pi 的运行时还会在 exact match 失败后进行 fuzzy normalization，包括行结束符、尾部空格、Unicode compatibility form、智能引号、破折号和特殊空格，并保留 BOM/原行结束符。它通过 per-path mutation queue 串行化同一文件的自身写操作，最后直接调用 `writeFile`，另为 TUI 生成 preview、display diff 和 unified patch。
+
+学习者选择保留已经由冻结源码证明的多段协议，但把 mutation 语义收敛为精确且可验证：
+
+- 输入使用 `path + edits[]`，每项保持 Pi 的模型字段 `oldText`/`newText`；`edits` 至少一项，`oldText` 非空，`newText` 可以为空以删除目标块。严格 JSON object、未知字段拒绝和 workspace-relative path 继续复用 `toolargs`/`fileutil`。
+- 文件必须已经存在且是 UTF-8 regular file；`edit` 不创建父目录或新文件。所有 `oldText` 按原始 UTF-8 内容逐字节匹配，包含空白和行结束符，并分别要求恰好出现一次。先完成零/多匹配与 overlap 校验，再构造整份新内容，因此失败不会产生部分编辑。
+- fuzzy matching 明确不在本子阶段实现。精确匹配失败是文件不变且可由模型重新 `read` 后恢复的 false negative；模糊误匹配则可能把猜测结果真正提交。冻结 Pi 的 fuzzy 算法还涉及 normalization 后的唯一性、offset 映射、未修改字节保留、CRLF/BOM 和多编辑组合测试，学习者确认它应在出现真实需求后作为一次独立且工作量较大的任务设计、实现和验证，不能通过普通重构顺带加入。
+- `edit` 先固定 resolved parent，读取并校验实际 opened handle，再复用 `ReplaceRegularFile` 在同一 parent root 中提交完整结果；因此拥有与 `write` 相同的最终 symlink、临时文件、取消和 rename commit point 语义。成功只返回替换块数和规范化相对路径，不回显文件内容，也不移植 TUI preview/diff metadata。
+- `edit` 保持 `CanRunParallel=false`。第一期只有一个 active task，Agent 已把 `write`、`edit`、`bash` 作为串行屏障，因此不复制冻结 Pi 的进程级 mutation queue；这不声称能检测 workspace 外部参与者的并发修改。
+
+加入 `edit` 后，nonblocking candidate open 加 opened-handle regular-file 校验第一次出现第二个真实消费者。此前只有 `read` 时将平台文件留在 `read` 包内是合理的；现在该能力迁入 `internal/coding/tools/fileutil`，由 `read` 与 `edit` 共用。这个修正只共享已经相同的 workspace 文件原语，不建立 filesystem interface、远程 operations 或含义宽泛的 `utils` package。
+
+## 05-C：`edit` 实现记录
+
+本子阶段新增 `internal/coding/tools/edit/tool.go` 负责 schema、参数与文件编排，`apply.go` 负责基于原文件的唯一匹配、overlap 检查和一次性内容构造；模型协议和匹配算法没有堆入同一个大文件。测试按公开协议、workspace/symlink boundary 和 macOS/Linux FIFO 行为拆分，覆盖多段成功、原文件匹配、删除、permission 保留、零/多匹配、overlap、无变化、全有或全无、严格参数、非法 UTF-8、预取消、read 可见性、特殊文件和 outside-canary 交换。
+
+`apply.go` 在 exact matcher 旁保留英文原因注释：冻结 Pi 虽有 fuzzy fallback，pi-go Phase 1 有意让不完全匹配安全失败；后续只有经过独立设计和测试才能扩展该 mutation contract。`fileutil/open_*.go` 也保留英文平台注释，说明 `O_NONBLOCK` 只在已有 FIFO 测试的 Darwin/Linux 生效，portable fallback 不扩大第一期平台承诺。
+
+实现审查发现最初为诊断精确重复次数而扫描全部重叠 occurrence，会在高度重复的大文件上产生不必要的放大工作；唯一性只需要确认第二个位置，最终实现因此在首个 match 后最多再搜索一次，并用 `aaa`/`aa` 测试锁定重叠 occurrence 也必须判为不唯一。这个收敛保留零/多匹配诊断，却不为模型无用的精确计数持续扫描整份重复内容。
+
+最终验证中，`make check` 完成 `go fmt ./...`、`go vet ./...`、`go test ./...` 和 `golangci-lint run ./...`，lint 为 0 issues；`make race` 全部通过。`edit` package 连续运行 20 次通过，Windows cross-build 也验证 portable open fallback 仍可构建。简化和代码审查修复了上述重复扫描问题，没有剩余 actionable finding；`edit` 子阶段完成，仍需学习者确认理解后才进入 `bash`。

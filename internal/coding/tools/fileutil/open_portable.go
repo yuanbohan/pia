@@ -1,6 +1,6 @@
 //go:build !darwin && !linux
 
-package read
+package fileutil
 
 import "os"
 

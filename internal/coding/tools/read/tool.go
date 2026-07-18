@@ -87,7 +87,7 @@ func (r *Tool) Execute(ctx context.Context, rawArguments json.RawMessage) (strin
 		return "", fmt.Errorf("read: %w", err)
 	}
 
-	file, err := openCandidate(r.root, rootPath)
+	file, err := fileutil.OpenRegularFile(r.root, rootPath)
 	if err != nil {
 		return "", fmt.Errorf("read %q: open: %w", displayPath, err)
 	}
@@ -97,16 +97,6 @@ func (r *Tool) Execute(ctx context.Context, rawArguments json.RawMessage) (strin
 			_ = file.Close()
 		}
 	}()
-
-	// Validate the opened handle, rather than a prior path lookup, so a path
-	// replacement cannot make us validate one object and read another.
-	info, err := file.Stat()
-	if err != nil {
-		return "", fmt.Errorf("read %q: inspect opened file: %w", displayPath, err)
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("read %q: target is not a regular file", displayPath)
-	}
 
 	offset := 1
 	if input.Offset != nil {
