@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-待理解确认。
+已提交。
 
 开课记录：第 03 课已于 2026-07-17 完成并提交到 `main`。学习者随后明确要求继续推动课程，并确认第 04 课采用 OpenAI-compatible 方式接入 DeepSeek，参考冻结 Pi 的 Provider 抽象。课程先讲清 Provider/API 分层、消息回放和 SSE settlement，再进入实现。
 
@@ -211,4 +211,4 @@ go test -tags=integration ./internal/ai/provider/deepseek -run TestDeepSeekSmoke
 
 ## 当前实现结果
 
-本课代码与离线验证已完成，当前没有阻塞设计问题；状态进入“待理解确认”。根据课程规则，在学习者确认前不进入第 05 课，也不会为本课自动 commit 或 push。
+本课代码与离线验证已完成。学习者随后确认继续课程并明确开始第 05 课，因此第 04 课完成理解确认；目录重构、证据化备注规则和 Provider 实现已经按学习者要求提交并 push 到 `main`。
