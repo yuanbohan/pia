@@ -45,6 +45,22 @@ Phase 1 is a DeepSeek-first, headless coding agent for one workspace and one act
 - Make DeepSeek data egress explicit: operators must choose a workspace whose selected contents and tool results may be sent to the Provider. Phase 1 shows a warning but has no approval flow.
 - Do not add TUI behavior to core packages.
 
+## Architecture and Maintainability
+
+- Do not over-design. Do not add abstractions, configuration, extension points, compatibility layers, or error branches for hypothetical consumers or failure modes that have not been established by the current lesson, verified source behavior, tests, or an explicit project decision.
+- Prefer the smallest design that fully satisfies the settled behavior, but do not use “small scope” as a reason to weaken ownership, cancellation, security, or dependency-direction contracts that are already known.
+- Before adding a new module, review the current project structure as a whole: dependency direction, package ownership, filenames, file cohesion, and how the new responsibility will interact with later confirmed work. Do not assume the layout chosen for an earlier, smaller implementation is still the clearest layout.
+- If that review indicates a package move, package split, directory restructuring, meaningful file rename, or other structural refactor, present the evidence, intended boundaries, migration impact, and proposed layout to the learner before making the structural change.
+- Keep each package centered on one cohesive responsibility and keep dependencies pointing inward according to the project's established architecture. Do not use a package as a dumping ground for unrelated helpers merely because it already exists.
+- Keep each file focused on a coherent part of its package responsibility. Split a file when independent protocol, orchestration, platform, persistence, or utility concerns have accumulated; do not split files solely to meet an arbitrary line-count target.
+- Put shared code in a common package only after current, concrete consumers establish the shared responsibility. A generic name such as `utils` does not justify moving unrelated code together; keep feature-specific behavior beside its feature until reuse and ownership are proven.
+- Prefer consumer-owned, narrow interfaces and concrete types. Introduce an interface only when a current boundary needs substitution, testing, or dependency inversion; do not create speculative interfaces for possible future implementations.
+- Make resource ownership and lifecycle explicit. Constructors validate required dependencies; the creator closes owned resources; borrowed resources are not closed by consumers; every goroutine, stream, file, timer, and child process has a deterministic settlement path.
+- Design mutations so failure and cancellation have explicit observable semantics. Avoid publishing partial state, clean up uncommitted temporary resources, preserve committed results after the commit point, and document any intentionally retained side effects.
+- Keep model-visible and operator-visible outputs bounded and free of unnecessary secrets or host details. Wrap errors with useful operation context while preserving their cause for `errors.Is` and `context.Cause` checks.
+- Treat concurrency as an explicit contract, not an implementation accident. Avoid package-level mutable state, state whether instances are safe for concurrent use, and add race/cancellation coverage whenever shared state or goroutines are introduced.
+- During review, check both local clarity and architectural fit: package placement, dependency direction, API surface, file responsibility, error/cleanup paths, cancellation, concurrency, test seams, and whether a simpler evidence-backed design can replace newly added machinery.
+
 ## Go Quality
 
 - Prefer idiomatic Go behavior over mechanical TypeScript translation.

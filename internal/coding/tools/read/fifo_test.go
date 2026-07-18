@@ -1,6 +1,6 @@
 //go:build darwin || linux
 
-package tools_test
+package read_test
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func TestReadRejectsFIFOWithoutWaitingForAWriter(t *testing.T) {
 	if err := syscall.Mkfifo(filepath.Join(rootPath, "events.fifo"), 0o600); err != nil {
 		t.Fatalf("Mkfifo() error = %v", err)
 	}
-	read := newRead(t, rootPath)
+	read := newTool(t, rootPath)
 
 	type outcome struct {
 		content string

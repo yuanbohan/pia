@@ -1,17 +1,17 @@
-package utils_test
+package fileutil_test
 
 import (
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding/tools/utils"
+	"github.com/yuanbohan/pi-go/internal/coding/tools/fileutil"
 )
 
 func TestNormalizeWorkspacePath(t *testing.T) {
 	t.Parallel()
 
-	rootPath, displayPath, err := utils.NormalizeWorkspacePath("dir/./file.go")
+	rootPath, displayPath, err := fileutil.NormalizeWorkspacePath("dir/./file.go")
 	if err != nil {
 		t.Fatalf("NormalizeWorkspacePath() error = %v", err)
 	}
@@ -35,7 +35,7 @@ func TestNormalizeWorkspacePath(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			_, _, err := utils.NormalizeWorkspacePath(test.path)
+			_, _, err := fileutil.NormalizeWorkspacePath(test.path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("NormalizeWorkspacePath() error = %v, want substring %q", err, test.want)
 			}

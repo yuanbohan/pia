@@ -1,4 +1,7 @@
-package utils
+// Package fileutil contains workspace-file primitives shared by coding tools.
+// Model-facing schemas and tool-specific policies remain in their owning tool
+// packages.
+package fileutil
 
 import (
 	"fmt"

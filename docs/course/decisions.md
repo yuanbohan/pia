@@ -226,12 +226,30 @@
 ### D37. 文件工具共享 Workspace root；read 使用有界完整行分页
 
 - 日期：2026-07-17
-- 共同边界：`internal/coding.Workspace` 拥有规范化 host path 和一个共享 `*os.Root`；文件工具只借用 root，组合层在全部调用收敛后关闭。严格 JSON object 解码和 workspace-relative path 规范化归入 `internal/coding/tools/utils`，具体分页、编码和输出语义留在 `read`。路径最多 4096 bytes，拒绝绝对/逃逸路径以及任何 `..` component；不能先 clean `alias/../file`，因为较早 component 是 symlink 时会改变实际目标。
+- 共同边界：`internal/coding.Workspace` 拥有规范化 host path 和一个共享 `*os.Root`；文件工具只借用 root，组合层在全部调用收敛后关闭。严格 JSON object 解码归入 `internal/coding/tools/toolargs`，workspace-relative path 规范化归入 `internal/coding/tools/fileutil`，具体分页、编码和输出语义留在 `internal/coding/tools/read`。路径最多 4096 bytes，拒绝绝对/逃逸路径以及任何 `..` component；不能先 clean `alias/../file`，因为较早 component 是 symlink 时会改变实际目标。
 - `read` 契约：参数体最多 8192 bytes，输入为 `path`、可选 1-based `offset` 和可选 `limit`；同一页最多 2000 个完整行或 50 KiB 实际内容。完整行保留终止换行，尾部换行不产生空 continuation page。结果固定返回规范化相对路径、实际行范围、内容与 EOF/next-offset 状态，不暴露 host absolute path，也不为总行数继续扫描整文件。
 - 文件与编码：所有 I/O 通过 root-relative handle；macOS/Linux 以 nonblocking read-only 方式取得 candidate，再对实际 opened handle 校验 regular-file，因此 FIFO 不会在校验前等待 writer，path replacement 也不能造成“检查 A、读取 B”。该行为由互斥 `go:build` 文件限定到已验证的平台；其他平台暂用普通 `Open` 保持包可构建，仍在打开成功后校验 regular-file，但不承诺无 writer FIFO 的非阻塞打开，也不扩展第一阶段的平台支持范围。本次返回页包含非法 UTF-8 时形成 call-local error，不使用 replacement character；未返回内容不为整文件编码判断而额外扫描。
 - 有界性：选中单行超过 50 KiB 时立即报错并停止读取，不 drain 剩余行；offset 跳过的任一单行也受相同限制，不能用 seek-by-line 绕过边界。参数/path 上限同时约束标准库错误可能回显的模型输入，使失败结果也保持有界。`read` 无可变 call state，依赖 `os.Root` 的并发安全并声明 `CanRunParallel=true`。
 - Pi 分歧：冻结 Pi 的默认 operations 使用 `fsAccess(R_OK)` 后直接 `fsReadFile`，没有 regular-file/FIFO 校验、nonblocking open 或相应 FIFO 测试；因此它不是用 pi-go 的 opened-handle 方案解决该问题。冻结 Pi 还允许绝对路径和可清理的 `..`、整文件读入后 `split/join`、非法 UTF-8 replacement、总行数提示、图片/UI/remote operations，并在首行超限时提示 bash fallback。pi-go 第一期选择 root containment、实际 handle 校验、macOS/Linux FIFO 非阻塞拒绝、精确文本视图和流式有界输出，不移植这些能力，也不建议通过 bash 绕过文件工具边界。
-- 原因：Agent 后续会把 read result 直接写入 transcript，并用其中的原文驱动 exact edit；路径、内容、错误和并发行为都必须在进入模型前可预测、有界且与磁盘对象一致。只抽取已经有多个真实消费者的 utils，避免为尚未讨论的工具建立猜测性接口。
+- 原因：Agent 后续会把 read result 直接写入 transcript，并用其中的原文驱动 exact edit；路径、内容、错误和并发行为都必须在进入模型前可预测、有界且与磁盘对象一致。只抽取已有真实消费者的聚焦 helper，避免为尚未讨论的工具建立猜测性接口。
+
+### D38. write 只替换普通文件，并在固定父目录内原子提交
+
+- 日期：2026-07-18
+- 能力边界：`write(path, content)` 创建或完整覆盖普通文件并递归创建父目录；空内容合法，不增加计划未要求的 content 上限。目录、最终 symlink、FIFO、socket 和 device 都拒绝，创建或直接操作这些对象属于 bash 的显式能力。workspace 内 ancestor symlink 可以使用，逃逸或 dangling ancestor 由 `os.Root` 拒绝。
+- 提交边界：先以 `root.OpenRoot(parent)` 固定实际父目录，再在该 root 内 `Lstat` 最终 component、创建随机 `O_EXCL` 临时文件、写完并关闭，最后以同目录 rename 提交。这样 ancestor swap 不会让临时文件、目标和清理落入不同目录；最终 symlink 在检查时直接拒绝，在检查后才出现则由 rename 替换 link entry 而不是跟随 referent。rename 前失败或取消删除临时文件并保留原目标，父目录创建不回滚；rename 后不再因 context 取消反报失败。
+- 可观察语义：替换保证运行时读者只看到旧内容或完整新内容，不通过 `fsync` 承诺 crash durability。新文件 `0666`、父目录 `0777` 并服从 umask；覆盖保留九个 permission bits，但新 inode 不保留原 hard-link relationship、owner、ACL、extended attributes 或特殊 mode bits。成功文本只返回规范化相对路径和 Go string 的实际 UTF-8 byte length，不回显 content。
+- Pi 分歧：冻结 Pi 递归建目录后直接 `fsWriteFile`，会跟随最终 symlink、直接截断目标，并用全局 per-path mutation queue；其成功文本把 JavaScript UTF-16 `content.length` 标作 bytes。pi-go 使用 Agent serial barrier、`os.Root`、普通文件限制和替换提交，不复制额外 mutation queue，并修正 byte count。
+- 共享能力：同目录替换提交进入 `internal/coding/tools/fileutil`，因为计划已经明确 `write` 与后续 `edit` 共用该责任；模型协议、父目录策略和结果格式仍留在 `internal/coding/tools/write`。`internal/coding/tools/toolargs` 中的 decoder 只截断可能回显模型输入的超长诊断，不限制合法 write content。
+- 原因：完整覆盖是模型需要的原子文件能力，不应隐式获得 symlink/特殊文件语义；固定 parent root 和 rename 同时满足 workspace boundary、取消前不暴露半写目标，以及后续 edit 可复用的提交契约。
+
+### D39. 每个 coding tool 使用独立子 package
+
+- 日期：2026-07-18
+- 决定：具体工具分别位于 `internal/coding/tools/read`、`write`，后续已经确认的 `edit`、`bash` 实现时沿用同一布局，但不提前创建空 package。每个 package 对外提供自己的 `Tool` 与 `New(*os.Root)`；包内参数、结果和 helper 使用短而准确的名称，不再用工具名前缀解决同包冲突。
+- 文件边界：模型协议与编排放在 `tool.go`；只有职责独立时才拆出分页、平台打开等实现文件。测试按模型协议、workspace boundary 和具体平台对象分组；同一工具可使用自己的 `helpers_test.go`，但测试 helper 不进入生产共享 package，也不跨工具 package 隐式共享。跨工具测试只通过公开构造器和可观察结果组合工具。
+- 共享 package 边界：`internal/coding/tools/toolargs` 只保存 coding tools 已复用的严格 JSON 参数解码；`internal/coding/tools/fileutil` 只保存 workspace-relative path 和普通文件替换原语。它们暂不上移 `internal/agent`：Agent 层只拥有 `Tool.Execute(ctx, json.RawMessage)` 契约，当前没有使用 decoder；只有出现非 coding 工具复用同一契约，并确认它是 Agent 工具实现的稳定公共责任时，才讨论上移。read 分页、输出格式、平台 candidate open 与测试 fixture 均保留在拥有它们的 package。
+- 修正原因：只实现 `read` 时，扁平 package 尚未显露足够拆分证据；加入 `write` 后已经需要工具名前缀、混合不同工具测试，并出现 `write_test.go` 调用 `read_test.go` helper 的隐式依赖。此前“没有证据继续拆 package”的结论因此失效；按工具拆包让未来 `edit`、`bash` 加入时保持依赖和文件责任清晰，同时不引入 speculative interface 或空扩展点。
 
 ## 变更记录
 
@@ -261,6 +279,9 @@
 - 2026-07-17：学习者确认用标准库 `net/http` 实现已讲解的完整消息映射，并将共享线协议包定名为 Go 惯例下的完整名称 `provider/openaicompatible`；不要求沿用 Pi 的 `openai-completions` 命名。
 - 2026-07-17：学习者确认 pull-based SSE parser、finish reason 加 `[DONE]` 双 settlement、tool-call 分片边界、零自动重试、64 KiB HTTP 错误体、1 MiB SSE event 和最小 usage 语义；第 04 课进入实现。
 - 2026-07-17：学习者明确要求第 04 课不为没有真实 DeepSeek/Pi 证据的 3xx 增加特殊逻辑或专门测试；Provider 保持标准 `http.Client` 行为，redirect 影响记录为后续独立验证项，“零自动重试”只表示 Provider 不自行 retry。
-- 2026-07-17：学习者开始第 05 课并确认 `read` 的 offset/limit、非法 UTF-8 error 与固定模型输出；共享 JSON/path 能力进入 `internal/coding/tools/utils`，具体读取语义保留在 `read`。
+- 2026-07-17：学习者开始第 05 课并确认 `read` 的 offset/limit、非法 UTF-8 error 与固定模型输出；共享 JSON/path 能力先进入 coding tools 的集中辅助 package，具体读取语义保留在 `read`。
 - 2026-07-17：`read` 子阶段完成测试先行实现和审查修复；workspace root、non-regular/FIFO、symlink/`..`、分页/双上限、错误有界、取消和并发测试通过。学习者随后确认理解并要求本地提交，下一步进入 `write`。
 - 2026-07-17：核对冻结 Pi 后确认其默认 `read` 没有 regular-file/FIFO 特殊处理；pi-go 的 `O_NONBLOCK` 加 opened-handle 校验是有意增强。课程同时修正 `go:build` 理由：当前只将该保证开放给已有测试的 macOS/Linux，而不是声称其他 Go 平台一定缺少该常量。代码注释统一使用英文，课程和其他文档语言不作限制。
+- 2026-07-18：学习者确认 `write` 只负责普通文件完整内容，其他文件系统对象由 bash 显式处理；完成固定 parent root、同目录临时文件替换、最终 symlink/特殊文件拒绝、取消清理、UTF-8 byte count 和 outside-canary 竞态测试。
+- 2026-07-18：加入 `write` 后重新审查 coding tools 结构，学习者确认按工具拆为 `read`/`write` 子 package；私有 helper 去掉多余工具前缀，测试 helper 不再跨工具隐式共享，并记录共享 package 只接纳已证明复用的责任。
+- 2026-07-18：学习者重新审查参数解码归属，确认暂不因为潜在通用性上移到 `internal/agent`；集中 `utils` 拆为 coding-owned `toolargs` 与 `fileutil`，待出现真实跨领域消费者后再讨论上移。

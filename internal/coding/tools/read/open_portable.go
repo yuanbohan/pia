@@ -1,10 +1,10 @@
 //go:build !darwin && !linux
 
-package tools
+package read
 
 import "os"
 
-func openRegularFileCandidate(root *os.Root, path string) (*os.File, error) {
+func openCandidate(root *os.Root, path string) (*os.File, error) {
 	// FIFO nonblocking-open semantics are not yet verified on this target, so use
 	// the portable fallback to preserve buildability. This does not expand Phase 1
 	// support beyond Darwin and Linux: a FIFO with no writer has no nonblocking

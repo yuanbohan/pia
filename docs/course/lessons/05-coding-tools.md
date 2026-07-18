@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-实现中；`read` 子阶段的代码、测试和文档已经完成并经学习者确认，下一步进入 `write` 的讲解与设计讨论。
+实现中；`read` 子阶段已经完成并提交，`write` 子阶段的设计、代码、测试和文档已经完成，下一步在学习者确认后进入 `edit`。
 
 开课记录：第 04 课已经完成、提交并 push 到 `main`。学习者确认第 05 课主要进入具体 Tool 实现，并要求按 `read`、`write`、`edit`、`bash` 一个个讲解和推进；本课先对齐共同 Tool 契约与 workspace 所有权，再逐个完成解释、讨论、实现和测试。
 
@@ -51,7 +51,7 @@
 
 因此第 05 课不会再设计第二套 Tool 接口。`internal/coding` 拥有 workspace 生命周期，文件工具共享同一个已打开的 `*os.Root`；工具不关闭 root，创建它的组合层负责最终关闭。`bash` 的 cwd 如何从同一个 Workspace 派生留到其小节确认，不把“持有 root”误写成命令 sandbox。`read` 可以并发使用该 root，`write`、`edit` 和 `bash` 不声明并行安全。
 
-已经确认会被多个文件工具复用的严格 JSON object 解码和 workspace-relative path 规范化放入 `internal/coding/tools/utils`。分页、完整行扫描、UTF-8 校验和结果格式仍留在 `read`，因为这些是读取协议而不是所有工具都共享的能力；非阻塞打开也留在 `read` 旁，因为它专门防止 FIFO 在完成 opened-handle 校验前阻塞。这样落实“通用能力进入 utils”的同时，不为尚未讨论的 `write`/`edit` 提前制造抽象。
+已经由 coding tools 实际复用的严格 JSON object 解码放入 `internal/coding/tools/toolargs`；workspace-relative path 规范化，以及 `write` 已建立且当前课程明确由 `edit` 复用的普通文件替换提交，放入 `internal/coding/tools/fileutil`。两者暂时都留在 `coding`：`agent.Tool` 只拥有原始参数的执行契约，Agent 循环本身并不使用具体解码 helper；在出现非 coding 工具复用同一严格解码契约前，不因为名字“通用”就提前上移。分页、完整行扫描、UTF-8 校验和结果格式仍留在 `read`，因为这些是读取协议；非阻塞打开也留在 `read` 旁，因为它专门防止 FIFO 在完成 opened-handle 校验前阻塞。每个模型工具使用独立子 package，避免为私有符号增加多余的 `read`/`write` 前缀；共享 package 也按参数协议与文件系统责任分开，而不是继续扩张含义模糊的 `utils`。
 
 ## 与冻结 Pi 的明确差别
 
@@ -97,10 +97,10 @@ Content:
 本子阶段新增：
 
 - `internal/coding/workspace.go`：规范化操作者选择的 workspace，并拥有一个共享 `*os.Root` 的生命周期；文件工具只借用 root，不负责关闭。
-- `internal/coding/tools/utils/arguments.go`：只接受一个 JSON object，拒绝未知字段和尾随 JSON。
-- `internal/coding/tools/utils/path.go`：统一限制 4096-byte workspace-relative path，拒绝绝对路径、逃逸路径和任意 `..` component，返回 OS-native path 与 slash-normalized 模型路径。
-- `internal/coding/tools/read.go`：实现 `read` schema、参数语义、regular-file 校验、流式分页、UTF-8 文本边界、稳定输出与 `CanRunParallel=true`。
-- 平台打开 helper 与 workspace/read/utils 测试：覆盖 macOS/Linux FIFO 非阻塞拒绝、symlink 边界和交换竞态、并发与取消。
+- `internal/coding/tools/toolargs/decode.go`：只接受一个 JSON object，拒绝未知字段和尾随 JSON，并限制可能包含模型输入的错误诊断。
+- `internal/coding/tools/fileutil/path.go`：统一限制 4096-byte workspace-relative path，拒绝绝对路径、逃逸路径和任意 `..` component，返回 OS-native path 与 slash-normalized 模型路径。
+- `internal/coding/tools/read/tool.go`：实现 `read` schema、参数语义、regular-file 校验、稳定输出与 `CanRunParallel=true`；`page.go` 保存流式分页和 UTF-8 文本边界，`open_nonblocking.go` 与 `open_portable.go` 明确区分已验证和可移植的打开策略。
+- `internal/coding/tools/read/*_test.go` 与 workspace/toolargs/fileutil 测试：按模型协议、分页、workspace boundary 和平台特殊文件拆分，覆盖 macOS/Linux FIFO 非阻塞拒绝、symlink 边界和交换竞态、并发与取消。
 
 关键实现理由保留在相邻代码注释中：
 
@@ -113,3 +113,39 @@ Content:
 测试先证明不存在实现时构建失败；实现后覆盖 schema/并行能力、稳定输出、CRLF 与终止换行、1-based offset/limit、2000 行和 50 KiB 边界、空文件、EOF、非法 UTF-8、非法参数、超长诊断、missing/non-regular/FIFO、internal/escaping/dangling symlink、symlink swap outside canary、预取消和同实例并发。实现审查额外发现并修复了巨型单行无界 drain、offset 绕过单行上限、`filepath.Clean` 改变 symlink 前 `..` 语义，以及 decoder 接受 `null` 的问题。
 
 验证结果：`go test ./...`、`go vet ./...`、`go test -race ./...` 和 `git diff --check` 全部通过。`read` 子阶段没有剩余 actionable review finding；学习者已经确认理解并明确要求形成独立本地 commit，本课整体继续进入 `write`。
+
+## 05-B：`write` 设计讨论
+
+冻结 Pi 的 `write` 接受 `path` 和 `content`，递归创建父目录后直接调用 Node `fsWriteFile`；已有测试只锁定写入内容和自动创建父目录。它允许相对/绝对路径，默认会跟随最终 symlink，覆盖时直接截断目标，并通过全局 file-mutation queue 串行化同一 resolved path。成功文本中的 `content.length` 是 JavaScript UTF-16 code-unit 数，却标记为 bytes，例如 `你好` 会报告 2 而不是 UTF-8 的 6 bytes。
+
+学习者确认 pi-go 不把目录、symlink、FIFO、socket 或 device 的创建混进 `write`。本工具只负责工作区内普通文件的完整内容创建或覆盖：
+
+- 目标不存在时创建普通文件，父目录不存在时递归创建；空内容合法，不增加没有计划证据的文件大小上限。
+- 已存在的普通文件通过同目录临时文件和 rename 替换，不直接截断模型当前可见的目标。
+- 最终 component 是 symlink、目录或其他特殊文件时拒绝；即使 symlink 已由 bash 创建，后续 `write` 也不会跟随它。创建或操作这些对象需要由 unsandboxed bash 显式完成。
+- 指向 workspace 内目录的 ancestor symlink 可以使用；逃逸或 dangling ancestor 仍由 `os.Root` 拒绝。模型结果展示输入规范化后的相对路径，不声称它是 host realpath。
+- `write` 继续保持 `CanRunParallel=false`，依赖 Agent 的串行屏障，不复制 Pi 的进程级 per-path mutation queue。
+
+替换提交只承诺运行期间的原子可见性：读者看到旧文件或完整新文件，不看到最终路径上的半写内容。它没有调用 file/directory `fsync`，因此不承诺断电或内核崩溃后的 durability。rename 前取消或失败会关闭并删除临时文件，原目标保持不变；已经创建的父目录不会回滚，因为删除目录会与 workspace 中的其他参与者竞争。rename 是 commit point，提交后的取消不再把已完成副作用报告成失败并诱导模型重试。
+
+新文件使用 `0666`、新目录使用 `0777`，两者都服从进程 umask；覆盖普通文件时保留已有的九个 permission bits。临时文件替换会产生新 inode，第一阶段不保留原 hard-link relationship，也不复制原文件 owner、ACL、extended attributes 或特殊 mode bits。成功结果不回显文件内容，只返回规范化路径和 `len(content)` 的实际 UTF-8 bytes：
+
+```text
+Successfully wrote 7 bytes to nested/hello.txt
+```
+
+## 05-B：`write` 实现记录
+
+本子阶段新增：
+
+- `internal/coding/tools/write/tool.go`：实现 schema、必填但可为空的 `content`、父目录创建、固定 parent root、普通文件替换和稳定成功文本。
+- `internal/coding/tools/fileutil/replace.go`：提供已经由 `write` 建立、且后续 `edit` 也需要的同目录替换提交；对最终 component 做 `Lstat`，用随机 `O_EXCL` 临时文件写完整内容，并在 context 仍有效时 rename。
+- `internal/coding/tools/write/*_test.go` 与共享 helper 测试：按模型协议、workspace boundary 和平台特殊文件拆分，覆盖新建/覆盖、空内容、大于 read 参数上限的内容、UTF-8 byte count、permission bits、参数错误、目录/symlink/FIFO、内部/逃逸 ancestor symlink、final/ancestor swap outside canary、取消清理以及 `write → read` 可见性。
+
+实现把 resolved parent 先通过 `root.OpenRoot` 固定下来，再只用 basename 创建临时文件和 rename。这样 ancestor symlink 在校验后被交换时，临时文件、目标和失败清理仍指向同一个已打开目录；最终 symlink 由 `Lstat` 拒绝，若它在检查后才出现，rename 替换的是 link directory entry，不会跟随 referent。共享 JSON decoder 同时把可能回显超长模型字段名的错误截为 512 bytes；因此 `write` 可以接受完整大内容，又不会让 malformed arguments 通过 error result 制造无界模型输出。
+
+最初只实现 `read` 时，扁平 `tools` package 尚未形成明确冲突；加入 `write` 后重新按完整课程结构审查，已经出现三个具体信号：工具私有符号需要 `read`/`write` 前缀才能共存、不同工具的协议与平台测试混在同一 package、`write_test.go` 还隐式调用 `read_test.go` 的 helper。学习者确认后将工具拆为 `tools/read` 与 `tools/write` 子 package，构造 API 收敛为各包的 `New`，私有 helper 去掉工具名前缀；测试 helper 只在所属工具 package 内共享，`write → read` 只通过两个工具的公开行为做集成验证。后续 `edit`、`bash` 遵循同一布局，但不提前创建空 package。
+
+这次修正不是按行数机械拆分：`read/page.go`、按平台行为命名的 `open_nonblocking.go`/`open_portable.go`、模型协议 `tool.go` 各自承担独立责任；FIFO 专属测试也使用 `fifo_test.go`，而不是笼统的 `nonregular_test.go`。依赖保持为 `read/write -> toolargs + fileutil`，工具 package 之间没有生产依赖；`toolargs` 只保存 coding tools 当前共用的严格参数解码，`fileutil` 只保存 workspace path 与普通文件替换原语。两者都不接纳 read 分页、结果格式或测试 helper，也不引入 filesystem interface、base tool、registry 或尚未需要的 `edit`/`bash` 空 package。
+
+按工具拆包并将共享责任收敛为 `toolargs`/`fileutil` 后，`gofmt`、`go test ./...`、`go vet ./...`、`go test -race ./...` 与 `git diff --check` 全部通过；read/final/ancestor symlink swap 测试分别重复 20 次、取消清理测试重复 100 次也通过。简化与代码审查没有剩余 actionable finding。`write` 子阶段实现已经完成，仍需学习者确认后才进入 `edit`。
