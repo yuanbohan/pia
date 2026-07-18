@@ -59,11 +59,11 @@ product_contract_source: ce-plan-bootstrap
 **Provider 与 coding 能力**
 
 - R8. 第一个真实 Provider 必须支持 DeepSeek SSE、reasoning content、tool calls、usage 和错误映射；非本地 endpoint 默认要求 HTTPS。
-- R9. coding runtime 必须提供 `read`、`write`、`edit`、`bash`；文件工具通过固定 workspace root 执行 root-relative I/O，bash 固定初始 cwd、使用最小环境并支持进程组取消、超时、输出截断和子进程回收。
+- R9. coding runtime 必须提供 `read`、`write`、`edit`、`bash`；文件工具通过固定 workspace root 执行 root-relative I/O。bash 每次从固定 workspace 启动新 shell，继承完整父进程环境，不提供 sandbox 或交互 stdin/PTY，并支持可选无默认 timeout、取消时进程组 hard kill、正常退出保留后台进程、合并输出 tail 截断和完整临时文件。
 - R10. `cmd/pi-go` 必须接收一个工作目录和任务 prompt，呈现运行事件并返回进程结果；其输入输出不构成公共 SDK 或稳定外部协议。
 - R17. 第一阶段最终验收必须使用仓库内固定 prompt、固定小型 Go bug-fix fixture、不可修改文件哈希和生产文件变更 allowlist，要求 Agent 自主读取代码、修改实现、运行测试并让原本失败的测试通过。
 - R18. Runtime 必须明确提示工作目录内容和 tool results 会发送给 DeepSeek；第一阶段要求操作者在启动前自行确认 workspace 可披露，Runtime 只显示披露提示，不实现确认或审批交互。transcript 只驻留内存且没有通用 secret detector 或 redactor。
-- R19. Run 取消必须停止新的 Provider 调用和工具阶段，取消并等待所有已启动的 stream、工具和 bash 进程组收敛，然后返回明确的 canceled 非成功结果。观察通道的最终事件和 settlement 语义等本地命令需要展示运行过程时再定义。
+- R19. Run 取消必须停止新的 Provider 调用和工具阶段，取消并等待所有已启动的 stream、工具以及仍在执行的 bash shell/原进程组收敛，然后返回明确的 canceled 非成功结果。正常完成的 bash call 可以按 R9 有意留下后台进程，不属于 Run cancellation 必须追溯清理的 active work。观察通道的最终事件和 settlement 语义在本地命令接入实时 bash output 时定义。
 
 ### Key Flows
 
@@ -82,7 +82,7 @@ product_contract_source: ce-plan-bootstrap
 
 - Faux Provider 下已移植的消息、流、工具、错误、取消和顺序契约都有确定性测试。
 - `pi-go` 能在固定 bug-fix fixture 上通过真实 DeepSeek 完成 read、edit 或 write、bash test 的多轮闭环。
-- 并行只读阶段没有 data race；取消不会留下失控的模型流、工具 goroutine 或 bash 子进程。
+- 并行只读阶段没有 data race；取消不会留下仍属于被取消调用原进程组的模型流、工具 goroutine 或 bash 进程。正常 bash exit 后有意保留的后台进程、以及自行创建新 session 而逃出原组的 daemon，遵循已记录的 Pi 语义而不是被描述为可完全回收。
 - 操作者能从有界事件和内存 transcript 判断模型做了什么、哪个工具失败以及 Run 为什么结束，默认输出不重复打印完整源码或未截断 tool output。
 - 第一阶段代码中不存在 Goal Runtime、Session persistence、IM、RPC、公共 SDK、权限审批或 benchmark/eval 模块。
 
@@ -96,7 +96,7 @@ product_contract_source: ce-plan-bootstrap
 - Session 创建、持久化、恢复、自动 compaction、跨 Session 上下文和多 active run 管理；Agent 当前进程内的完整对话 transcript 不属于该推迟范围。
 - Steering、follow-up、continue、完整 listener subscription 生命周期和 Agent Manager。
 - 公共 Go SDK、gRPC、IM 适配、多用户、多仓库、worktree 与 GitHub issue/PR 管理。
-- 权限审批、trust/yolo 配置矩阵和真正 sandbox；本地命令以当前用户权限运行，文件工具路径边界、凭据不向子进程传播、取消、超时和输出限制仍是强制安全不变量。
+- 权限审批、trust/yolo 配置矩阵和真正 sandbox；本地命令以当前用户权限运行并完整继承父进程环境，文件工具路径边界、active call 取消和进入 transcript 前的输出限制仍是强制不变量。已经存在于父环境中的 Provider 凭据对 bash 可见，这不是 secret isolation。
 - 通用 secret scanning 或 redaction。操作者必须只选择允许发送给 DeepSeek 的 workspace；默认事件输出只减少额外复制，不阻止模型看到 tool results。
 - Windows bash 进程树管理；第一阶段只验证 macOS 和 Linux 的进程组取消与回收。
 - Pi 与 pi-go 的自动 benchmark、eval package、进程比较协议或评分工具。学习者可以在仓库外手动使用同一 fixture 和 prompt 比较两者。
@@ -128,10 +128,10 @@ product_contract_source: ce-plan-bootstrap
 - KTD5. Faux Provider 先于 DeepSeek，用脚本响应锁定模型流、工具循环和 transcript 语义。
 - KTD6. 第一阶段不实现 Goal Runtime；通用 Agent Loop 只负责模型与工具循环，任务成功由外部验收判断。（session-settled: user-directed — chosen over building plan/replan/done state now: 当前只验证 coding loop 能否完成任务）
 - KTD7. `internal/agent` 定义通用 Tool 契约，`internal/coding/tools` 提供文件和进程实现，避免核心层依赖 workspace。
-- KTD8. 第一阶段没有审批或 trust 策略系统；`read`、`write`、`edit` 受 workspace root 限制，bash 只保证从 workspace 启动并仍可访问当前用户资源。bash 使用最小 allowlist 环境加显式非敏感配置，Provider 凭据不通过 env、argv 或 tool config 传播；这不是对恶意 bash 的 secret isolation。（session-settled: user-directed — chosen over per-action approval: 长任务不能被审批循环阻断，完整权限策略延后）
+- KTD8. 第一阶段没有审批或 trust 策略系统；`read`、`write`、`edit` 受 workspace root 限制，bash 只保证每次从 workspace 启动并仍可访问当前用户资源。bash 沿用冻结 Pi 的完整父进程环境，已经存在于环境中的 Provider 凭据对命令可见；只存在于 Provider 内存配置中的凭据不被额外注入 argv、tool config、transcript、事件、日志或错误。（session-settled: user-directed — chosen over per-action approval and an environment allowlist: 本地 CLI 信任模型命令，并需要保留用户终端的 PATH、代理与工具链环境）
 - KTD10. 每课是文档、代码、测试和讨论记录的共同边界，只有学习者明确要求后才 commit。（session-settled: user-directed — chosen over automatic course commits: 学习者需要理解和调整节奏）
 - KTD12. 第一轮课程冻结 Pi commit 和 package version；上游升级通过显式决策处理，不静默改变基线。
-- KTD13. Provider 对 Agent 暴露可取消的 pull/receive stream。Agent event sink、串行投递和 observer settlement 等本地 headless 入口需要展示运行过程时再定义，不进入基础 transcript loop。
+- KTD13. Provider 对 Agent 暴露可取消的 pull/receive stream。最终本地 CLI 必须节流展示实时 bash output，但第 05 课只实现增量 pipe drain、tail accumulator 和完整临时文件；Agent event sink、call identity、串行投递和 observer settlement 在第 06 课出现真实 CLI consumer 时定义，不进入基础 transcript loop。（session-settled: user-directed — chosen over adding a speculative Tool progress callback now: 保留实时数据路径，同时让展示接口由真实消费者塑形）
 - KTD14. Tool 对模型暴露 JSON Schema，并用自身的 Go 解码与校验逻辑保护执行；初始版本不实现通用 JSON Schema evaluator。
 - KTD16. 第一阶段 bash 进程树管理只支持 macOS 和 Linux；Windows 的进程模型与取消语义延后单独设计。
 - KTD17. Headless Agent Runtime 与未来 Agent Manager 分层；第一阶段只有单目录、单 active Run 的本地 Runtime。（session-settled: user-approved — chosen over building multi-tenant orchestration into the loop: 先掌握和验证 Agent 核心）
@@ -142,9 +142,9 @@ product_contract_source: ce-plan-bootstrap
 - KTD22. 固定 fixture 和 prompt 可以供学习者在仓库外手动比较 Pi 与 pi-go，但项目不实现任何比较或评分模块。（session-settled: user-directed — chosen over an in-repo eval module: 比较属于后续独立 benchmark 活动）
 - KTD23. 四个 coding tools 操作同一个 Run-pinned workspace；工具只返回原子能力的模型可用结果，不增加 `run_tests` 等 workflow tool。后一个阶段可以观察前一个阶段已完成的文件副作用。
 - KTD24. 完整接收且不含 tool calls 的 assistant response 即正常 loop completion，即使文本为空；provider/stream failure、Run cancellation 和 acceptance deadline 是不同终态。CLI 报告 loop 终态，fixture harness 独立判断 coding task 是否成功。
-- KTD25. Run cancellation 停止新工作，取消所有已启动 child contexts，等待 stream、tool workers 和 bash process group 收敛后返回 canceled result。工具阶段 terminal assistant 中的每个 tool call 都按模型源顺序得到一个 settlement result：已完成调用保留实际结果，执行中调用记录 canceled，未启动调用明确记录因 Run 取消而未执行；若 Provider aborted/error terminal 自身保留了已完成组装、尚未进入工具阶段的 calls，它们全部不执行并得到同 ID not-executed results。未启动调用绝不产生工具副作用。这样取消后的完整 transcript 可直接供同一 Agent 的下一次 Run 使用，不依赖 Provider request 阶段临时修复 orphaned tool calls；observer settlement 留到 event sink 设计时定义。（session-settled: user-approved — intentional divergence from Pi request-time synthetic `No result provided`: 保持 Agent transcript 为 Provider 所见历史的单一事实源）
+- KTD25. Run cancellation 停止新工作，取消所有已启动 child contexts，等待 stream、tool workers 和仍在执行的 bash shell/原进程组收敛后返回 canceled result；正常完成的 bash call 按 KTD35 可以有意留下后台进程，不追溯为 active work。工具阶段 terminal assistant 中的每个 tool call 都按模型源顺序得到一个 settlement result：已完成调用保留实际结果，执行中调用记录 canceled，未启动调用明确记录因 Run 取消而未执行；若 Provider aborted/error terminal 自身保留了已完成组装、尚未进入工具阶段的 calls，它们全部不执行并得到同 ID not-executed results。未启动调用绝不产生工具副作用。这样取消后的完整 transcript 可直接供同一 Agent 的下一次 Run 使用，不依赖 Provider request 阶段临时修复 orphaned tool calls；observer settlement 留到 event sink 设计时定义。（session-settled: user-approved — intentional divergence from Pi request-time synthetic `No result provided`: 保持 Agent transcript 为 Provider 所见历史的单一事实源）
 - KTD26. Go `os.Root` 是第一阶段文件工具的 workspace boundary primitive；workspace 在 Run 开始时打开，read/create/overwrite/edit/replace 都通过 root-relative 方法完成，不使用易受 symlink TOCTOU 影响的“检查绝对路径后再普通 open”。
-- KTD27. 发送给模型的 transcript 只驻留内存；read 和 bash 在内容进入 transcript、event preview 或 Provider request 前完成大小限制。默认事件呈现 metadata、状态和有界 preview，不提供通用 secret redaction。
+- KTD27. 发送给模型的 transcript 只驻留内存；read 和 bash 在内容进入 transcript、event preview 或 Provider request 前完成大小限制。bash 超限时沿用 Pi，把完整 raw output 写入无大小上限且不会自动删除的系统临时文件并返回路径；这个恢复文件不等于 transcript 内容边界，也不提供 secret redaction。（session-settled: user-directed — chosen over discarding earlier output or adding a new file cap: 保留 Pi 的完整输出恢复能力并接受磁盘增长与残留风险）
 - KTD28. `Agent.Run(ctx, userInput)` 返回 Agent 当前完整 transcript 的快照与 Go error，不增加重复 Run outcome；正常完成返回 nil error，Provider/stream failure 返回非 nil error，取消保留 context cause，terminal 或合成 assistant message 留在 Agent transcript。
 - KTD29. 同一 Agent 的每条新 user message、terminal assistant 和 tool result 都追加到已有 transcript；后续 Provider call 发送完整历史。新对话通过新 Agent 或显式 reset/session boundary 开始，Agent 拒绝并发 Run。
 - KTD30. Provider terminal message、Provider Request 和 `RunResult.Transcript` 在 Agent 所有权边界深复制；调用方和 Provider 不能通过嵌套 content slice、tool-call arguments 或 tool schema JSON 反向修改 Agent transcript。clone 规则由 `internal/ai` 统一拥有并供 Faux、Agent 复用。
@@ -152,6 +152,7 @@ product_contract_source: ce-plan-bootstrap
 - KTD32. 每次 Provider call 的 stream consumer 在所有退出路径只返回 `(terminal AssistantMessage, error)`；Turn/Run coordinator 在该次调用的唯一位置深复制并追加该消息。第一条有效 terminal event 是该 Turn 的 settlement point，之后的取消不追溯这条 assistant；同一次 `Receive()` 同返有效 terminal event 与 error 时 terminal 优先。terminal 前 raw stream failure 依据 context cause 合成 aborted 或 error assistant，nil stream 合成协议错误 assistant；Agent 等待绑定 context 的 `Receive()` 真正收敛而不遗留竞争 goroutine。第 02 课一个 Run 只有一个 Turn，第 03 课多 Turn Run 对每次 Provider call 重复同一规则；assistant 写入点唯一不排斥协调层随后追加 tool-result settlement。
 - KTD33. Agent Runtime 对每个 tool call 只执行一次，不在通用 Tool Loop 自动重试；失败形成 tool result，由模型决定是否发起新调用。未来只有能够明确分类瞬时错误的具体 I/O 后端，才可在单次 `Execute` 内实现有界、可取消的内部重试。
 - KTD34. Tool-call terminal 先校验可配对 identity，再按 reason/content 分类：空或重复 call ID、`toolUse` 却无 call 是 Provider protocol error；`stop + calls` 执行，`length + calls` 全部不执行并返回 truncation results；ID 有效时的空/未知 tool name、非法/不合语义的 arguments 和 execute failure 是 call-local errors；Provider error/aborted terminal 中的 calls 全部不执行，只追加 not-executed settlement results。（session-settled: user-approved — extends assistant exactly-once with explicit tool-result closure: 不修改或重复 terminal assistant，也不让失败 Turn 的 calls 产生副作用）
+- KTD35. bash 沿用冻结 Pi 的本地 CLI 核心语义：直接执行、完整父环境、每次新建无 stdin/PTY shell、可选无默认 timeout、正常 exit 不清理后台进程、取消/超时以 `SIGKILL` 终止原进程组、stdout/stderr 合并增量 drain、最后 2000 行或 50 KiB 进入模型、完整 output 写入无上限临时文件，非零 exit 形成 call-local error。第一期支持可选 shell path 和 `/bin/bash -> PATH bash -> sh` fallback，不移植 remote operations、command prefix、spawn hook、TUI 或 Windows transport。（session-settled: user-directed — chosen over the plan's earlier minimum-environment and all-descendants-cleanup proposal: 学习者要求以冻结 Pi 的实际行为塑造本地 coding-agent CLI）
 
 ### High-Level Technical Design
 
@@ -229,10 +230,10 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - DeepSeek 模型或 SSE 协议漂移：模型 ID 配置化，Provider 课程开始时重查官方文档，离线 fixture 与真实 smoke test 分开。
 - 模型把有依赖的工具放进同一 assistant message：调度器只保证执行顺序，不制造新的 LLM 推理步骤；需要读取结果后再决定的操作必须进入下一轮模型调用。
 - `CanRunParallel` 被错误标记：默认 false，只有能证明无副作用的工具才显式开启，并用 race test 与阶段顺序测试锁定。
-- bash 逃逸 workspace：第一阶段明确不提供 sandbox；fixture 使用 disposable temp root、隔离 HOME/TMPDIR/cache 和最小环境，文档不把 cwd 或 fixture diff 描述为主机隔离。
+- bash 逃逸 workspace：第一阶段明确不提供 sandbox；产品命令继承完整父环境。fixture 可以用 test-owned 的 disposable temp root、HOME/TMPDIR/cache 和显式环境获得确定性，但这只是 harness 输入，不是 Runtime allowlist，文档不把 cwd 或 fixture diff 描述为主机隔离。
 - workspace symlink race：文件工具固定 `os.Root` 并只使用 root-relative I/O；测试用 outside canary 验证 ancestor、final 和替换竞态不能越界。
 - 数据发送与日志泄漏：操作者只选择 disclosure-safe workspace；工具在进入 transcript 前限制输出，默认事件只提供有界 preview，并明确没有通用 redaction。
-- bash 遗留后台进程：每次调用拥有独立进程组；正常退出、超时和取消都在进入下一阶段前完成 terminate、必要时 hard kill、drain 和 reap。
+- bash 后台进程与输出：每次调用拥有独立进程组；超时和取消 hard-kill 原组并回收 shell，正常 exit 则允许后台进程继续。后台失败、文件竞态、端口占用、daemon 逃组、持续持有 pipe 和完整临时文件无上限增长属于已接受的 Pi corner cases；测试分别锁定 quiet/active descendant、取消与 timeout，而不是声称能清理所有 OS descendants。
 - 真实模型行为不确定：Faux Provider 证明 Runtime 契约，固定真实 fixture 证明一次端到端能力，两者互不替代。
 
 ---
@@ -307,13 +308,13 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 ### U9. Implement Coding Tools and Workspace Boundary
 
 - **Goal:** 提供能修改真实临时仓库并运行验证的 `read`、`write`、`edit`、`bash`。
-- **Requirements:** R9、R15、R16、R18、R19；KTD7、KTD8、KTD16、KTD20、KTD23、KTD25-KTD27。
+- **Requirements:** R9、R15、R16、R18、R19；KTD7、KTD8、KTD16、KTD20、KTD23、KTD25-KTD27、KTD35。
 - **Dependencies:** U4、U5。
 - **Files:** `internal/coding/workspace.go`、`internal/coding/tools/read/`、`internal/coding/tools/write/`、`internal/coding/tools/edit/`、`internal/coding/tools/bash/`、`internal/coding/tools/toolargs/`、`internal/coding/tools/fileutil/`、`docs/course/lessons/05-coding-tools.md`。
-- **Approach:** Run 开始时用 `os.Root` 固定 canonical workspace，文件工具只使用 root-relative I/O 并拒绝非 regular-file 目标；每个模型工具使用独立子 package，只有已经证明跨工具复用的能力进入 coding-owned `tools/toolargs` 或 `tools/fileutil`，不提前上移 Agent 层，也不创建尚未实现的空 package。write 和 edit 通过 workspace 内临时文件与替换提交结果；edit 保留冻结 Pi 的非空 `edits[]` 模型协议，所有 `oldText` 都在同一原文件上精确匹配且必须唯一、互不重叠，整组验证后一次提交。冻结 Pi 的 fuzzy normalization 涉及错误匹配风险、offset 映射与大量组合测试，第一期明确不实现，待真实需求出现后作为独立工作评估。bash 绑定 cwd 和独立进程组，使用最小 allowlist 环境，但不声称 sandbox；第一阶段只支持 macOS 和 Linux。read 标记为 parallel-safe，其他三个工具保持默认 false。工具返回 resolved relative path、edit 匹配诊断、bash exit code/stdout/stderr/timeout/truncation 等模型可用结果。
-- **Execution note:** 使用临时 workspace 做集成测试，并在实现 bash 后立即验证进程组取消。
-- **Test scenarios:** read 成功与不存在、write 新建与覆盖、edit 多段精确替换、原文件匹配、零/多匹配、overlap、全有或全无以及 fuzzy candidate 安全失败、非 regular-file 拒绝、`..` 穿越、ancestor/final/dangling symlink、validation-to-open swap 和 outside canary；bash stdout/stderr、非零退出 error result、timeout、startup cancel、正常 shell exit 后后台子进程、grandchild 持有 pipe、输出在进入 transcript 前截断；任意父进程 secret、Provider key 和敏感 handle 不进入子进程或事件，显式允许变量可见；`write → read`、`edit → bash`、`bash-created file → read` 观察同一 workspace。
-- **Verification:** `os.Root` 文件操作不能越出 workspace；每个 bash 路径都在下一阶段前 drain、terminate、必要时 kill 并 reap 同进程组 descendants；`go test -race ./...` 通过。
+- **Approach:** Run 开始时用 `os.Root` 固定 canonical workspace，文件工具只使用 root-relative I/O 并拒绝非 regular-file 目标；每个模型工具使用独立子 package，只有已经证明跨工具复用的能力进入 coding-owned `tools/toolargs` 或 `tools/fileutil`，不提前上移 Agent 层，也不创建尚未实现的空 package。write 和 edit 通过 workspace 内临时文件与替换提交结果；edit 保留冻结 Pi 的非空 `edits[]` 模型协议，所有 `oldText` 都在同一原文件上精确匹配且必须唯一、互不重叠，整组验证后一次提交。冻结 Pi 的 fuzzy normalization 涉及错误匹配风险、offset 映射与大量组合测试，第一期明确不实现，待真实需求出现后作为独立工作评估。bash 按 KTD35 从 workspace 启动新 shell，继承完整父环境，以独立进程组处理 timeout/cancel，正常 exit 保留后台进程，并在运行期间合并 drain stdout/stderr 到有界 tail 与完整临时文件；第一阶段只支持 macOS 和 Linux。read 标记为 parallel-safe，其他三个工具保持默认 false。
+- **Execution note:** U9 四个工具已完成本地实现与测试；bash 使用临时 workspace 验证完整父环境、fresh shell、child/grandchild 进程组取消、正常退出后台存活、idle-drain、tail/完整临时文件，以及与 read/edit 的跨工具可见性。最终 CLI live output 的消费接口仍属于 U10。
+- **Test scenarios:** read 成功与不存在、write 新建与覆盖、edit 多段精确替换、原文件匹配、零/多匹配、overlap、全有或全无以及 fuzzy candidate 安全失败、非 regular-file 拒绝、`..` 穿越、ancestor/final/dangling symlink、validation-to-open swap 和 outside canary；bash 完整父环境、每次新 shell/cwd reset、stdin EOF、shell fallback、stdout/stderr 合并、非零 exit error、无输出、可选 timeout、预取消、运行中取消、原进程组 grandchild hard kill、正常 exit 后 quiet background 存活、持续输出 descendant 的 idle/drain、UTF-8 chunk、2000 行/50 KiB tail、单个超长行和完整临时文件；`write → read`、`edit → bash`、`bash-created file → read` 观察同一 workspace。
+- **Verification:** `os.Root` 文件操作不能越出 workspace；bash timeout/cancel 在返回前 kill 并 reap 直接 shell 与仍属于原组的进程，正常 exit 不主动 kill 后台进程，模型结果始终有界而完整临时文件保持可读；`go test -race ./...` 通过。
 
 ### U10. Assemble Headless Coding Agent and Fixed Acceptance Task
 
@@ -321,7 +322,7 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Requirements:** R10、R17-R19；F2；AE7；KTD2、KTD4、KTD6、KTD17、KTD22-KTD25、KTD27。
 - **Dependencies:** U3-U5、U8、U9。
 - **Files:** `internal/agent/events.go`、`internal/agent/loop.go`、`internal/agent/loop_test.go`、`internal/coding/prompt.go`、`internal/coding/runtime.go`、`internal/coding/runtime_test.go`、`cmd/pi-go/main.go`、`cmd/pi-go/main_test.go`、`testdata/acceptance/bugfix/task.txt`、`testdata/acceptance/bugfix/`、`docs/course/lessons/06-headless-coding-task.md`、`README.md`。
-- **Approach:** 本地入口装配 DeepSeek、内存 transcript 和四个 coding tools；在出现真实终端展示需求时设计基础 Agent event sink、串行投递和有界输出，不实现 TUI 状态。固定 Go fixture 的 `NormalizeTags` starter 实现不能满足“trim、删除空项、按首次出现顺序去重”的既有测试；checked-in prompt 要求定位并修复 bug、运行测试且不修改测试文件。真实验收把 regular-file-only fixture 复制到 checkout 外的 disposable temp root，隔离 HOME/TMPDIR/Go caches，设置最小环境、外部 deadline、immutable hashes、target allowlist 和相邻 canary。
+- **Approach:** 本地入口装配 DeepSeek、内存 transcript 和四个 coding tools；根据 KTD13 为已经能增量 drain 的 bash 接入基础 Agent event sink、串行投递和有界 CLI 展示，不实现 TUI 状态。固定 Go fixture 的 `NormalizeTags` starter 实现不能满足“trim、删除空项、按首次出现顺序去重”的既有测试；checked-in prompt 要求定位并修复 bug、运行测试且不修改测试文件。真实验收把 regular-file-only fixture 复制到 checkout 外的 disposable temp root，为 harness 设置独立 HOME/TMPDIR/Go caches、显式测试环境和外部 deadline，并检查 immutable hashes、target allowlist 与相邻 canary；这不改变产品 bash 继承其父进程完整环境的契约。
 - **Execution note:** 先建立失败 fixture 和不可修改的验收断言，再组装 Runtime；真实模型运行只在离线契约测试全部通过后进行。
 - **Test scenarios:** fixture 初始测试失败、Faux 多轮 read/edit/bash 后通过、每轮 request context 完整、基础 event sink 顺序和 settlement、CLI 有界流式输出、help 和运行启动明确显示 DeepSeek data-egress 边界、无效 workspace、缺少 DeepSeek key、zero-tool assistant response 正常结束、provider failure 与用户取消返回不同非成功终态、取消工具批次后同一 Agent 继续 Run、acceptance deadline、真实 DeepSeek 在 final mutation 后运行成功 bash test、独立测试通过、immutable hashes 不变、fixture diff 只含 allowlist、相邻 canary 不变、无遗留进程。
 - **Verification:** structured trace 包含 read、edit 或 write、final mutation 后成功 bash test 和 loop terminal reason；同一 checked-in prompt 可以手动交给 Pi 和 pi-go。fixture diff 和 canary 只验证验收目录效果，不宣称 OS-wide containment，也不生成比较分数或 eval 文件。
@@ -350,15 +351,15 @@ go test -race ./...
 
 ### Provider Gates
 
-默认测试不得读取 DeepSeek key 或调用付费 API。真实 smoke test 必须显式 opt-in，记录模型 ID 和 endpoint，并验证 Provider key 没有通过工具环境、argv、tool config、transcript、事件、日志或错误传播。测试还要用非 Provider secret canaries 证明 bash 只获得 allowlist 环境。真实 smoke test 只证明协议可用，不能替代 Faux Provider 的确定性测试。
+默认测试不得读取 DeepSeek key 或调用付费 API。真实 smoke test 必须显式 opt-in，记录模型 ID 和 endpoint，并验证 Provider 不把 key 写入 argv、tool config、transcript、事件、日志或错误。bash 按 KTD8 完整继承 smoke-test 进程环境，因此测试不再声称环境来源的 key 对命令不可见，也不通过执行回显环境的命令制造额外副本。真实 smoke test 只证明协议可用，不能替代 Faux Provider 的确定性测试。
 
 运行前必须明确告知操作者：system prompt、用户任务、模型选择的文件内容、命令和 tool output 会发送到 DeepSeek。默认 CLI 事件只显示 metadata、状态和有界 preview；transcript 不落盘，输出限制在内容进入 transcript 和 Provider request 前生效。
 
 ### Final Coding Acceptance
 
-最终验收把 checked-in regular files 复制到真实 checkout 外的 disposable temp root，使用独立 HOME/TMPDIR/Go caches、最小环境、外部 deadline 和相邻 canary。先证明 starter tests 失败，再用 `testdata/acceptance/bugfix/task.txt` 启动 `pi-go`，最后独立运行 fixture tests。
+最终验收把 checked-in regular files 复制到真实 checkout 外的 disposable temp root，使用 harness-owned HOME/TMPDIR/Go caches、显式测试环境、外部 deadline 和相邻 canary。bash 仍完整继承该父环境；harness 控制自己的输入不等于产品运行时过滤变量。先证明 starter tests 失败，再用 `testdata/acceptance/bugfix/task.txt` 启动 `pi-go`，最后独立运行 fixture tests。
 
-通过条件是测试成功、immutable hashes 未改变、fixture diff 只包含 allowlist、相邻 canary 未改变、无遗留子进程，并且 structured trace 包含读取、修改、final mutation 后成功测试和明确 loop terminal reason。这些检查不证明 unsandboxed bash 没有访问或修改主机其他位置。
+通过条件是测试成功、immutable hashes 未改变、fixture diff 只包含 allowlist、相邻 canary 未改变、fixture 使用的前台命令没有意外遗留进程，并且 structured trace 包含读取、修改、final mutation 后成功测试和明确 loop terminal reason。这项特定验收既不证明 unsandboxed bash 没有访问主机其他位置，也不改变正常 bash call 可以有意保留后台进程的产品契约。
 
 Pi 与 pi-go 的人工对比在本仓库外进行，不属于 `go test ./...`、命令输出或 Definition of Done。
 

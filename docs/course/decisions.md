@@ -49,8 +49,9 @@
 ### D8. 第一期没有审批或 trust/yolo 策略系统
 
 - 日期：2026-07-15
-- 决定：模型选择的工具直接执行，不逐次请求批准，也不提供 trust/yolo 配置矩阵。`read`、`write`、`edit` 强制 workspace 文件边界；bash 只固定初始 cwd，不是 sandbox，可以访问当前用户有权访问的 workspace 外资源。bash 使用最小 allowlist 环境加显式非敏感配置；Provider 凭据不能进入子进程、argv、tool config、transcript、事件、日志或错误。参数校验、超时、取消和输出截断始终生效。
-- 原因：逐工具审批会阻断长任务；第一期也没有足够场景证明需要策略抽象。不审批不等于隐藏权限或取消安全不变量。
+- 修正日期：2026-07-18
+- 决定：模型选择的工具直接执行，不逐次请求批准，也不提供 trust/yolo 配置矩阵。`read`、`write`、`edit` 强制 workspace 文件边界；bash 只固定每次调用的初始 cwd，不是 sandbox，可以访问当前用户有权访问的 workspace 外资源。bash 与冻结 Pi 一样继承 CLI 的完整进程环境，因此已经存在于环境中的 Provider 凭据也对命令可见；只存在于 Provider 内存配置中的凭据不会被额外注入 argv、tool config、transcript、事件、日志或错误。
+- 原因：学习者在 bash 子阶段确认本地 CLI 信任当前 workspace、模型和命令，选择冻结 Pi 的直接执行与完整环境语义，而不是此前未经讨论就写入文档的最小 allowlist。逐工具审批会阻断自动 coding loop；完整环境还能保留从 Ghostty/zsh 启动 CLI 时已经导出的 PATH、代理和语言工具链配置。这不是 credential isolation，操作者仍需理解命令拥有当前用户权限。
 
 ### D9. 课程与代码按同一个提交节奏推进
 
@@ -67,8 +68,9 @@
 ### D11. Provider stream 使用 pull boundary；Agent event sink 延后设计
 
 - 日期：2026-07-16
-- 决定：Provider 对 Agent 暴露可取消的 pull/receive 流抽象。第 02 课不设计或实现 Agent event sink；等本地 headless 入口真正需要展示运行过程时，再根据终端消费者核对事件形状、串行投递、错误和 settlement 语义。
-- 原因：pull boundary 直接参与模型调用、结束、错误和取消，属于基础执行数据流；event sink 服务运行观察和展示，当前 transcript loop 没有真实消费者，不应为了未来 TUI 提前固化接口。
+- 修正日期：2026-07-18
+- 决定：Provider 对 Agent 暴露可取消的 pull/receive 流抽象。最终本地 CLI 已确认需要节流展示实时 bash 输出，但第 05 课只让 bash 增量 drain 并构造有界最终结果，不为尚未存在的 CLI 消费者提前修改通用 Tool/Agent progress 接口；第 06 课组装本地入口时再根据 call identity、串行投递、错误和 settlement 语义接通 event sink。
+- 原因：pull boundary 直接参与模型调用、结束、错误和取消，属于基础执行数据流。增量读取现在就能避免 pipe deadlock 并保留未来实时数据路径；event API 的形状仍取决于真实 CLI 消费者，提前增加 callback 或 context value 只会固化猜测。
 
 ### D12. 工具 schema 与 Go 参数校验分离
 
@@ -246,12 +248,14 @@
 ### D39. 每个 coding tool 使用独立子 package
 
 - 日期：2026-07-18
-- 决定：具体工具分别位于 `internal/coding/tools/read`、`write`，后续已经确认的 `edit`、`bash` 实现时沿用同一布局，但不提前创建空 package。每个 package 对外提供自己的 `Tool` 与 `New(*os.Root)`；包内参数、结果和 helper 使用短而准确的名称，不再用工具名前缀解决同包冲突。
+- 决定：具体工具分别位于 `internal/coding/tools/read`、`write`、`edit`，后续 `bash` 沿用独立子 package 布局而不提前创建空 package。文件工具对外提供自己的 `Tool` 与 `New(*os.Root)`；bash 不能从 `os.Root` 取得 `exec.Cmd` 所需的 host cwd，而且其命令本就不受 root containment，因此通过聚焦配置接收 canonical workspace path 与可选 shell path。包内参数、结果和 helper 使用短而准确的名称，不用工具名前缀解决同包冲突，也不为构造差异建立 base tool。
 - 文件边界：模型协议与编排放在 `tool.go`；只有职责独立时才拆出分页、平台打开等实现文件。测试按模型协议、workspace boundary 和具体平台对象分组；同一工具可使用自己的 `helpers_test.go`，但测试 helper 不进入生产共享 package，也不跨工具 package 隐式共享。跨工具测试只通过公开构造器和可观察结果组合工具。
 - 共享 package 边界：`internal/coding/tools/toolargs` 只保存 coding tools 已复用的严格 JSON 参数解码；`internal/coding/tools/fileutil` 保存 workspace-relative path、opened-handle regular-file 校验和普通文件替换提交。它们暂不上移 `internal/agent`：Agent 层只拥有 `Tool.Execute(ctx, json.RawMessage)` 契约，当前没有使用 decoder 或文件原语；只有出现非 coding 工具复用同一契约，并确认它是 Agent 工具实现的稳定公共责任时，才讨论上移。read 分页、edit 匹配策略、模型结果和测试 fixture 均保留在拥有它们的 package。
 - 修正原因：只实现 `read` 时，扁平 package 尚未显露足够拆分证据；加入 `write` 后已经需要工具名前缀、混合不同工具测试，并出现 `write_test.go` 调用 `read_test.go` helper 的隐式依赖。此前“没有证据继续拆 package”的结论因此失效；按工具拆包让未来 `edit`、`bash` 加入时保持依赖和文件责任清晰，同时不引入 speculative interface 或空扩展点。
 
 - 第二次修正：只有 `read` 使用 nonblocking candidate open 时，平台文件保留在 `read` package 符合最小共享原则；`edit` 加入后也必须在可能阻塞的 FIFO 打开之后校验实际 handle，第二个真实消费者已经成立，因此将聚焦的 `OpenRegularFile` 与互斥平台 open 文件迁入 `fileutil`。这不是建立通用 filesystem abstraction，具体分页和匹配仍不共享。
+
+- 第三次修正：此前把未来 bash 也写成 `New(*os.Root)` 是从文件工具机械外推。`os.Root` 只服务 root-relative file I/O，不提供 host path，也不可能约束 shell；bash 使用 `Workspace.Path()`，文件工具使用 `Workspace.Root()`，由后续 composition root 分别注入。进程组、shell resolution 和 output accumulation 都属于 bash package，不进入 `fileutil` 或含义宽泛的 utils package。
 
 ### D40. edit 保留多段原文件匹配，但第一期只执行精确替换
 
@@ -261,6 +265,15 @@
 - Pi 证据与分歧：冻结 Pi commit 的主协议同样是 `edits[]`，所有项在原文件上匹配、要求唯一且不重叠，并在写入前完成整组校验；但其 exact 失败后会进行空白、Unicode 与行结束符 fuzzy normalization，还兼容旧单编辑参数和字符串化 `edits`，生成 TUI preview/diff/patch，支持可替换 operations，并由 mutation queue 后直接 `writeFile`。pi-go 第一期不移植这些扩展。
 - fuzzy 延后原因：精确失败保留原文件并允许模型重新读取恢复，模糊误匹配却可能提交非预期修改。normalization 后唯一性、offset 映射、原字节保留、CRLF/BOM 和多编辑组合需要单独设计及大量测试；学习者确认它是出现真实需求后的一次独立工作，不能因为冻结 Pi 已实现就顺带加入当前 exact mutation contract。
 - 选择原因：`edits[]` 是冻结源码已经证明的核心可观察协议，保留它避免先建立马上废弃的单编辑 schema；fuzzy、UI、remote operations 和额外队列则没有第一期消费者。这个边界同时满足 semantic port、当前计划的“精确且可验证”以及不为未发现需求过度设计的约束。
+
+### D41. bash 沿用冻结 Pi 的受信任本地 CLI 语义
+
+- 日期：2026-07-18
+- 信任与进程环境：bash tool 暴露 `command` 和可选秒数 `timeout`，不逐次审批，也不提供 sandbox。每次调用从固定 workspace 启动一个新的非交互、无 PTY shell，stdin 为空，并完整继承启动 pi-go 的父进程环境；zsh 已导出的 PATH、代理和变量会传入 Bash，未导出的 shell variable、alias 和 function 不会。shell 支持显式 path；默认按 `/bin/bash`、PATH 中的 `bash`、`sh` 回退。第一期不移植 Pi 的 remote operations、command prefix、spawn hook 或 Windows transport。
+- 生命周期：macOS/Linux 为每次调用建立独立进程组。可选 timeout 没有默认值；timeout、Run cancellation 或 CLI cancellation 直接以 `SIGKILL` 终止原进程组并等待 shell 回收，不承诺运行 cleanup handler。正常 shell exit 不主动清理进程组，因此重定向输出的后台服务可以继续运行，后续失败不改变已经返回的 shell exit code，后台文件修改也可能与后续工具竞态；创建新 session 的 daemon 还可能逃出原进程组。每次调用都是新 shell，`cd`、`export` 和 virtualenv activation 不跨调用保留。
+- 输出与错误：stdout/stderr 按到达顺序合并并在运行期间持续 drain；跨 pipe 的相对顺序不作确定性承诺。模型最终只看到最后 2000 行或 50 KiB，完整 raw output 在首次超限后写入无大小上限、不会自动删除的系统临时文件；单个超长行可能只保留尾部。正常 shell exit 后，继承 pipe 的 descendant 以冻结 Pi 的短 idle grace 收敛读取，持续输出的后台进程会让调用继续等待，除非 timeout 或取消。非零 exit 形成保留有界输出的 call-local error，Agent 继续运行；shell pipeline 和命令列表仍服从自身的最后命令 exit status。
+- CLI 展示边界：最终 CLI 必须节流展示实时 bash 输出，同时只有有界 final result 进入 transcript。第 05 课实现增量 drain、tail accumulator 和完整临时文件，不提前修改通用 Agent/Tool progress API；第 06 课出现真实 CLI 消费者时再接通事件。这个边界避免 `CombinedOutput` 式结束后读取和 pipe deadlock，也避免为未知 call identity 与展示顺序提前设计 callback。
+- Pi 证据与修正：冻结 `bash.ts` 使用完整 `process.env`、可选无默认 timeout、detached process group、取消/超时 hard kill、合并输出、tail truncation 和完整临时文件；`waitForChildProcess` 用 output-idle grace 避免 descendant 持有 pipe 时永久等待。此前课程计划中的最小 allowlist、Provider key 对命令不可见和正常退出清理全部 descendants 没有经过学习者讨论，也不符合该源码，现由本决定取代。
 
 ## 变更记录
 
@@ -299,3 +312,5 @@
 - 2026-07-18：重新核对冻结 Pi 后纠正“单个精确替换”的课程预览；学习者选择保留 `edits[]`、原文件匹配、唯一性、overlap 与全有或全无，但第一期不引入 fuzzy fallback。
 - 2026-07-18：学习者确认 fuzzy matching 涉及 normalization、位置映射和大量组合测试，应在真实需求出现后作为独立工作推进；代码和文档必须保留该延后原因。加入 `edit` 同时让 opened-handle regular-file 校验形成第二个真实消费者，因此从 `read` 迁入聚焦的 `fileutil` 原语。
 - 2026-07-18：`edit` 完成测试先行实现和审查；多段原文件匹配、唯一性、overlap、失败不落盘、普通文件替换、workspace/symlink/FIFO 边界、取消和 read 可见性测试通过。审查将重复 occurrence 检测收敛为最多寻找两个位置，避免为非唯一诊断扫描全部高度重复内容。
+- 2026-07-18：进入 `bash` 子阶段后纠正未经讨论的最小环境与 descendant cleanup 结论；学习者逐项确认沿用冻结 Pi 的直接执行、完整父环境、新 shell、无 stdin/PTY、可选无默认 timeout、正常退出保留后台进程、取消/超时 hard-kill 进程组、合并 tail 加完整临时文件、非零 call-local error 和最终 CLI 实时展示语义。
+- 2026-07-18：`bash` 完成测试先行实现：独立 package 接收 canonical workspace host path，Darwin/Linux 进程组负责 timeout/cancel，正常退出使用 output-idle grace 且保留后台进程，增量 accumulator 提供 2000 行/50 KiB tail 与完整 raw 临时文件；CLI live event 接口仍按决定延后到第 06 课的真实消费者。

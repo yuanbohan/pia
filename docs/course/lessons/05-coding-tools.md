@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-实现中；`read` 子阶段已经完成并提交，`write` 与 `edit` 子阶段的设计、代码、测试和文档已经完成；下一步在学习者确认后进入 `bash`。
+待理解确认；`read`、`write` 与 `edit` 子阶段已经完成并提交，`bash` 也已完成冻结 Pi 源码核对、corner-case 讨论、测试先行实现和全仓验证。第 05 课代码已完成但尚未 commit，等待学习者 review 实现并确认理解。
 
 开课记录：第 04 课已经完成、提交并 push 到 `main`。学习者确认第 05 课主要进入具体 Tool 实现，并要求按 `read`、`write`、`edit`、`bash` 一个个讲解和推进；本课先对齐共同 Tool 契约与 workspace 所有权，再逐个完成解释、讨论、实现和测试。
 
@@ -13,7 +13,7 @@
 1. 为什么通用 `agent.Tool` 契约留在 `internal/agent`，具体文件和进程实现进入 `internal/coding/tools`。
 2. `os.Root` 能保证什么、不能保证什么，以及文件工具为什么仍要拒绝非 regular-file 目标。
 3. `read`、`write`、`edit` 如何限制模型可见内容并保持同一个 workspace 内的可观察副作用顺序。
-4. `bash` 为什么只是固定 cwd、最小环境和可取消进程组，而不是 sandbox。
+4. `bash` 为什么只是固定初始 cwd、继承完整 CLI 环境并管理可取消进程组，而不是 sandbox。
 5. 为什么只有 `read` 声明 `CanRunParallel=true`，其余工具保持串行屏障。
 
 ## 证据边界
@@ -29,7 +29,7 @@
 - `packages/coding-agent/src/core/tools/truncate.ts`
 - `packages/coding-agent/src/core/tools/path-utils.ts`
 
-当前 Go 实现依据本仓库的 Go 1.26 toolchain 与标准库 `os.Root` 文档。Pi 源码说明上游工具的可观察能力；`docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 中的 U9、R9 和 KTD7/KTD8/KTD20/KTD23/KTD26/KTD27 是 pi-go 的范围与安全契约。候选设计在讨论确认前不记作既定架构。
+当前 Go 实现依据本仓库的 Go 1.26 toolchain 与标准库 `os.Root` 文档。Pi 源码说明上游工具的可观察能力；`docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 中的 U9、R9 和 KTD7/KTD8/KTD16/KTD20/KTD23/KTD26/KTD27/KTD35 是 pi-go 的范围与安全契约。候选设计在讨论确认前不记作既定架构。
 
 ## 推进顺序
 
@@ -37,7 +37,7 @@
 2. `read`：root-relative 读取、regular-file 校验、分页和输出上限。
 3. `write`：创建/覆盖、父目录和替换提交。
 4. `edit`：唯一精确替换、诊断和替换提交。
-5. `bash`：cwd、最小环境、超时、进程组取消、drain/reap 和尾部截断。
+5. `bash`：cwd、完整父环境、无交互 shell、可选超时、进程组取消、后台进程、drain/reap 和尾部截断。
 6. 四工具组合与完整质量门禁。
 
 ## 已验证的共同契约
@@ -173,3 +173,46 @@ Successfully wrote 7 bytes to nested/hello.txt
 实现审查发现最初为诊断精确重复次数而扫描全部重叠 occurrence，会在高度重复的大文件上产生不必要的放大工作；唯一性只需要确认第二个位置，最终实现因此在首个 match 后最多再搜索一次，并用 `aaa`/`aa` 测试锁定重叠 occurrence 也必须判为不唯一。这个收敛保留零/多匹配诊断，却不为模型无用的精确计数持续扫描整份重复内容。
 
 最终验证中，`make check` 完成 `go fmt ./...`、`go vet ./...`、`go test ./...` 和 `golangci-lint run ./...`，lint 为 0 issues；`make race` 全部通过。`edit` package 连续运行 20 次通过，Windows cross-build 也验证 portable open fallback 仍可构建。简化和代码审查修复了上述重复扫描问题，没有剩余 actionable finding；`edit` 子阶段完成，仍需学习者确认理解后才进入 `bash`。
+
+## 05-D：`bash` 源码纠正与设计讨论
+
+此前课程材料在尚未进入 `bash` 子阶段、也未与学习者讨论时，就写入了“最小 allowlist 环境”“Provider 凭据不能进入子进程”和“正常 shell exit 后清理全部 descendants”。进入本子阶段重新核对冻结 Pi 后确认，这些不是上游行为：`bash.ts` 的本地 operations 使用 `getShellEnv()` 复制完整 `process.env`；每次调用启动 detached shell，只有 abort 或可选 timeout 调用 `killProcessTree`；正常 shell exit 后不会主动 kill 该进程组。`waitForChildProcess` 在 shell 已 exit 但 descendant 仍持有 stdout/stderr 时等待 pipe output idle，而不是等待所有 descendants 退出。学习者也明确指出此前安全边界从未讨论，因此旧结论不能继续作为实现依据。
+
+讨论从最终产品形态出发：pi-go 是由用户在 Ghostty/zsh 等终端中启动的本地 coding-agent CLI。导出的环境变量属于进程环境，会按 `zsh -> pi-go -> bash` 继承；Bash 无需再次读取 `.zshrc`。未导出的 shell variable、alias、function 和 zsh option 不会继承。基于这个区别，学习者逐项确认下面的第一期契约：
+
+- bash tool 启用后直接执行模型命令，不增加逐次审批、trust/yolo matrix 或 sandbox。文件工具仍受 `os.Root` 限制，bash 只保证每次调用从 workspace 开始，可以访问当前用户有权访问的 workspace 外文件、网络和其他资源。
+- 每次调用使用新建的非交互、非 login shell，stdin 为空且不分配 PTY；`cd`、`export`、virtualenv activation 和 alias 不跨调用保留，文件、Git 状态、外部服务和后台进程等真实副作用会保留。shell 支持显式 path，默认按 `/bin/bash`、PATH 中的 `bash`、`sh` 回退。
+- 子进程完整继承 pi-go 的进程环境。环境来源可以是启动 zsh、配置工具或上层 launcher；Provider 只需在内存中持有 key 并为 HTTP request 设置 Authorization，并不要求 key 一定存在环境中。反过来，如果 key 已在父环境中，bash 就能看到；如果 Pi-style auth storage 把 key 存在文件中，unsandboxed bash 也可能直接读取该文件。本阶段不声称 credential isolation。
+- 输入为 `command` 与可选秒数 `timeout`，没有默认 timeout。timeout、Run cancellation 或 CLI cancellation 直接 hard-kill 原进程组；正常 exit 不清理后台进程。`server >server.log 2>&1 &` 可以继续运行，而 `go test &` 的后续失败不会改变 shell 已返回的成功；后台文件修改可能与后续工具竞态，`setsid`/daemonize 还可能逃出原进程组。
+- stdout/stderr 合并并持续 drain。非零 shell exit 保留输出并形成 call-local error，Agent 继续；`grep` 的 no-match、pipeline 的最后命令以及 `cmd1; cmd2` 的最终 exit status 都服从 shell 自身语义，不由工具猜测业务成功。
+- 模型 final result 只保留最后 2000 行或 50 KiB，完整 raw output 从首次超限开始写入系统临时文件并回填此前 chunks。该文件没有大小上限、不会自动删除，也可能包含命令打印的敏感内容；在无默认 timeout 的选择下，`yes` 等命令可以持续占用临时磁盘。学习者在看到该 corner case 后仍选择沿用 Pi。
+- 最终 CLI 要像 Pi 一样节流展示实时 bash output，但第 05 课不提前增加 Agent event sink 或 Tool callback。当前实现必须在进程运行期间增量读取 pipe，使用独立 accumulator 形成有界 tail 与完整临时文件，从数据流上保留实时展示能力；第 06 课有真实 CLI consumer 时再决定 call identity、投递顺序和展示接口。
+
+Go 机制不会机械复制 TypeScript API：macOS/Linux 通过 `exec.Cmd.SysProcAttr.Setpgid` 建立独立进程组，取消时对负 PID 发送 `SIGKILL`，并始终调用 `Wait` 回收直接 shell。只调用 `exec.CommandContext` 不足以满足该契约，因为它不能保证终止 shell 启动的整个进程组。stdout 与 stderr pipe 必须并发 drain 到同步 accumulator；正常 shell exit 后使用短 output-idle grace 处理仍持有 pipe 的 descendant，不能因等待 pipe close 永久挂住，也不能在 output 仍持续到达时过早丢弃尾部。
+
+本子阶段不移植 Pi 的 TUI renderer、remote `BashOperations`、command prefix、spawn hook 或 Windows Git Bash/taskkill 分支。第一期只在 macOS/Linux 验证本地 shell、进程组、取消、后台进程、输出 tail/临时文件和 tool-result 语义；这些范围已经由学习者确认，可以进入测试先行实现。
+
+## 05-D：`bash` 实现记录
+
+本子阶段新增独立的 `internal/coding/tools/bash` package，没有把进程或输出逻辑放入文件工具的 `fileutil`，也没有建立含义宽泛的 utils：
+
+- `tool.go` 保存模型 schema、`Config`、严格参数解码和 Agent-facing 结果。`Config.WorkingDirectory` 接收 composition root 已规范化的 `Workspace.Path()`；文件工具继续借用 `Workspace.Root()`，两者不会被虚构成相同的 base tool。
+- `shell.go` 保存显式 shell path 与 `/bin/bash -> PATH bash -> sh` 的冻结 Pi 回退顺序，不读取 `$SHELL`，因为交互 zsh 与模型命令所需的 Bash-compatible shell 不是同一个责任。
+- `process.go` 使用两个独立 pipe goroutine 持续读取 stdout/stderr，再由单一 event loop 顺序更新 accumulator。它同时使用 `exec.CommandContext` 作为 direct-shell fallback，并在 macOS/Linux 通过 `Setpgid` 与负 PID `SIGKILL` 处理整个原进程组；只杀 `exec.Cmd.Process` 会遗漏 shell 启动的 child/grandchild。每个已启动 shell 都进入 `Wait`。
+- `process_group_unix.go` 保存已经验证的 Darwin/Linux 进程组机制；互斥的 portable 文件只让其他平台明确返回 Phase 1 unsupported error，不假装已经移植 Windows taskkill/Git Bash 语义。
+- `output.go` 增量解码跨 chunk UTF-8，统计全局行数和 decoded bytes，只在内存保留有界 tail。阈值前 raw chunks 暂存在小型 `bytes.Buffer`；首次超过 2000 行或 50 KiB 时创建 `0600` 系统临时文件、先回填旧 chunks，再持续写入后续原始 bytes。产品有意不删除该文件。
+
+正常 shell exit 后不能直接等待 pipe EOF：安静的后台进程可能长期继承 handle。实现因此沿用冻结 Pi 的 100ms output-idle grace；每个新 chunk 都重新计时，持续输出的 descendant 继续被 drain，安静 handle 到期后由本调用关闭 reader。这个路径不 kill 正常退出留下的后台进程。相反，timeout 或 context cancellation 会 hard-kill 原进程组；即使 descendant 已把 stdout/stderr 重定向、导致 pipe 提前关闭，返回前的 context 检查仍会补做 group kill，避免它借此逃出取消。
+
+测试先证明 package 缺少生产实现时构建失败；实现后按责任拆分覆盖：
+
+- schema、严格 JSON、timeout 边界、explicit/default shell、workspace cwd、完整父环境、fresh shell、stdin EOF、空命令、stdout/stderr 与非零 exit；
+- 预取消无副作用、运行中取消保留既有输出和自定义 cause、timeout 杀 child/grandchild、正常 exit 后 quiet background 存活、shell exit 后 active descendant 输出完整 drain；
+- 跨 chunk UTF-8、无效尾部 replacement、2000 行/50 KiB tail、单个超长 UTF-8 行、阈值前 chunks 回填、raw temp file 完整一致和 footer；
+- `bash-created file -> read` 与 `edit -> bash` 通过公开构造器验证同一 Workspace 的真实副作用可见性。
+
+冻结 Pi 在 TypeScript tool 内把 timeout、abort 和非零 exit 组装成 thrown `Error` 文本；pi-go 保持已经确定的通用 Go Tool 契约，由 `Execute` 分别返回有界 output 与 idiomatic error，再由 Agent 统一形成 model-visible call-local error result。因此保留信息和循环继续语义一致，但错误文案不机械复制 TypeScript。
+
+简化审查将阈值前 raw chunks 收敛为 `bytes.Buffer`，移除重复的 stream-error 状态，并避免为字符串 byte length 创建临时 `[]byte`；复用审查确认现有 `toolargs` 已用于真正共享的参数边界，而 shell resolution、进程组与 accumulator 没有其他生产消费者，不应提前上移。可靠性审查补上了已重定向 descendant 的取消路径和 threshold-crossing 多 chunk 测试；还锁定完整输出临时文件首次创建失败后不能重试生成缺失 chunks 的误导文件，footer 也不声称存在完整路径。修复后没有剩余 actionable finding。
+
+最终 `make check` 完成 `go fmt ./...`、`go vet ./...`、`go test ./...` 与 `golangci-lint run ./...`，lint 为 0 issues；`make race` 全部通过，bash package 重复运行通过，Windows cross-build 也确认 portable unsupported 分支保持可构建。Windows 执行语义仍明确不属于第一期支持范围。第 05 课现在停在待理解确认，只有学习者明确要求后才 commit。
