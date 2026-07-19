@@ -12,9 +12,9 @@ import (
 // Run appends one user input and continues Provider turns until the model no
 // longer requests tools or the Run reaches a Provider/cancellation failure.
 func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
-	earlyResult, err := a.beginRun(ctx, userInput)
+	runStart, err := a.beginRun(ctx, userInput)
 	if err != nil {
-		return earlyResult, err
+		return RunResult{}, err
 	}
 	defer a.endRun()
 
@@ -22,7 +22,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
 	for {
 		if continuingAfterTools {
 			if cause := context.Cause(ctx); cause != nil {
-				return a.snapshot(), cause
+				return a.snapshotRun(runStart), cause
 			}
 		}
 
@@ -34,11 +34,11 @@ func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
 			if len(calls) > 0 {
 				a.appendToolResults(failedTurnToolResults(calls, message.StopReason))
 			}
-			return a.snapshot(), turnErr
+			return a.snapshotRun(runStart), turnErr
 		}
 
 		if len(calls) == 0 {
-			return a.snapshot(), nil
+			return a.snapshotRun(runStart), nil
 		}
 
 		var results []ai.ToolResultMessage
@@ -50,56 +50,27 @@ func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
 		}
 		a.appendToolResults(results)
 		if runErr != nil {
-			return a.snapshot(), runErr
+			return a.snapshotRun(runStart), runErr
 		}
 		continuingAfterTools = true
 	}
 }
 
-func (a *Agent) beginRun(ctx context.Context, userInput string) (RunResult, error) {
+func (a *Agent) beginRun(ctx context.Context, userInput string) (int, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	if a.active {
-		return RunResult{}, ErrRunActive
+		return 0, ErrRunActive
 	}
 	if cause := context.Cause(ctx); cause != nil {
-		return RunResult{Transcript: ai.CloneMessages(a.transcript)}, cause
+		return 0, cause
 	}
 
 	a.active = true
-	a.transcript = append(a.transcript, ai.UserMessage{Content: userInput})
-	return RunResult{}, nil
-}
-
-func (a *Agent) requestSnapshot() ai.Request {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return ai.CloneRequest(ai.Request{
-		SystemPrompt: a.systemPrompt,
-		Messages:     a.transcript,
-		Tools:        a.toolSchemas,
-	})
-}
-
-func (a *Agent) appendAssistant(message ai.AssistantMessage) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.transcript = append(a.transcript, ai.CloneAssistantMessage(message))
-}
-
-func (a *Agent) appendToolResults(results []ai.ToolResultMessage) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, result := range results {
-		a.transcript = append(a.transcript, result)
-	}
-}
-
-func (a *Agent) snapshot() RunResult {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return RunResult{Transcript: ai.CloneMessages(a.transcript)}
+	runStart := len(a.workingContext)
+	a.workingContext = append(a.workingContext, ai.UserMessage{Content: userInput})
+	return runStart, nil
 }
 
 func (a *Agent) endRun() {
@@ -143,7 +114,7 @@ func receiveAssistant(ctx context.Context, stream ai.Stream) (ai.AssistantMessag
 		case nil:
 			return assistantFromProtocolError("provider returned a nil event without an error")
 		default:
-			// Formation events are not authoritative transcript entries.
+			// Formation events are not authoritative Working Context messages.
 		}
 	}
 }

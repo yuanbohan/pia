@@ -2,7 +2,7 @@ package ai
 
 import "encoding/json"
 
-// Message is one ordered entry in the model transcript.
+// Message is one ordered entry in the model/tool dialogue.
 type Message interface {
 	isMessage()
 }

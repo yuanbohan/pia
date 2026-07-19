@@ -22,7 +22,7 @@ func CloneRequest(request Request) Request {
 	return cloned
 }
 
-// CloneMessages returns an ownership-independent copy of a transcript.
+// CloneMessages returns an ownership-independent copy of ordered messages.
 func CloneMessages(messages []Message) []Message {
 	if messages == nil {
 		return nil
@@ -34,7 +34,7 @@ func CloneMessages(messages []Message) []Message {
 	return cloned
 }
 
-// CloneMessage returns an ownership-independent copy of one transcript entry.
+// CloneMessage returns an ownership-independent copy of one message.
 func CloneMessage(message Message) Message {
 	switch message := message.(type) {
 	case nil:

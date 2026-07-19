@@ -15,6 +15,7 @@ deepened: 2026-07-19
 
 - **Objective:** 交付第一版可真实使用的 one-shot coding agent，让临时命令 `pia` 在当前工作目录中接收一个任务、调用 DeepSeek 和四个 coding tools，并只输出最终回答。
 - **Product authority:** 本计划的 Product Contract 是本次工作的产品契约；它在冲突处取代 `docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 的 Lesson 06 旧设定。冻结 Pi 源码只提供语义和设计证据，不自动成为 pi-go 的需求。
+- **Later ownership refinement:** Lesson 07 的 D46–D51 后续修正了内部消息所有权：`internal/coding` 的私有 Conversation Owner 保存完整 History，`internal/agent` 保存 Working Context 并返回 run-local delta。本计划的 one-shot prompt、输出、trace 和验收契约不变；下文旧的“Agent owns transcript”只描述 Lesson 06 当时的实现，不再定义当前内部 API。
 - **Execution profile:** 在现有 `internal/ai`、`internal/agent`、`internal/coding` 分层上完成代码、离线测试、文档与本地真实模型验收。
 - **Stop condition:** 只有两个互相独立、从原始错误项目复制出的全新 workspace 连续通过专家验收，才算达到本计划的真实模型里程碑。
 - **Open blockers:** 无阻塞规划的问题；临时 trace 契约和具体文件布局可在技术规划中收敛。
@@ -36,7 +37,7 @@ pi-go 已有模型协议、DeepSeek Provider、Agent loop 和 `read`、`write`�
 
 ### Key Decisions
 
-- **保留现有三层边界。** (session-settled: user-approved — chosen over 直接在 `main` 中组装全部依赖或机械复制 Pi 包名: 现有依赖方向已经表达 AI、通用 Agent 与 coding 应用的职责。) `internal/ai` 负责模型协议，`internal/agent` 负责 transcript 和 model/tool loop，`internal/coding` 负责 workspace、coding prompt、tools 与 one-shot composition，`cmd/pia` 只负责进程边界。
+- **保留现有三层边界。** (session-settled: user-approved — chosen over 直接在 `main` 中组装全部依赖或机械复制 Pi 包名: 现有依赖方向已经表达 AI、通用 Agent 与 coding 应用的职责。) `internal/ai` 负责模型协议，`internal/agent` 负责 Working Context 和 model/tool loop，`internal/coding` 负责完整 Conversation History、workspace、coding prompt、tools 与 one-shot composition，`cmd/pia` 只负责进程边界。
 - **`pia` 只是临时命令名。** (session-settled: user-directed — chosen over 在本阶段确定最终品牌名: 命名不应阻塞真实闭环。) 本阶段不围绕它建立稳定 SDK、配置命名或品牌承诺。
 - **one-shot 默认只输出最终回答。** (session-settled: user-directed — chosen over 实时显示 thinking、tool call 和 bash output: 真正的实时体验留给后续 TUI。) 正常运行不显示进度，也不显示数据披露警告。
 - **模型配置固定。** (session-settled: user-directed — chosen over 第一版提供模型、thinking 和 effort 配置矩阵: 单一配置更利于收敛首个真实验收。) 使用 `deepseek-v4-pro`，明确开启 thinking，并使用 high reasoning effort。
@@ -50,7 +51,7 @@ pi-go 已有模型协议、DeepSeek Provider、Agent loop 和 `read`、`write`�
 
 - A1. 操作者：在目标项目目录运行 `pia "<task>"`，提供继承自 shell 的 Provider 凭据，并阅读最终回答。
 - A2. Coding Application：读取 workspace context、组装 system prompt、注册 coding tools，并驱动通用 Agent。
-- A3. DeepSeek：根据完整 transcript 和工具 schemas 生成 assistant 文本或 tool calls。
+- A3. DeepSeek：根据当前完整 Working Context snapshot 和工具 schemas 生成 assistant 文本或 tool calls。
 - A4. 验收者：创建本地错误项目、独立检查 Agent 的改动和测试，并判断任务是否真实完成。
 
 ### Architecture Boundary
@@ -58,7 +59,7 @@ pi-go 已有模型协议、DeepSeek Provider、Agent loop 和 `read`、`write`�
 ```mermaid
 flowchart TB
   CLI[cmd/pia: process boundary] --> Coding[internal/coding: coding application]
-  Coding --> Agent[internal/agent: transcript and model/tool loop]
+  Coding --> Agent[internal/agent: Working Context and model/tool loop]
   Agent --> AI[internal/ai: model-neutral protocol]
   AI --> Provider[DeepSeek provider]
   Agent --> Contracts[agent-owned tool contracts]
@@ -194,7 +195,7 @@ Product Contract changed in R3, R11, R12 and R15 without changing the settled pr
 
 - KTD1. **Preserve the existing three-layer boundary.** `internal/coding` composes the coding application over `internal/agent`, while `internal/agent` continues to depend only on model-neutral `internal/ai`; `cmd/pia` remains a host adapter. (session-settled: user-approved — chosen over assembling all behavior in `main` or copying Pi package names: the current dependency direction already expresses the intended responsibilities.)
 - KTD2. **Keep `pia` temporary.** The name appears in the local command, help/error context and docs, but does not create public packages, stable config or compatibility promises. (session-settled: user-directed — chosen over blocking this milestone on final branding: naming should not delay the real loop.)
-- KTD3. **Project only the final answer.** The one-shot path consumes the existing authoritative transcript after Run settlement and never adds an Agent event sink or Tool progress callback. (session-settled: user-directed — chosen over live thinking, tool-call and bash display: real-time presentation belongs to a future TUI consumer.)
+- KTD3. **Project only the final answer.** The one-shot path consumes the complete Conversation History snapshot after Run settlement and never adds an Agent event sink or Tool progress callback. (session-settled: user-directed — chosen over live thinking, tool-call and bash display: real-time presentation belongs to a future TUI consumer.)
 - KTD4. **Freeze the first product model.** The coding composition uses `deepseek-v4-pro` with DeepSeek thinking enabled and `reasoning_effort=high`; the lower Provider stays configurable for its existing tests and other internal consumers. (session-settled: user-directed — chosen over a Phase 1 model and reasoning configuration matrix: one fixed profile makes the first real acceptance comparable.)
 - KTD5. **Assemble one coding-owned system prompt.** The prompt describes only the current identity, four tools, coding guidance, root project instructions and canonical cwd; Agent and Provider contracts still receive one string. (session-settled: user-approved — chosen over copying Pi's complete resource loader or moving coding prose into the Provider: this preserves Pi's ownership boundary without claiming unsupported features.)
 - KTD6. **Keep process success separate from task success.** A nil Agent Run error maps to a zero CLI exit even when later expert checks reject the code; no assistant phrase, tool sequence or Goal Runtime field can self-certify the task. (session-settled: user-directed — chosen over inferring success from the assistant response or loop termination: repository facts are authoritative.)
@@ -203,18 +204,19 @@ Product Contract changed in R3, R11, R12 and R15 without changing the settled pr
 - KTD9. **Use an opt-in post-run trace.** The trace captures the settled coding context and transcript without changing stdout/stderr or introducing real-time events. It is deliberately created after settlement as diagnostics, not reserved before Run as an execution or audit gate. (session-settled: user-approved — chosen over speculative event infrastructure or no diagnostic evidence: prompt and loop iteration need a local audit trail.)
 - KTD10. **Let one coding Run own the workspace lifetime.** The coding application opens one canonical `Workspace`, constructs the four existing tools and Agent, waits for Run settlement, materializes the result, then closes the workspace and joins cleanup failures without hiding the primary error. This follows `internal/coding/workspace.go` and the settlement patterns already used by the Agent and Bash.
 - KTD11. **Inject Faux only behind the package test seam.** The exported Phase 1 coding entry constructs the fixed DeepSeek product profile; an unexported provider-injected path gives `internal/coding` deterministic integration tests without exposing Provider selection as a `pia` feature.
-- KTD12. **Do not change generic AI or Agent contracts.** Final projection, typed trace conversion and project-context loading are coding-application concerns; `internal/agent/events.go`, new request fields and workflow-specific tools are out of scope.
+- KTD12. **Keep one-shot product concerns out of generic AI and Agent contracts.** Final projection, typed trace conversion and project-context loading remain coding-application concerns; `internal/agent/events.go`, new request fields and workflow-specific tools are out of scope. Lesson 07 later changed the generic ownership/result contract for its own context-boundary requirement, not for one-shot presentation.
 - KTD13. **Keep lifecycle and product-configuration seams private and narrow.** Offline tests may inspect the fixed DeepSeek configuration and control an owned workspace's close path, but those seams stay package-private and do not become Provider/workspace interfaces for application callers.
 
 ### High-Level Technical Design
 
-The one-shot process preserves the current authoritative transcript loop and adds lifecycle ownership around it:
+The one-shot process now composes a coding-owned Conversation History around the Core Agent Working Context while preserving the same observable lifecycle:
 
 ```mermaid
 sequenceDiagram
   participant CLI as cmd/pia
   participant Coding as internal/coding
   participant Workspace as coding.Workspace
+  participant Conversation as coding conversation owner
   participant Agent as internal/agent
   participant Provider as DeepSeek
   participant Tools as read/write/edit/bash
@@ -223,15 +225,19 @@ sequenceDiagram
   Coding->>Workspace: open canonical root
   Coding->>Coding: load root instructions and assemble prompt
   Coding->>Agent: fixed provider, prompt, four tools
+  Coding->>Conversation: Core Agent
+  Conversation->>Agent: accepted Run
   loop Until assistant stops calling tools
-    Agent->>Provider: prompt, complete transcript, schemas
+    Agent->>Provider: prompt, Working Context snapshot, schemas
     Provider-->>Agent: terminal assistant
     opt Tool calls
       Agent->>Tools: execute ordered stages
       Tools-->>Agent: ordered tool results
     end
   end
-  Agent-->>Coding: transcript and Go error
+  Agent-->>Conversation: run-local NewMessages and Go error
+  Conversation->>Conversation: commit complete History
+  Conversation-->>Coding: History snapshot and Go error
   Coding->>Workspace: close after settlement
   Coding-->>CLI: materialized coding result and error
   opt PIA_TRACE_PATH is set
@@ -369,9 +375,9 @@ flowchart TB
 
 **Dependencies:** U2.
 
-**Files:** `internal/coding/runtime.go`, `internal/coding/runtime_test.go`, `internal/coding/trace.go`, `internal/coding/trace_test.go`.
+**Files:** `internal/coding/runtime.go`, `internal/coding/conversation.go`, `internal/coding/runtime_test.go`, `internal/coding/conversation_test.go`, `internal/coding/trace.go`, `internal/coding/trace_test.go`.
 
-**Approach:** The exported product Run validates the DeepSeek key, obtains the fixed product configuration through a package-private helper, opens one Workspace, builds all four tools and one Agent, then closes the Workspace after settlement. Narrow package-private seams enable Faux composition tests and close-order/error tests without exposing Provider or workspace selection. The result keeps canonical workspace, actual prompt, model/tool context and transcript without duplicating final text; only after a nil Run error does coding-owned projection scan backward for the last assistant and concatenate its text blocks. An explicit typed trace DTO represents all message/content variants and the top-level error without modifying generic protocol types.
+**Approach:** The exported product Run validates the DeepSeek key, obtains the fixed product configuration through a package-private helper, opens one Workspace, builds all four tools and one Core Agent, and drives it through a private coding-owned Conversation Owner before closing the Workspace after settlement. Narrow package-private seams enable Faux composition tests and close-order/error tests without exposing Provider or workspace selection. The result keeps canonical workspace, actual prompt, model/tool context and complete History snapshot without duplicating final text; only after a nil Run error does coding-owned projection scan backward for the last assistant and concatenate its text blocks. An explicit typed trace DTO represents all message/content variants and the top-level error without modifying generic protocol types.
 
 **Execution note:** Prove the multi-turn composition with Faux before invoking DeepSeek; use real temp workspaces so tool side effects, prompt context and cleanup share the production path.
 
@@ -481,7 +487,7 @@ Default verification never reads `DEEPSEEK_API_KEY` or contacts the network. Rea
 - Product Contract R1-R22, Flows F1-F3 and Acceptance Examples AE1-AE8 are traced to active implementation units and observable evidence.
 - U1 has removed all active Lesson 06 contract conflicts and established `tmp/` as ignored local evidence space.
 - U2 produces one stable Pi-grounded prompt with canonical cwd, exact root-file precedence, bounded UTF-8 context and no unsupported feature claims.
-- U3 composes fixed DeepSeek, one Workspace, all four real tools and the existing Agent loop without modifying generic AI/Agent contracts; its typed result and trace preserve settled transcript/error semantics.
+- U3 composes fixed DeepSeek, one Workspace, all four real tools, the Core Agent loop and the private Conversation Owner; its typed result and trace preserve complete settled History/error semantics while generic ownership follows Lesson 07.
 - U4 builds a temporary `pia` command whose success output contains only final assistant text and whose configuration, trace or Run failures are stderr/nonzero.
 - U5 leaves accurate course records and two retained, independent successful acceptance workspaces whose Agent tests expose the original bug and whose executable prints `55`.
 - All Verification Contract gates pass after the final code, prompt, task and documentation state; any change that can affect model behavior invalidates earlier real-run evidence.

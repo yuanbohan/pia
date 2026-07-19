@@ -290,7 +290,7 @@
 ### D43. 后续课程采用滚动式大纲，只编号近期闭环
 
 - 日期：2026-07-19
-- 决定：目前只为二期前三课分配稳定编号：Lesson 07 建立完整 conversation history 与 active model context 的所有权边界；Lesson 08 完成请求前的 context budget/compaction 核心闭环；Lesson 09 完成 Skills 渐进披露。Skills 保持为二期第 03 课。Runtime 韧性、事件与文本交互、Session 持久化/恢复、TUI 和稳定评测只保留为后续方向，等前三课产生真实证据后再拆分和编号。
+- 决定：目前只为二期前三课分配稳定编号：Lesson 07 建立完整 conversation history、Agent working context 与 Provider request snapshot 的所有权边界；Lesson 08 完成请求前的 context budget/compaction 核心闭环；Lesson 09 完成 Skills 渐进披露。Skills 保持为二期第 03 课。Runtime 韧性、事件与文本交互、Session 持久化/恢复、TUI 和稳定评测只保留为后续方向，等前三课产生真实证据后再拆分和编号。
 - 范围：Lesson 07 不做 compaction、持久化或 Skills；Lesson 08 不同时吸收 Provider retry、branch summary 或持久化；Lesson 09 不扩建完整 ResourceLoader、extensions 或 MCP。大纲不预先决定具体 Go API、package、算法和完整测试矩阵，开课时才根据冻结 Pi 与当前实现补齐。
 - 原因：context ownership 到 compaction 仍是解锁长任务的主线，Skills 是已经确认的第三个独立闭环。更远能力的依赖和责任会被这些实现改变；现在给它们固定课次或详细设计，只会制造很快失效的计划。
 
@@ -306,6 +306,49 @@
 - 决定：完成 coding-relevant Pi 能力覆盖后，建立稳定、可重复的 pi-go 与冻结 Pi 对照评测。公平比较固定模型/Provider profile、任务与初始仓库并做多次独立运行；以客观 resolve rate 为主要能力指标，同时记录成本、turn、时延、tool error、恢复和长上下文表现，并把协议完整性与安全回归作为门槛。Codex 和 Grok Build 只提供候选机制与工程证据，不替代 Pi 对照组。
 - 范围：当前只确定目标和公平性原则，不提前确定 benchmark corpus、runner 架构、统计阈值、trace schema 或产物存储。Lesson 06 的本地 fixture 仍只是第一期验收；正式评测方向在前置能力稳定后另行拆课。
 - 原因：项目目标是比 Pi 完成 coding 任务更强，而不是仅达到文件结构或功能清单相似。没有同模型、同任务、重复运行和客观判据，“超过 Pi”只能是主观印象，不能指导后续优化。
+
+### D46. 完整 Conversation History 与 Core Agent Working Context 分属不同 owner
+
+- 日期：2026-07-19
+- 决定：Lesson 07 采用外层最小内存 Conversation Owner 保存完整、有序的 Conversation History；Core Agent 只拥有可替换的 Working Context，并继续负责 Provider/tool loop；每次 Provider 调用使用由 Working Context 构造的 ownership-independent Request Snapshot。这里的 Conversation Owner 是语义责任，不预先要求同名 Go 类型或独立 package。
+- 范围：当前决定不引入持久化 Session、entry tree、branch、compaction 算法、事件订阅或 TUI。Conversation Owner 与 Core Agent 之间的同步、首份 package 归属、active 边界、消息复制和 Working Context replacement 分别采用 D47 至 D51。
+- 原因：冻结 Pi 在 `message_end` 后先把 terminal assistant 保存进完整 Session entries，再由外层在 threshold/overflow compaction 后替换 `agent.state.messages`；overflow error 可以保留在完整历史中，却从 retry 的 Working Context 中移除。当前 pi-go 的单 `transcript` slice 在无 compaction 时成立，但继续合并会迫使 Lesson 08 在“丢失原始历史”和“压缩不减少模型输入”之间二选一。只确定最小内存 owner 边界可以解决这项真实张力，同时避免提前复制 Pi 的完整 Session 基础设施。
+
+### D47. Core Agent 以同步 run-local message delta 提交一次 Run 的新增消息
+
+- 日期：2026-07-19
+- 决定：一次 accepted Core Agent Run 在 settlement 后同步返回该 Run 新增的完整有序 message delta，并同时返回独立的 Go error；Conversation Owner 无论 error 是否为 nil，都先把 ownership-independent delta 一次性追加到 Conversation History。acceptance point 前取消或 concurrent Run rejection 返回空 delta且不修改 History。当前同步路径使用普通函数返回，不引入 Go channel、message callback 或完整 Agent event stream。
+- 范围：这里确定的是 settlement 语义，不预先锁定 Go struct/field 名；课程使用 `NewMessages` 表示该 delta。History 在当前最小内存实现中以 settled Run 为提交边界，不承诺 active Run 中途可观察或进程崩溃恢复。实时持久化、TUI progress、extensions、steering/follow-up 和多订阅者事件仍在后续真实消费者出现时设计。
+- 原因：冻结 Pi 的低层 `runAgentLoop()` / `runAgentLoopContinue()` 已经独立维护并返回 `newMessages`，同时另行发出逐消息和 `agent_end` 事件；前者表达 Run 结果，后者服务 `AgentSession` persistence、extensions 与 UI。pi-go 当前只有 settlement 后的 Conversation History 消费者，直接返回 delta 足够；提前使用 channel/callback 会额外引入 close、backpressure、drain、panic、reentrancy 和 listener settlement 契约，却没有当前收益。
+
+### D48. 首份 Conversation Owner 是 coding-owned 私有实现
+
+- 日期：2026-07-19
+- 决定：首份 Conversation Owner 实现在现有 `internal/coding` package 的独立 `conversation.go` 中，使用未导出的类型协调具体 Core Agent 与完整内存 Conversation History。当前不创建 `internal/conversation`、`internal/session` 或同名公共抽象，也不把完整 History 的所有权放回 `internal/agent`。
+- 范围：这是第一个真实 Coding Agent 消费者的 package 归属，不宣称 research、OCR、web search 等未来应用必然复用同一种 history policy。出现第二个非 coding 消费者时，必须从双方已经证明相同的责任重新审查 package 布局，再决定是否提取共享实现或接口；概念上的通用性本身不是提前建包的证据。
+- 原因：冻结 Pi 同样把持久 conversation/session 协调放在 coding-agent 的 `AgentSession`，而不是低层 agent loop。pi-go 当前只有 Coding Agent 需要该责任；将私有实现放在 composition 所在应用层，既保持 Core Agent 通用，也避免为尚不存在的消费者设计宽泛 API。独立文件让 history ownership 与 `runtime.go` 的一次性装配责任保持收敛。
+
+### D49. Conversation Owner 以 fail-fast active guard 保证 Run 提交顺序
+
+- 日期：2026-07-19
+- 决定：同一 Conversation 同时最多接受一个 active Run。Conversation Owner 的 active 边界从 Run acceptance 持续到 Core Agent 返回、run-local message delta 提交进 Conversation History并生成返回 snapshot 之后；这段时间的 concurrent Run 立即返回 active-run error，不阻塞也不进入隐式队列。Core Agent 保留自己的 active guard，分别保护其 Working Context。
+- 范围：该决定只串行化同一 Conversation 的 Run；不同 Conversation 可以并行。一个 accepted Run 内仍可按既有工具调度契约并行执行连续的 parallel-safe tool calls。steering、follow-up、显式输入队列、优先级和中途插话仍不属于本课。
+- 原因：Core Agent 的 deferred active release 会在调用方收到 result 之前发生；如果 Conversation Owner 没有覆盖 History commit 的外层 guard，Run B 可能在 Run A 已更新 Working Context、但尚未提交完整 History 的间隙被接受，从而使 Core Agent 处理顺序与 Conversation History 提交顺序不一致。阻塞第二个调用则会隐式引入尚未设计生命周期的输入队列。
+
+### D50. Run delta 只在真实所有权边界深复制
+
+- 日期：2026-07-19
+- 决定：Core Agent 的 `RunResult` 使用 `NewMessages` 表示本次 accepted Run 的 run-local message delta，不再把完整 Working Context 命名为 `Transcript` 返回。`NewMessages` 必须与 Core Agent Working Context 深度隔离；Conversation Owner 接收后取得这份 delta 的内部所有权并直接追加到完整 History，不做第二次无收益的 clone。Coding Agent 返回的 `RunResult.Transcript` 仍是完整 Conversation History 的 deep-cloned snapshot，调用者不能反向修改 owner state。
+- 范围：ownership transfer 只发生在 Conversation Owner 调用 Core Agent 的内部同步路径；Conversation Owner 不把接管的 delta slice 或嵌套可变内容原样暴露出去。Provider Request Snapshot、Provider terminal message 与 D51 的 Working Context replacement 仍各自在自己的 owner 边界执行深复制。
+- 原因：Core Agent 与 Conversation History 是不同 owner，因此必须隔离；Conversation Owner 接管一份已经独立的返回值后没有第二个共享 owner，再 clone 只会增加成本并模糊真正的边界。最终完整 History snapshot 会跨到调用者，因此那里仍必须 clone。
+
+### D51. Working Context 只能在 Core Agent idle 时原子替换
+
+- 日期：2026-07-19
+- 决定：Core Agent 提供窄方法 `ReplaceWorkingContext([]ai.Message) error`。该方法只在没有 active Run 时深复制并原子替换当前 Working Context；active Run 期间立即返回 active-run error，不等待、不排队，也不在同一 Run 的 Turns 之间切换 context。替换不读取或修改 Conversation History。
+- 范围：这是 Lesson 08 compaction 投影可接入的状态边界，不在本课实现摘要、token budget、overflow recovery 或通用 message-graph validator。方法是即时内存操作，不接收 `context.Context`，也不返回旧 context 或暴露可变 Agent state。
+- Pi 差异：冻结 Pi 通过赋值 `agent.state.messages` 替换 working messages，setter 只复制顶层数组；coding-agent 的实际 compaction replacement 位于 `agent_end` 之后、下一次 prompt 之前。pi-go 保留这一 idle-time 使用时序，但用显式 Go 方法、active guard 和深复制收紧所有权，而不暴露可变 state object。
+- 原因：Run 内后续 Turn 依赖前面 Turn 和 tool results；中途替换会让同一 Run 使用两套上下文，破坏 delta 与 Provider request 的可推理关系。等待式 API 又会隐式引入生命周期和排队语义；调用方本就应由 Conversation Owner 在 Run settlement 之后协调 replacement，因此 fail-fast 最清晰。
 
 ## 变更记录
 
@@ -350,3 +393,12 @@
 - 2026-07-19：Lesson 06 在最终产品代码、system prompt 和任务文字冻结后完成两次连续真实 DeepSeek 验收；两个新进程都从 untouched baseline 修复通用 Fibonacci base case、增加能让原错误实现失败的测试，并通过独立测试与程序输出 `55`。本地 workspace 和 trace 保留在 ignored `tmp/`，课程进入待理解确认且尚未提交。
 - 2026-07-19：学习者独立运行第三个 `pia` acceptance workspace，复核了最终修改、测试与 trace，并确认理解 stable system prompt、每轮完整 transcript 重放、结构化 tool schemas、thinking replay 与 final-only 输出的组合流程；随后明确要求提交并推送第 06 课。
 - 2026-07-19：完成第一期后重新核对 Pi、Codex 和 Grok Build 的长任务与交互边界；学习者确认后续课程采用滚动式大纲，只固定最近三个闭环，Skills 位于二期第 03 课。所有 XLarge 方向必须在开课前拆分，远期 TUI 与稳定 Pi 对照评测暂不绑定课次和实现细节。
+- 2026-07-19：学习者明确开始 Lesson 07，并要求把“每课开课先重读对应 Pi 源码、再修正甚至推翻大纲”的流程写入 `AGENTS.md`。冻结源码校准确认 Pi 实际区分完整 session entries、Agent working messages 与 request-local transformed messages，Lesson 07 因此从含糊的两层 active-context 表述修正为三种角色的所有权课程，但仍不引入 compaction 或持久化。
+- 2026-07-19：学习者接受 Lesson 07 的 owner 分离方向：外层最小内存 Conversation Owner 保存完整 Conversation History，Core Agent 保存可替换 Working Context，Provider Request Snapshot 保持 request-local；同步机制留待本课下一步讨论。仓库新增 `CONCEPTS.md`，为 Agent、Core Agent、Coding Agent、Conversation、Working Context、Session 等跨课程词汇记录明确包含项和排除项。
+- 2026-07-19：学习者确认一次 Core Agent Run 可以包含多个 Turns 和 Messages，并接受 settlement 后同步返回 run-local `NewMessages` delta、由 Conversation Owner 批量提交 History 的方向；当前不使用 Go channel、callback 或完整事件流。`CONCEPTS.md` 同步增加 Run、Turn 与 Run Message Delta 的有界定义。
+- 2026-07-19：学习者确认首份 Conversation Owner 作为 Coding Agent 的私有应用层实现放在 `internal/coding/conversation.go`；当前不建立通用 conversation/session package，也不把完整 History 放回 Core Agent。第二个非 coding 消费者出现时再依据已证明的共同责任重新审查并提取。
+- 2026-07-19：学习者选择 Conversation Owner 自有的 fail-fast active guard，覆盖 Core Agent Run 到 History commit 和返回 snapshot 的完整边界；同一 Conversation 的 accepted Runs 保持顺序，不建立隐式等待队列，Core Agent guard 继续独立保护 Working Context。
+- 2026-07-19：学习者接受最小深复制契约：Core Agent 以 ownership-independent `RunResult.NewMessages` 返回 run-local delta，Conversation Owner 直接接管并提交，Coding Agent 的完整 `RunResult.Transcript` 继续作为 deep-cloned History snapshot；不在同一 owner 内重复 clone。
+- 2026-07-19：学习者确认 Core Agent 使用 idle-only `ReplaceWorkingContext`：输入深复制、替换原子化、active 时立即失败，不允许一个 Run 的不同 Turns 使用两套 context；Pi 的可变 state setter 不机械移植到 Go。
+- 2026-07-19：Lesson 07 按 D46–D51 完成实现：Core Agent 改为 Working Context 加 run-local `NewMessages`，coding-owned 私有 Conversation Owner 提交完整 History，idle-only replacement 提供 Lesson 08 接入点。完整 tests、vet 和 race 通过，课程进入待理解确认且尚未提交。
+- 2026-07-19：学习者确认理解 Lesson 07 的 Core Agent delta、Conversation History commit 与 idle-only replacement 主线，并明确要求提交；课程状态更新为已提交，不夹带 Lesson 08 工作。

@@ -4,7 +4,7 @@
 
 项目以课程驱动：先阅读冻结的 Pi 源码并提炼可观察契约，再完成对应 Go 实现、测试、讨论记录和一次由学习者批准的提交。
 
-第一阶段只构建最小 coding loop：Agent 在当前进程中保留同一对话的完整有序 transcript，DeepSeek 每轮接收全部历史，Agent 多轮调用 `read`、`write`、`edit`、`bash` 并把 tool results 追加回 transcript，直到模型停止调用工具。Lesson 06 用临时命令名 `pia` 把这些能力组装为当前目录中的 one-shot coding agent，并通过本地、被忽略的 Go bug-fix 项目验证真实闭环。
+第一阶段只构建最小 coding loop；Lesson 07 进一步明确其内存所有权：Coding Agent 的 Conversation Owner 保存同一对话的完整有序 History，Core Agent 保存可替换的 Working Context，每次 DeepSeek 请求使用后者的独立 snapshot。自动 compaction 尚未加入，因此两份状态当前内容相同；Agent 可以多轮调用 `read`、`write`、`edit`、`bash` 并追加 tool results，直到模型停止调用工具。Lesson 06 用临时命令名 `pia` 把这些能力组装为当前目录中的 one-shot coding agent，并通过本地、被忽略的 Go bug-fix 项目验证真实闭环。
 
 第一阶段不实现 Goal Runtime、Session 持久化、TUI、公共 SDK、RPC/IM、多用户、多仓库、worktree/GitHub 管理、权限策略矩阵或 Pi 对比工具。bash 不是 sandbox；具体安全边界和验收约束记录在完整实施计划中。
 
@@ -21,6 +21,7 @@
 - [第 4 课：OpenAI-Compatible DeepSeek Provider](docs/course/lessons/04-deepseek-provider.md)
 - [第 5 课：Coding Tools 与 Workspace 边界](docs/course/lessons/05-coding-tools.md)
 - [第 6 课：Headless one-shot Coding Task](docs/course/lessons/06-headless-coding-task.md)
+- [第 7 课：Conversation History、Working Context 与 Request Snapshot](docs/course/lessons/07-conversation-history-and-active-context.md)
 
 ## 临时 one-shot 命令
 
@@ -50,4 +51,4 @@ make check
 make race
 ```
 
-当前进度：第 00 至 06 课已完成并提交；第 06 课“Headless one-shot Coding Task”已通过两次连续真实 DeepSeek 验收和学习者的独立手动运行复核。后续采用滚动式大纲，目前只固定 Lesson 07 至 09 的 context ownership、compaction 核心和 Skills 三个闭环；更远方向等前课产生证据后再拆分。详细信息见[课程总纲](docs/course/README.md#后续课程的滚动式大纲)。
+当前进度：第 00 至 07 课已完成并提交；Lesson 07 已把完整 Conversation History、Core Agent Working Context 与 Provider Request Snapshot 拆成独立 owner，并完成离线、race 和 lint 验证。Lesson 08–09 仍为待开始的大纲。详细信息见[课程总纲](docs/course/README.md#后续课程的滚动式大纲)。

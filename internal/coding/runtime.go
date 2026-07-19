@@ -40,7 +40,8 @@ type ModelInfo struct {
 }
 
 // RunResult is the settled coding context retained for final projection and
-// optional diagnostics. The separate Go error remains the Run outcome.
+// optional diagnostics. Transcript is the complete Conversation History; the
+// separate Go error remains the Run outcome.
 type RunResult struct {
 	WorkspacePath string
 	SystemPrompt  string
@@ -112,7 +113,7 @@ func runWithWorkspaceOperations(
 	}
 	result.SystemPrompt = prompt
 
-	runtime, err := agent.New(agent.Config{
+	core, err := agent.New(agent.Config{
 		Provider:     provider,
 		SystemPrompt: prompt,
 		Tools:        tools,
@@ -120,8 +121,12 @@ func runWithWorkspaceOperations(
 	if err != nil {
 		return result, fmt.Errorf("coding: create Agent: %w", err)
 	}
-	agentResult, runErr := runtime.Run(ctx, input.Task)
-	result.Transcript = agentResult.Transcript
+	conversation, err := newConversation(core)
+	if err != nil {
+		return result, err
+	}
+	history, runErr := conversation.run(ctx, input.Task)
+	result.Transcript = history
 	if runErr != nil {
 		return result, fmt.Errorf("coding: run Agent: %w", runErr)
 	}

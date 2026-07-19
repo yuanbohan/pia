@@ -17,7 +17,7 @@ product_contract_source: ce-plan-bootstrap
 
 第一阶段只证明最短闭环：模型接收基础上下文，产生文本或工具调用，Runtime 安全调度 `read`、`write`、`edit`、`bash`，把结果加入 transcript 并继续调用模型，直到模型停止调用工具。课程不以复制 TypeScript 文件结构为目标，也不在第一阶段解决 Session、Goal Runtime、权限审批、IM 或多仓库管理。
 
-本计划继续作为第一阶段基础契约。自 2026-07-19 起，Lesson 06 的命令、prompt、输出、trace 和真实验收行为以 `docs/plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md` 为权威；本文件中与它冲突的早期 `cmd/pi-go`、实时事件、启动 warning、tracked fixture/harness 和 acceptance deadline 设定均已被取代。其余权威顺序为：本计划的 Product Contract 与 Planning Contract → `docs/course/decisions.md` 的当前决定 → 当前课程文档 → 冻结 Pi 源码与测试。`session-settled:` 只标记已经由学习者明确决定、未经重新讨论和确认不得改变的事项。出现冲突时先修正文档，不让实现静默选择一套语义。
+本计划继续作为第一阶段基础契约。自 2026-07-19 起，Lesson 06 的命令、prompt、输出、trace 和真实验收行为以 `docs/plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md` 为权威；本文件中与它冲突的早期 `cmd/pi-go`、实时事件、启动 warning、tracked fixture/harness 和 acceptance deadline 设定均已被取代。Lesson 07 又以 `docs/course/decisions.md` 的 D46–D51 修正了内部消息所有权：coding-owned Conversation Owner 保存完整 History，Core Agent 保存可替换 Working Context并返回 run-local `NewMessages`；本计划中描述“Agent 返回或拥有完整 transcript”的旧里程碑文字只保留为形成过程，不再是当前 API 契约。其余权威顺序为：本计划的 Product Contract 与 Planning Contract → `docs/course/decisions.md` 的当前决定 → 当前课程文档 → 冻结 Pi 源码与测试。`session-settled:` 只标记已经由学习者明确决定、未经重新讨论和确认不得改变的事项。出现冲突时先修正文档，不让实现静默选择一套语义。
 
 执行采用交互式课程节奏。每课先讲解和讨论；涉及 Go 实现的课程再完成对应代码与测试。第 00 课是只建立 module、课程文档和验证证据的基线例外，不创建占位 Runtime package。学习者确认理解并明确要求后才能 commit。计划更新不等于自动开始下一课。
 
@@ -48,7 +48,7 @@ product_contract_source: ce-plan-bootstrap
 
 - R4. Go Agent Loop 必须保留 Pi 的 user、assistant、tool call、tool result、stop reason 和多轮 transcript 核心语义。
 - R5. 系统必须提供可脚本化 Faux Provider，使模型流、工具循环、错误和取消在无网络、无密钥的环境中确定性验证。
-- R14. Agent 的第一次 Run 把原始用户任务转换成 transcript 首条 user message；同一 Agent 后续 Run 把新 user input 追加到已有历史。每次 Provider 调用必须收到包含 workspace/cwd 说明的稳定 system prompt、截至当前的完整有序 transcript 和当前 tool schemas，不增加独立 task 或 workspace context AI 协议字段。第一阶段不实现自动压缩、摘要、持久化恢复或跨 Session 上下文。
+- R14. Coding Agent 的第一次 Run 把原始用户任务转换成 Conversation History 与 Core Agent Working Context 的首条 user message；同一 Conversation 的后续 Run 继续追加。每次 Provider 调用必须收到包含 workspace/cwd 说明的稳定 system prompt、截至当前的完整有序 Working Context snapshot 和当前 tool schemas，不增加独立 task 或 workspace context AI 协议字段。Lesson 07 不实现自动压缩、摘要、持久化恢复或跨 Session 上下文，因此当前 Working Context 与完整 History 内容相同但所有权独立。
 
 **工具循环**
 
@@ -68,7 +68,7 @@ product_contract_source: ce-plan-bootstrap
 ### Key Flows
 
 - F1. 课程闭环：选择当前课 → 阅读 Pi → 讲解与讨论 → 完成本课适用的 Go 实现和测试 → 验证 → 记录结论 → 理解确认 → 学习者要求 commit → 下一课。第 00 课按 R1 的基线例外执行。
-- F2. coding task：把用户任务转换成首条 user message，组装包含 workspace/cwd 说明的 system prompt、完整 transcript 与 tool schemas → 调用模型 → 执行工具阶段 → 把 tool results 加入 transcript → 再次调用模型 → 完整 assistant response 不含 tool calls 时结束 Run → 外部验收测试独立判断代码结果。
+- F2. coding task：把用户任务转换成首条 user message，组装包含 workspace/cwd 说明的 system prompt、Working Context snapshot 与 tool schemas → 调用模型 → 执行工具阶段 → 把 tool results 加入 Working Context → 再次调用模型 → 完整 assistant response 不含 tool calls 时结束 Run → Conversation Owner 提交 run-local delta 到完整 History → 外部验收测试独立判断代码结果。
 
 ### Acceptance Examples
 
@@ -93,7 +93,7 @@ product_contract_source: ce-plan-bootstrap
 - TUI、主题、按键、命令提示和 slash command UI。
 - 多 Provider 矩阵；真实 Provider 只实现 DeepSeek。
 - Goal Runtime、结构化 plan/progress/replan/done/blocked 状态机；第一阶段由模型决定是否继续调用工具，由外部测试判断任务是否成功。
-- Session 创建、持久化、恢复、自动 compaction、跨 Session 上下文和多 active run 管理；Agent 当前进程内的完整对话 transcript 不属于该推迟范围。
+- Session 创建、持久化、恢复、自动 compaction、跨 Session 上下文和多 active run 管理；Coding Agent 当前进程内的完整 Conversation History 与 Core Agent Working Context 不属于该推迟范围。
 - Steering、follow-up、continue、完整 listener subscription 生命周期和 Agent Manager。
 - 公共 Go SDK、gRPC、IM 适配、多用户、多仓库、worktree 与 GitHub issue/PR 管理。
 - 权限审批、trust/yolo 配置矩阵和真正 sandbox；本地命令以当前用户权限运行并完整继承父进程环境，文件工具路径边界、active call 取消和进入 transcript 前的输出限制仍是强制不变量。已经存在于父环境中的 Provider 凭据对 bash 可见，这不是 secret isolation。
@@ -135,20 +135,20 @@ product_contract_source: ce-plan-bootstrap
 - KTD14. Tool 对模型暴露 JSON Schema，并用自身的 Go 解码与校验逻辑保护执行；初始版本不实现通用 JSON Schema evaluator。
 - KTD16. 第一阶段 bash 进程树管理只支持 macOS 和 Linux；Windows 的进程模型与取消语义延后单独设计。
 - KTD17. Headless Agent Runtime 与未来 Agent Manager 分层；第一阶段只有单目录、单 active Run 的本地 Runtime。（session-settled: user-approved — chosen over building multi-tenant orchestration into the loop: 先掌握和验证 Agent 核心）
-- KTD18. Agent 保存同一对话的完整有序内存 transcript，顺序 Run 的新 user input 继续追加；第一阶段不做 Session 持久化、恢复或自动上下文整理。（session-settled: user-directed — chosen over weakening transcript ownership because the acceptance command starts with one task: 小阶段仍保留完整 Agent 设计）
+- KTD18. Coding-owned Conversation Owner 保存同一 Conversation 的完整有序内存 History，Core Agent 保存可替换 Working Context；顺序 Run 的新 user input 同时进入本次 delta 和 Working Context，settlement 后 delta 提交 History。当前不做 Session 持久化、恢复或自动上下文整理。（supersedes the original single-Agent transcript owner in Lesson 07: 完整事实与模型工作视图需要在 compaction 前先分离所有权）
 - KTD19. 工具调度使用屏障式分段：连续 `CanRunParallel` 调用并行，其他调用逐个成为串行屏障，阶段之间保持模型源顺序。（session-settled: user-approved — chosen over Pi default whole-batch parallel and whole-batch sequential fallback: 保留只读并行，同时避免 read/write/bash 竞态）
 - KTD20. `CanRunParallel` 是工具显式声明且默认 false；第一阶段只有 `read` 为 true，`write`、`edit`、`bash` 和未知工具均为 false。
 - KTD21. 普通工具错误不触发 fail-fast；结果作为模型观察继续同批后续阶段，只有 Run context 取消才停止。（session-settled: user-directed — chosen over skipping the remaining batch after any error: 避免调度器猜测依赖并保持 Pi 的恢复方式）
 - KTD22. Fibonacci baseline、运行副本、task 和 trace 只保存在被忽略的 `tmp/`，项目不提交 fixture/harness，也不实现 Pi 比较或评分模块。（session-settled: user-directed — chosen over an in-repo eval module: 当前只需要专家迭代首个真实闭环）
 - KTD23. 四个 coding tools 操作同一个 Run-pinned workspace；工具只返回原子能力的模型可用结果，不增加 `run_tests` 等 workflow tool。后一个阶段可以观察前一个阶段已完成的文件副作用。
 - KTD24. 完整接收且不含 tool calls 的 assistant response 即正常 loop completion，即使文本为空；provider/stream failure 与 Run cancellation 是不同非成功终态。第一版没有自动 wall-clock 或 model-turn budget；CLI 在 nil Run error 后投影最终文本，本地专家验收独立判断 coding task 是否成功。
-- KTD25. Run cancellation 停止新工作，取消所有已启动 child contexts，等待 stream、tool workers 和仍在执行的 bash shell/原进程组收敛后返回 canceled result；正常完成的 bash call 按 KTD35 可以有意留下后台进程，不追溯为 active work。工具阶段 terminal assistant 中的每个 tool call 都按模型源顺序得到一个 settlement result：已完成调用保留实际结果，执行中调用记录 canceled，未启动调用明确记录因 Run 取消而未执行；若 Provider aborted/error terminal 自身保留了已完成组装、尚未进入工具阶段的 calls，它们全部不执行并得到同 ID not-executed results。未启动调用绝不产生工具副作用。这样取消后的完整 transcript 可直接供同一 Agent 的下一次 Run 使用，不依赖 Provider request 阶段临时修复 orphaned tool calls；未来交互式消费者真正引入 event sink 时，再定义 observer settlement。（session-settled: user-approved — intentional divergence from Pi request-time synthetic `No result provided`: 保持 Agent transcript 为 Provider 所见历史的单一事实源）
+- KTD25. Run cancellation 停止新工作，取消所有已启动 child contexts，等待 stream、tool workers 和仍在执行的 bash shell/原进程组收敛后返回 canceled result；正常完成的 bash call 按 KTD35 可以有意留下后台进程，不追溯为 active work。工具阶段 terminal assistant 中的每个 tool call 都按模型源顺序得到一个 settlement result：已完成调用保留实际结果，执行中调用记录 canceled，未启动调用明确记录因 Run 取消而未执行；若 Provider aborted/error terminal 自身保留了已完成组装、尚未进入工具阶段的 calls，它们全部不执行并得到同 ID not-executed results。未启动调用绝不产生工具副作用。这样取消后的 Working Context 与已提交 Conversation History 都可直接用于下一次 Run，不依赖 Provider request 阶段临时修复 orphaned tool calls；未来交互式消费者真正引入 event sink 时，再定义 observer settlement。（session-settled: user-approved — intentional divergence from Pi request-time synthetic `No result provided`: 权威状态显式保存完整配对关系）
 - KTD26. Go `os.Root` 是第一阶段文件工具的 workspace boundary primitive；workspace 在 Run 开始时打开，read/create/overwrite/edit/replace 都通过 root-relative 方法完成，不使用易受 symlink TOCTOU 影响的“检查绝对路径后再普通 open”。
 - KTD27. 发送给模型的 transcript 只驻留内存；read 和 bash 在内容进入 transcript 或 Provider request 前完成大小限制。bash 超限时沿用 Pi，把完整 raw output 写入无大小上限且不会自动删除的系统临时文件并返回路径；这个恢复文件和可选 `PIA_TRACE_PATH` 都不提供 secret redaction。（session-settled: user-directed — chosen over discarding earlier output or adding a new file cap: 保留 Pi 的完整输出恢复能力并接受磁盘增长与残留风险）
-- KTD28. `Agent.Run(ctx, userInput)` 返回 Agent 当前完整 transcript 的快照与 Go error，不增加重复 Run outcome；正常完成返回 nil error，Provider/stream failure 返回非 nil error，取消保留 context cause，terminal 或合成 assistant message 留在 Agent transcript。
-- KTD29. 同一 Agent 的每条新 user message、terminal assistant 和 tool result 都追加到已有 transcript；后续 Provider call 发送完整历史。新对话通过新 Agent 或显式 reset/session boundary 开始，Agent 拒绝并发 Run。
-- KTD30. Provider terminal message、Provider Request 和 `RunResult.Transcript` 在 Agent 所有权边界深复制；调用方和 Provider 不能通过嵌套 content slice、tool-call arguments 或 tool schema JSON 反向修改 Agent transcript。clone 规则由 `internal/ai` 统一拥有并供 Faux、Agent 复用。
-- KTD31. 同一锁内先拒绝 active Run，再检查 context，并以设置 active 加追加 user 作为 Run acceptance point；预取消在该点前不修改 transcript、不调用 Provider、不产生 aborted assistant，越过该点后到 terminal settlement 前的取消保留 user 并只产生一条 aborted assistant。assistant exactly-once 只约束 assistant 数量；若该 terminal 含已完成 tool calls，KTD25 允许其后追加非执行型 settlement results。
+- KTD28. `Agent.Run(ctx, userInput)` 返回 ownership-independent run-local `NewMessages` 与 Go error，不增加重复 Run outcome；正常完成返回 nil error，Provider/stream failure 返回非 nil error，取消保留 context cause。Conversation Owner 无论 accepted Run 的 error 是否为 nil，都先提交 delta，再由 Coding Agent 返回完整 `RunResult.Transcript` snapshot。
+- KTD29. Core Agent 把每条 accepted user、terminal assistant 和 tool result 追加到 Working Context；Conversation Owner 按 Run settlement 把相同 delta 追加到完整 History。后续 Provider call 发送当前 Working Context。新对话通过新的 Conversation Owner 和 Core Agent 开始；两层 owner 都拒绝并发 Run，外层 guard 覆盖 History commit。
+- KTD30. Provider terminal message、Provider Request、Core `RunResult.NewMessages`、Working Context replacement 输入和 Coding `RunResult.Transcript` 在真实所有权边界深复制；Conversation Owner 接管已经独立的 delta 时不重复 clone。调用方和 Provider 不能通过嵌套 content slice、tool-call arguments 或 tool schema JSON 反向修改任何 owner state；clone 规则由 `internal/ai` 统一拥有。
+- KTD31. Core Agent 与 Conversation Owner 都在自己的锁内先拒绝 active Run，再检查 context；预取消在 acceptance point 前不修改 Working Context 或 History、不调用 Provider、不产生 aborted assistant。越过该点后到 terminal settlement 前的取消保留 user 并只产生一条 aborted assistant，Conversation Owner 提交该失败 delta。assistant exactly-once 只约束 assistant 数量；若该 terminal 含已完成 tool calls，KTD25 允许其后追加非执行型 settlement results。`ReplaceWorkingContext` 只在 Core Agent idle 时深复制并原子替换。
 - KTD32. 每次 Provider call 的 stream consumer 在所有退出路径只返回 `(terminal AssistantMessage, error)`；Turn/Run coordinator 在该次调用的唯一位置深复制并追加该消息。第一条有效 terminal event 是该 Turn 的 settlement point，之后的取消不追溯这条 assistant；同一次 `Receive()` 同返有效 terminal event 与 error 时 terminal 优先。terminal 前 raw stream failure 依据 context cause 合成 aborted 或 error assistant，nil stream 合成协议错误 assistant；Agent 等待绑定 context 的 `Receive()` 真正收敛而不遗留竞争 goroutine。第 02 课一个 Run 只有一个 Turn，第 03 课多 Turn Run 对每次 Provider call 重复同一规则；assistant 写入点唯一不排斥协调层随后追加 tool-result settlement。
 - KTD33. Agent Runtime 对每个 tool call 只执行一次，不在通用 Tool Loop 自动重试；失败形成 tool result，由模型决定是否发起新调用。未来只有能够明确分类瞬时错误的具体 I/O 后端，才可在单次 `Execute` 内实现有界、可取消的内部重试。
 - KTD34. Tool-call terminal 先校验可配对 identity，再按 reason/content 分类：空或重复 call ID、`toolUse` 却无 call 是 Provider protocol error；`stop + calls` 执行，`length + calls` 全部不执行并返回 truncation results；ID 有效时的空/未知 tool name、非法/不合语义的 arguments 和 execute failure 是 call-local errors；Provider error/aborted terminal 中的 calls 全部不执行，只追加 not-executed settlement results。（session-settled: user-approved — extends assistant exactly-once with explicit tool-result closure: 不修改或重复 terminal assistant，也不让失败 Turn 的 calls 产生副作用）
@@ -176,19 +176,23 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant A as Agent Loop
+    participant C as Conversation Owner
+    participant A as Core Agent
     participant M as Provider
     participant T as Tools
-    U->>A: task prompt
+    U->>C: task prompt
+    C->>A: accepted Run
     loop until assistant returns no tool calls
-        A->>M: system + transcript
+        A->>M: system + Working Context snapshot
         M-->>A: streamed assistant message
         alt message contains tool calls
             A->>T: execute ordered stages
             T-->>A: ordered tool results
-            A->>A: append results to transcript
+            A->>A: append results to Working Context
         else final assistant text
-            A-->>U: run result
+            A-->>C: run-local NewMessages
+            C->>C: commit complete History
+            C-->>U: History snapshot + Run error
         end
     end
 ```
@@ -203,7 +207,7 @@ flowchart LR
     B --> R3[parallel read group]
 ```
 
-并行阶段为每个 source index 预留 result slot。worker 完成后写入自己的 slot；阶段结束后再按 source index 把 tool results 加入 transcript。串行屏障完成后才开始下一阶段。第一阶段不为这个内部完成顺序建立外部 event sink。
+并行阶段为每个 source index 预留 result slot。worker 完成后写入自己的 slot；阶段结束后再按 source index 把 tool results 加入 Working Context 和最终 run-local delta。串行屏障完成后才开始下一阶段。第一阶段不为这个内部完成顺序建立外部 event sink。
 
 ### Pi Baseline and Intentional Divergence
 
@@ -267,8 +271,9 @@ pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏�
 - **Requirements:** R4、R5、R14、R19；F2；KTD6、KTD18、KTD24、KTD25、KTD28、KTD29、KTD30、KTD31、KTD32。
 - **Dependencies:** U2。
 - **Files:** `internal/ai/clone.go`、`internal/ai/clone_test.go`、`internal/ai/provider/faux/provider.go`、`internal/agent/loop.go`、`internal/agent/types.go`、`internal/agent/loop_test.go`、`docs/course/lessons/02-agent-loop-and-transcript.md`。
-- **Approach:** 本单元实现有状态 Agent 与无工具的一次 Provider turn；`Agent.Run()` 在同一个锁内拒绝 active Run、检查预取消 context，并以设置 active 加追加新 user input 作为 acceptance point。每次 Provider 请求包含已组装 workspace/cwd 说明的稳定 system prompt、截至当前的完整 transcript 和 tool schemas，不增加独立 task 或 workspace context 字段。Provider terminal message、Provider Request 和 `RunResult.Transcript` 在所有权边界深复制，并由 `internal/ai` 统一提供 clone 规则。完整 response 无 tool calls 时正常结束，包括空文本；不加入 Agent event sink、运行过程展示、Session 持久化、steering、follow-up 或 compaction。
-- **Execution note:** 先锁定 Agent transcript 所有权、顺序 Run 历史和 Run 返回结果，再实现 loop。
+- **Historical approach, superseded by Lesson 07 ownership only:** 本单元最初实现有状态 Agent 与无工具的一次 Provider turn；`Agent.Run()` 在同一个锁内拒绝 active Run、检查预取消 context，并以设置 active 加追加新 user input 作为 acceptance point。当时每次 Provider 请求包含截至当前的完整 transcript，`RunResult.Transcript` 返回同一 Agent 的完整 snapshot。该形状已由 D46–D51 替换，正常/失败/取消 settlement 语义仍保留。
+- **Current contract:** Core Agent 保存 Working Context、发送其 request snapshot 并返回 run-local `NewMessages`；coding-owned Conversation Owner 提交完整 History 并返回 Coding `RunResult.Transcript`。Provider terminal、request、delta 和 History snapshot 在各自所有权边界深复制。不加入 Agent event sink、运行过程展示、Session 持久化、steering、follow-up 或 compaction。
+- **Execution note:** Lesson 02 先锁定单 owner 的顺序和 settlement；Lesson 07 根据冻结 Pi 的 compaction/context 证据拆分 owner，但没有改变 Provider Turn 的终态契约。
 - **Test scenarios:** 单轮文本、空文本正常结束、reasoning 与 text 混合、同一 Agent 两次顺序 Run 的第二次 request 包含 `[user1, assistant1, user2]`、并发 Run 拒绝、预取消不修改 transcript 且不调用 Provider、acceptance point 后取消保留 user 和唯一 aborted assistant、完整 Provider request 字段、provider error、stream cancel、Run cancel 等待已启动 stream 收敛、明确的 canceled result，以及修改 Provider Request、Provider terminal message 或 RunResult 的嵌套 slice/JSON bytes 都不能反向修改 Agent transcript。这里的“唯一”只计 assistant；第 03 课负责失败 terminal 中 tool calls 的 result closure。
 - **Verification:** 每条退出路径产生一致的 assistant message 和明确 Run 结果；取消只在已启动 stream settlement 后返回且没有遗留 goroutine。
 

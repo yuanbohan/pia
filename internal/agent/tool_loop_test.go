@@ -121,14 +121,14 @@ func TestRunFreezesToolDefinitionsAndSendsCompleteMultiTurnRequests(t *testing.T
 		ToolName:   "read",
 		Content:    "package main",
 	}
-	wantTranscript := []ai.Message{
+	wantMessages := []ai.Message{
 		ai.UserMessage{Content: "inspect main.go"},
 		first,
 		wantResult,
 		final,
 	}
-	if !reflect.DeepEqual(result.Transcript, wantTranscript) {
-		t.Fatalf("Run() transcript = %#v, want %#v", result.Transcript, wantTranscript)
+	if !reflect.DeepEqual(result.NewMessages, wantMessages) {
+		t.Fatalf("Run() NewMessages = %#v, want %#v", result.NewMessages, wantMessages)
 	}
 
 	requests := provider.Requests()
@@ -199,7 +199,7 @@ func TestRunMapsCallLocalToolFailuresAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	results := transcriptToolResults(result.Transcript)
+	results := runToolResults(result.NewMessages)
 	if got, want := len(results), 4; got != want {
 		t.Fatalf("tool result count = %d, want %d", got, want)
 	}
@@ -256,7 +256,7 @@ func TestRunDoesNotExecuteTruncatedToolCalls(t *testing.T) {
 	if got := executions.Load(); got != 0 {
 		t.Fatalf("tool executions = %d, want 0", got)
 	}
-	results := transcriptToolResults(result.Transcript)
+	results := runToolResults(result.NewMessages)
 	if got, want := len(results), 2; got != want {
 		t.Fatalf("tool result count = %d, want %d", got, want)
 	}
@@ -311,10 +311,10 @@ func TestRunRejectsMalformedToolCallProtocolBeforeAppendingProviderMessage(t *te
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Run() error = %v, want substring %q", err, test.want)
 			}
-			if got, want := len(result.Transcript), 2; got != want {
-				t.Fatalf("transcript length = %d, want %d", got, want)
+			if got, want := len(result.NewMessages), 2; got != want {
+				t.Fatalf("NewMessages length = %d, want %d", got, want)
 			}
-			terminal := result.Transcript[1].(ai.AssistantMessage)
+			terminal := result.NewMessages[1].(ai.AssistantMessage)
 			if terminal.StopReason != ai.StopReasonError || !strings.Contains(terminal.ErrorMessage, "provider protocol") {
 				t.Fatalf("terminal = %#v, want synthetic protocol error", terminal)
 			}
@@ -341,7 +341,7 @@ func TestRunTreatsEmptyToolNameAsCallLocalError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	results := transcriptToolResults(result.Transcript)
+	results := runToolResults(result.NewMessages)
 	if got, want := len(results), 1; got != want {
 		t.Fatalf("tool result count = %d, want %d", got, want)
 	}
@@ -445,7 +445,7 @@ func TestRunSchedulesParallelStagesAroundSerialBarriers(t *testing.T) {
 	if got.err != nil {
 		t.Fatalf("Run() error = %v", got.err)
 	}
-	results := transcriptToolResults(got.result.Transcript)
+	results := runToolResults(got.result.NewMessages)
 	wantIDs := []string{"r1", "r2", "w", "r3", "r4"}
 	for index, want := range wantIDs {
 		if results[index].ToolCallID != want {
@@ -454,7 +454,7 @@ func TestRunSchedulesParallelStagesAroundSerialBarriers(t *testing.T) {
 	}
 }
 
-func TestParallelCompletionOrderDoesNotChangeTranscriptOrder(t *testing.T) {
+func TestParallelCompletionOrderDoesNotChangeNewMessageOrder(t *testing.T) {
 	t.Parallel()
 
 	aStarted := make(chan struct{})
@@ -510,9 +510,9 @@ func TestParallelCompletionOrderDoesNotChangeTranscriptOrder(t *testing.T) {
 	if want := []string{"B", "A"}; !reflect.DeepEqual(gotCompletion, want) {
 		t.Fatalf("completion order = %v, want %v", gotCompletion, want)
 	}
-	results := transcriptToolResults(got.result.Transcript)
+	results := runToolResults(got.result.NewMessages)
 	if got, want := []string{results[0].ToolCallID, results[1].ToolCallID}, []string{"A", "B"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("transcript result order = %v, want %v", got, want)
+		t.Fatalf("NewMessages result order = %v, want %v", got, want)
 	}
 }
 
@@ -560,7 +560,7 @@ func TestToolLocalTimeoutIsCallLocalAndLaterStageContinues(t *testing.T) {
 	if got := writeExecutions.Load(); got != 1 {
 		t.Fatalf("write executions = %d, want 1", got)
 	}
-	results := transcriptToolResults(result.Transcript)
+	results := runToolResults(result.NewMessages)
 	if !results[0].IsError || !strings.Contains(results[0].Content, context.DeadlineExceeded.Error()) {
 		t.Fatalf("timeout result = %#v, want call-local deadline error", results[0])
 	}
@@ -644,7 +644,7 @@ func TestRunCancellationSettlesAllCallsAndNextRunUsesPairedHistory(t *testing.T)
 	if got := laterExecutions.Load(); got != 0 {
 		t.Fatalf("later stage executions = %d, want 0", got)
 	}
-	results := transcriptToolResults(first.result.Transcript)
+	results := runToolResults(first.result.NewMessages)
 	if got, want := len(results), 4; got != want {
 		t.Fatalf("tool result count = %d, want %d", got, want)
 	}
@@ -670,14 +670,14 @@ func TestRunCancellationSettlesAllCallsAndNextRunUsesPairedHistory(t *testing.T)
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
-	if got, want := second.Transcript[len(second.Transcript)-1], ai.Message(finalAssistant); !reflect.DeepEqual(got, want) {
+	if got, want := second.NewMessages[len(second.NewMessages)-1], ai.Message(finalAssistant); !reflect.DeepEqual(got, want) {
 		t.Fatalf("second terminal = %#v, want %#v", got, want)
 	}
 	requests := provider.Requests()
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("Provider calls = %d, want %d", got, want)
 	}
-	wantSecondRequest := append(ai.CloneMessages(first.result.Transcript), ai.UserMessage{Content: "continue after cancellation"})
+	wantSecondRequest := append(ai.CloneMessages(first.result.NewMessages), ai.UserMessage{Content: "continue after cancellation"})
 	if !reflect.DeepEqual(requests[1].Messages, wantSecondRequest) {
 		t.Fatalf("second request messages = %#v, want paired history %#v", requests[1].Messages, wantSecondRequest)
 	}
@@ -727,13 +727,13 @@ func TestProviderAbortedTerminalClosesCompletedToolCallsWithoutExecuting(t *test
 	if got := executions.Load(); got != 0 {
 		t.Fatalf("tool executions = %d, want 0", got)
 	}
-	if got, want := len(first.Transcript), 3; got != want {
-		t.Fatalf("first transcript length = %d, want %d", got, want)
+	if got, want := len(first.NewMessages), 3; got != want {
+		t.Fatalf("first NewMessages length = %d, want %d", got, want)
 	}
-	if got, want := first.Transcript[1], ai.Message(aborted); !reflect.DeepEqual(got, want) {
+	if got, want := first.NewMessages[1], ai.Message(aborted); !reflect.DeepEqual(got, want) {
 		t.Fatalf("aborted assistant = %#v, want exactly %#v", got, want)
 	}
-	result := first.Transcript[2].(ai.ToolResultMessage)
+	result := first.NewMessages[2].(ai.ToolResultMessage)
 	if result.ToolCallID != "call-1" || !result.IsError || !strings.Contains(result.Content, "not executed") {
 		t.Fatalf("settlement result = %#v, want same-ID not-executed error", result)
 	}
@@ -742,14 +742,14 @@ func TestProviderAbortedTerminalClosesCompletedToolCallsWithoutExecuting(t *test
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
-	if got, want := second.Transcript[len(second.Transcript)-1], ai.Message(final); !reflect.DeepEqual(got, want) {
+	if got, want := second.NewMessages[len(second.NewMessages)-1], ai.Message(final); !reflect.DeepEqual(got, want) {
 		t.Fatalf("second terminal = %#v, want %#v", got, want)
 	}
 	requests := provider.Requests()
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("Provider calls = %d, want %d", got, want)
 	}
-	wantSecondRequest := append(ai.CloneMessages(first.Transcript), ai.UserMessage{Content: "continue"})
+	wantSecondRequest := append(ai.CloneMessages(first.NewMessages), ai.UserMessage{Content: "continue"})
 	if !reflect.DeepEqual(requests[1].Messages, wantSecondRequest) {
 		t.Fatalf("second request messages = %#v, want paired history %#v", requests[1].Messages, wantSecondRequest)
 	}
@@ -784,13 +784,13 @@ func TestProviderErrorTerminalClosesToolCallsWithoutExecuting(t *testing.T) {
 	if got := executions.Load(); got != 0 {
 		t.Fatalf("tool executions = %d, want 0", got)
 	}
-	if got, want := len(result.Transcript), 3; got != want {
-		t.Fatalf("transcript length = %d, want %d", got, want)
+	if got, want := len(result.NewMessages), 3; got != want {
+		t.Fatalf("NewMessages length = %d, want %d", got, want)
 	}
-	if got, want := result.Transcript[1], ai.Message(failed); !reflect.DeepEqual(got, want) {
+	if got, want := result.NewMessages[1], ai.Message(failed); !reflect.DeepEqual(got, want) {
 		t.Fatalf("error assistant = %#v, want exactly %#v", got, want)
 	}
-	settlement := result.Transcript[2].(ai.ToolResultMessage)
+	settlement := result.NewMessages[2].(ai.ToolResultMessage)
 	if settlement.ToolCallID != "call-1" || !settlement.IsError || !strings.Contains(settlement.Content, "not executed") {
 		t.Fatalf("settlement result = %#v, want same-ID not-executed error", settlement)
 	}
@@ -815,10 +815,10 @@ func TestProviderErrorTerminalWithDuplicateToolCallIDIsProtocolError(t *testing.
 	if err == nil || !strings.Contains(err.Error(), "duplicate ID") {
 		t.Fatalf("Run() error = %v, want duplicate-ID protocol error", err)
 	}
-	if got, want := len(result.Transcript), 2; got != want {
-		t.Fatalf("transcript length = %d, want %d", got, want)
+	if got, want := len(result.NewMessages), 2; got != want {
+		t.Fatalf("NewMessages length = %d, want %d", got, want)
 	}
-	terminal := result.Transcript[1].(ai.AssistantMessage)
+	terminal := result.NewMessages[1].(ai.AssistantMessage)
 	if terminal.StopReason != ai.StopReasonError || !strings.Contains(terminal.ErrorMessage, "provider protocol") {
 		t.Fatalf("terminal = %#v, want synthetic protocol error", terminal)
 	}
@@ -953,7 +953,7 @@ func argumentLabel(arguments json.RawMessage) (string, error) {
 	return input.Label, nil
 }
 
-func transcriptToolResults(messages []ai.Message) []ai.ToolResultMessage {
+func runToolResults(messages []ai.Message) []ai.ToolResultMessage {
 	var results []ai.ToolResultMessage
 	for _, message := range messages {
 		if result, ok := message.(ai.ToolResultMessage); ok {

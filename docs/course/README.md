@@ -28,27 +28,28 @@
 第一阶段只证明最短 coding 闭环：
 
 ```text
-task + system prompt + transcript + tool schemas + workspace context
+task + system prompt + working context + tool schemas + workspace context
   -> DeepSeek response
   -> read/write/edit/bash tool stages
-  -> ordered tool results appended to transcript
+  -> ordered tool results appended to working context
   -> next model turn
   -> assistant response without tool calls
-  -> loop terminal result
+  -> run-local message delta committed to conversation history
   -> final assistant text
   -> local ignored acceptance project
 ```
 
 核心术语：
 
-- `Agent Runtime`：当前课程的本地核心，拥有同一对话的完整有序内存 transcript，并负责 Provider 调用、工具循环和取消。
+- `Core Agent`：通用模型与工具循环，拥有可替换的 Working Context，并负责 Provider 调用、工具循环和取消。
+- `Conversation Owner`：Coding Agent 的私有应用层责任，保存同一 Conversation 的完整有序内存 History，并提交 Core Agent 每次 Run 返回的 message delta。
 - `Run`：一次任务 prompt 启动的完整循环，可以包含多个模型 Turn；课程使用 `run_start/run_end`，引用 Pi 源码时保留 `agent_start/agent_end`。
 - `Turn`：一次 assistant response，以及它触发的 tool calls 和 tool results。
 - `Tool stage`：同一 assistant message 中的一个执行阶段。连续 parallel-safe calls 构成并行阶段，其他调用分别构成串行屏障。
 - `Headless`：没有 TUI 或网页界面。第一阶段还进一步限定为单目录、单 active Run 和单进程内存上下文，但这些不是“headless”一词本身的定义。
 - `Agent Manager`：后续可能负责用户、仓库、Session、并发、worktree 和 IM 路由的服务；不属于第一阶段 Runtime。
 
-第一阶段不实现 Goal Runtime、Session 创建/持久化/恢复、自动 compaction、steering/follow-up、完整 subscription 生命周期、权限审批、公共 SDK、gRPC、IM、多用户、多仓库、worktree、GitHub 管理或自动 Pi 对比。这里推迟的是 Session 基础设施；Agent 在当前进程内保留完整 transcript 属于核心语义。
+第一阶段不实现 Goal Runtime、Session 创建/持久化/恢复、自动 compaction、steering/follow-up、完整 subscription 生命周期、权限审批、公共 SDK、gRPC、IM、多用户、多仓库、worktree、GitHub 管理或自动 Pi 对比。这里推迟的是 Session 基础设施；Coding Agent 在当前进程内保留完整 Conversation History、Core Agent 保留 Working Context，属于已经实现的核心语义。
 
 ## 每课工作方式
 
@@ -128,7 +129,7 @@ flowchart LR
 
 | 阶段内课次 | 全局课次 | 解锁的闭环 | Pi 的大致做法 | pi-go 本课边界 | 结束信号 | 依赖 | 规模 | 状态 |
 |---|---:|---|---|---|---|---|---|---|
-| 二期 01 | 07 | Conversation History 与 Active Context 所有权 | `AgentSession` 协调运行，`SessionManager` 从完整记录投影本轮模型上下文 | 只建立内存中的权威 history 与 active context 边界；不做 compaction、持久化或 Skills | 连续 Run 不丢完整 history，Provider 明确只接收当前 active context | 06 | Large | 待开始 |
+| 二期 01 | 07 | [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md) | `SessionManager` 保存完整 session entries 并构造上下文，core `Agent` 持有 working messages，每次模型调用再生成 request-local view | 只建立三种角色的内存所有权边界；不做 compaction、持久化或 Skills | history 与 working context 的所有权独立，Provider 不能反向修改任何 owner | 06 | Large | 已提交 |
 | 二期 02 | 08 | Context budget 与 compaction 核心 | `compaction.ts` 在预算触发时摘要较旧内容并保留近期上下文，由 `AgentSession` 接入运行 | 只完成请求前的预算判断和一次 compaction 闭环；不含 Provider 重试、branch summary 或持久化 | 人为缩小 context window 后可触发压缩并继续任务，同时保留权威 history | 07 | Large | 待开始 |
 | 二期 03 | 09 | Skills 与渐进披露 | `skills.ts` 发现有界 metadata，system prompt 只暴露索引，模型匹配后再读取正文 | 只建设最小 Skills 发现与按需读取；不扩成完整 ResourceLoader、extensions 或 MCP | 适用 Skill 可被发现和读取，而未使用 Skill 的正文不占据初始上下文 | 07 | Medium | 待开始 |
 
@@ -187,8 +188,8 @@ pi-go/
 │   │       ├── faux/          # 确定性脚本 Provider
 │   │       ├── openaicompatible/ # Chat Completions 线协议
 │   │       └── deepseek/      # DeepSeek 配置和兼容 profile
-│   ├── agent/                 # 通用模型与工具循环
-│   └── coding/                # prompt、workspace、Runtime 装配和 coding tools
+│   ├── agent/                 # 通用模型与工具循环及可替换 Working Context
+│   └── coding/                # Conversation History、prompt、workspace、装配和 coding tools
 ├── docs/
 │   ├── course/                # 课程、讨论与决策
 │   └── plans/                 # 当前实施计划
@@ -199,4 +200,4 @@ pi-go/
 
 冻结 Pi commit 和 package version 只保存在课程文档，不进入 Runtime package。Lesson 06 的真实验收项目、运行副本和 trace 只保存在被忽略的 `tmp/` 中，不提交 fixture 或 harness。正式 Pi 对照评测属于尚未编号的后续方向；其可重复设施和产物边界在对应课程开始时另行决定。
 
-第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)。
+第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)，当前第 07 课记录见 [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md)。

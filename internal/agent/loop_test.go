@@ -25,7 +25,7 @@ func TestNewRequiresProvider(t *testing.T) {
 	}
 }
 
-func TestRunSendsCompleteRequestAndReturnsTerminalTranscript(t *testing.T) {
+func TestRunSendsCompleteRequestAndReturnsTerminalDelta(t *testing.T) {
 	t.Parallel()
 
 	message := ai.AssistantMessage{
@@ -43,12 +43,12 @@ func TestRunSendsCompleteRequestAndReturnsTerminalTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	wantTranscript := []ai.Message{
+	wantMessages := []ai.Message{
 		ai.UserMessage{Content: "inspect the project"},
 		message,
 	}
-	if !reflect.DeepEqual(result.Transcript, wantTranscript) {
-		t.Fatalf("Run() transcript = %#v, want %#v", result.Transcript, wantTranscript)
+	if !reflect.DeepEqual(result.NewMessages, wantMessages) {
+		t.Fatalf("Run() NewMessages = %#v, want %#v", result.NewMessages, wantMessages)
 	}
 
 	requests := provider.Requests()
@@ -80,7 +80,7 @@ func TestRunTreatsEmptyAssistantAsNormalCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if got, want := result.Transcript[1], ai.Message(message); !reflect.DeepEqual(got, want) {
+	if got, want := result.NewMessages[1], ai.Message(message); !reflect.DeepEqual(got, want) {
 		t.Fatalf("terminal message = %#v, want %#v", got, want)
 	}
 }
@@ -99,12 +99,12 @@ func TestRunTreatsLengthStopAsNormalCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if got, want := result.Transcript[1], ai.Message(message); !reflect.DeepEqual(got, want) {
+	if got, want := result.NewMessages[1], ai.Message(message); !reflect.DeepEqual(got, want) {
 		t.Fatalf("terminal message = %#v, want %#v", got, want)
 	}
 }
 
-func TestSequentialRunsKeepHistoryAndReturnIndependentSnapshots(t *testing.T) {
+func TestSequentialRunsKeepWorkingContextAndReturnIndependentDeltas(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -122,21 +122,19 @@ func TestSequentialRunsKeepHistoryAndReturnIndependentSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
-	returnedAssistant := firstResult.Transcript[1].(ai.AssistantMessage)
+	returnedAssistant := firstResult.NewMessages[1].(ai.AssistantMessage)
 	returnedAssistant.Content[0] = ai.TextContent{Text: "caller mutation"}
 
 	secondResult, err := runtime.Run(context.Background(), "second question")
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
-	wantTranscript := []ai.Message{
-		ai.UserMessage{Content: "first question"},
-		first,
+	wantDelta := []ai.Message{
 		ai.UserMessage{Content: "second question"},
 		second,
 	}
-	if !reflect.DeepEqual(secondResult.Transcript, wantTranscript) {
-		t.Fatalf("second Run() transcript = %#v, want %#v", secondResult.Transcript, wantTranscript)
+	if !reflect.DeepEqual(secondResult.NewMessages, wantDelta) {
+		t.Fatalf("second Run() NewMessages = %#v, want %#v", secondResult.NewMessages, wantDelta)
 	}
 
 	requests := provider.Requests()
@@ -153,7 +151,7 @@ func TestSequentialRunsKeepHistoryAndReturnIndependentSnapshots(t *testing.T) {
 	}
 }
 
-func TestProviderCannotMutateAgentTranscriptThroughRequest(t *testing.T) {
+func TestProviderCannotMutateAgentWorkingContextThroughRequest(t *testing.T) {
 	t.Parallel()
 
 	provider := &requestMutatingProvider{message: ai.AssistantMessage{
@@ -166,12 +164,12 @@ func TestProviderCannotMutateAgentTranscriptThroughRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if got, want := result.Transcript[0], (ai.UserMessage{Content: "original user input"}); !reflect.DeepEqual(got, want) {
+	if got, want := result.NewMessages[0], (ai.UserMessage{Content: "original user input"}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("user message after Provider mutation = %#v, want %#v", got, want)
 	}
 }
 
-func TestProviderCannotMutateNestedTranscriptContentThroughRequest(t *testing.T) {
+func TestProviderCannotMutateNestedWorkingContextThroughRequest(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -182,22 +180,28 @@ func TestProviderCannotMutateNestedTranscriptContentThroughRequest(t *testing.T)
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := &nestedRequestMutatingProvider{responses: []ai.AssistantMessage{first, second}}
+	third := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "third answer"}},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := &nestedRequestMutatingProvider{responses: []ai.AssistantMessage{first, second, third}}
 	runtime := newAgent(t, provider, "system")
 
 	if _, err := runtime.Run(context.Background(), "first question"); err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
-	result, err := runtime.Run(context.Background(), "second question")
-	if err != nil {
+	if _, err := runtime.Run(context.Background(), "second question"); err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
-	if got, want := result.Transcript[1], ai.Message(first); !reflect.DeepEqual(got, want) {
-		t.Fatalf("stored first assistant = %#v, want %#v", got, want)
+	if _, err := runtime.Run(context.Background(), "third question"); err != nil {
+		t.Fatalf("third Run() error = %v", err)
+	}
+	if got, want := provider.previousTexts, []string{"first answer", "first answer"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("previous assistant texts = %v, want %v after request mutations", got, want)
 	}
 }
 
-func TestProviderTerminalMutationCannotAffectAgentTranscript(t *testing.T) {
+func TestProviderTerminalMutationCannotAffectAgentWorkingContext(t *testing.T) {
 	t.Parallel()
 
 	arguments := []byte(`{"path":"main.go"}`)
@@ -212,6 +216,7 @@ func TestProviderTerminalMutationCannotAffectAgentTranscript(t *testing.T) {
 	provider := &responseProvider{messages: []ai.AssistantMessage{
 		message,
 		{Content: []ai.AssistantContent{ai.TextContent{Text: "done"}}, StopReason: ai.StopReasonStop},
+		{Content: []ai.AssistantContent{ai.TextContent{Text: "continued"}}, StopReason: ai.StopReasonStop},
 	}}
 	runtime := newAgentWithTools(t, provider, "system", &testTool{
 		definition: agent.ToolDefinition{Schema: toolSchema("read"), CanRunParallel: true},
@@ -225,13 +230,14 @@ func TestProviderTerminalMutationCannotAffectAgentTranscript(t *testing.T) {
 	}
 	arguments[9] = 'X'
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	result, err := runtime.Run(ctx, "not accepted")
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("snapshot Run() error = %v, want context.Canceled", err)
+	if _, err := runtime.Run(context.Background(), "continue"); err != nil {
+		t.Fatalf("second Run() error = %v", err)
 	}
-	terminal := result.Transcript[1].(ai.AssistantMessage)
+	requests := provider.Requests()
+	if got, want := len(requests), 3; got != want {
+		t.Fatalf("Provider requests = %d, want %d", got, want)
+	}
+	terminal := requests[2].Messages[1].(ai.AssistantMessage)
 	call := terminal.Content[0].(ai.ToolCall)
 	if got, want := string(call.Arguments), `{"path":"main.go"}`; got != want {
 		t.Fatalf("stored tool arguments = %q, want %q", got, want)
@@ -258,12 +264,12 @@ func TestRunAppendsProviderErrorTerminalExactlyOnce(t *testing.T) {
 		ai.UserMessage{Content: "try once"},
 		message,
 	}
-	if !reflect.DeepEqual(result.Transcript, want) {
-		t.Fatalf("Run() transcript = %#v, want exactly %#v", result.Transcript, want)
+	if !reflect.DeepEqual(result.NewMessages, want) {
+		t.Fatalf("Run() NewMessages = %#v, want exactly %#v", result.NewMessages, want)
 	}
 }
 
-func TestPreCanceledRunDoesNotMutateTranscriptOrCallProvider(t *testing.T) {
+func TestPreCanceledRunDoesNotMutateWorkingContextOrCallProvider(t *testing.T) {
 	t.Parallel()
 
 	provider := newFaux(t, assistantStep(ai.AssistantMessage{StopReason: ai.StopReasonStop}))
@@ -275,8 +281,8 @@ func TestPreCanceledRunDoesNotMutateTranscriptOrCallProvider(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
-	if len(result.Transcript) != 0 {
-		t.Fatalf("Run() transcript = %#v, want unchanged empty transcript", result.Transcript)
+	if len(result.NewMessages) != 0 {
+		t.Fatalf("Run() NewMessages = %#v, want unchanged empty transcript", result.NewMessages)
 	}
 	if got := len(provider.Requests()); got != 0 {
 		t.Fatalf("len(Requests()) = %d, want 0", got)
@@ -320,12 +326,12 @@ func TestCancelAfterAcceptanceWaitsForReceiveAndAppendsOneAbortedTerminal(t *tes
 	if !errors.Is(got.err, cause) {
 		t.Fatalf("Run() error = %v, want cancellation cause", got.err)
 	}
-	if gotLen, want := len(got.result.Transcript), 2; gotLen != want {
-		t.Fatalf("len(Transcript) = %d, want %d", gotLen, want)
+	if gotLen, want := len(got.result.NewMessages), 2; gotLen != want {
+		t.Fatalf("len(NewMessages) = %d, want %d", gotLen, want)
 	}
-	terminal, ok := got.result.Transcript[1].(ai.AssistantMessage)
+	terminal, ok := got.result.NewMessages[1].(ai.AssistantMessage)
 	if !ok {
-		t.Fatalf("terminal = %T, want ai.AssistantMessage", got.result.Transcript[1])
+		t.Fatalf("terminal = %T, want ai.AssistantMessage", got.result.NewMessages[1])
 	}
 	if terminal.StopReason != ai.StopReasonAborted {
 		t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonAborted)
@@ -354,7 +360,7 @@ func TestRunPreservesProviderAbortedTerminalAndContextCause(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Fatalf("Run() error = %v, want cancellation cause", err)
 	}
-	if got, want := result.Transcript[1], ai.Message(message); !reflect.DeepEqual(got, want) {
+	if got, want := result.NewMessages[1], ai.Message(message); !reflect.DeepEqual(got, want) {
 		t.Fatalf("terminal message = %#v, want Provider terminal %#v", got, want)
 	}
 }
@@ -368,10 +374,10 @@ func TestRunSynthesizesErrorWhenStreamEndsBeforeTerminal(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "before terminal") {
 		t.Fatalf("Run() error = %v, want missing-terminal error", err)
 	}
-	if got, want := len(result.Transcript), 2; got != want {
-		t.Fatalf("len(Transcript) = %d, want %d", got, want)
+	if got, want := len(result.NewMessages), 2; got != want {
+		t.Fatalf("len(NewMessages) = %d, want %d", got, want)
 	}
-	terminal := result.Transcript[1].(ai.AssistantMessage)
+	terminal := result.NewMessages[1].(ai.AssistantMessage)
 	if terminal.StopReason != ai.StopReasonError {
 		t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonError)
 	}
@@ -387,7 +393,7 @@ func TestRunSynthesizesErrorForNonEOFReceiveFailure(t *testing.T) {
 	if !errors.Is(err, receiveErr) {
 		t.Fatalf("Run() error = %v, want wrapped receive error", err)
 	}
-	terminal := result.Transcript[1].(ai.AssistantMessage)
+	terminal := result.NewMessages[1].(ai.AssistantMessage)
 	if terminal.StopReason != ai.StopReasonError {
 		t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonError)
 	}
@@ -433,7 +439,7 @@ func TestRunSynthesizesProtocolErrorForInvalidTerminal(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "provider protocol") {
 				t.Fatalf("Run() error = %v, want protocol error", err)
 			}
-			terminal := result.Transcript[1].(ai.AssistantMessage)
+			terminal := result.NewMessages[1].(ai.AssistantMessage)
 			if terminal.StopReason != ai.StopReasonError {
 				t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonError)
 			}
@@ -450,10 +456,10 @@ func TestRunSynthesizesErrorWhenProviderReturnsNilStream(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nil stream") {
 		t.Fatalf("Run() error = %v, want nil-stream protocol error", err)
 	}
-	if got, want := len(result.Transcript), 2; got != want {
-		t.Fatalf("len(Transcript) = %d, want %d", got, want)
+	if got, want := len(result.NewMessages), 2; got != want {
+		t.Fatalf("len(NewMessages) = %d, want %d", got, want)
 	}
-	terminal := result.Transcript[1].(ai.AssistantMessage)
+	terminal := result.NewMessages[1].(ai.AssistantMessage)
 	if terminal.StopReason != ai.StopReasonError {
 		t.Fatalf("terminal StopReason = %q, want %q", terminal.StopReason, ai.StopReasonError)
 	}
@@ -484,8 +490,104 @@ func TestTerminalEventWinsWhenReceiveAlsoReturnsCancellation(t *testing.T) {
 		ai.UserMessage{Content: "finish this turn"},
 		message,
 	}
-	if !reflect.DeepEqual(result.Transcript, want) {
-		t.Fatalf("Run() transcript = %#v, want %#v", result.Transcript, want)
+	if !reflect.DeepEqual(result.NewMessages, want) {
+		t.Fatalf("Run() NewMessages = %#v, want %#v", result.NewMessages, want)
+	}
+}
+
+func TestReplaceWorkingContextDeepClonesAndChangesNextRequest(t *testing.T) {
+	t.Parallel()
+
+	priorAssistant := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "retained answer"}},
+		StopReason: ai.StopReasonStop,
+	}
+	replacement := []ai.Message{
+		ai.UserMessage{Content: "summary of earlier work"},
+		priorAssistant,
+	}
+	final := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "continued"}},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := newFaux(t, assistantStep(final))
+	runtime := newAgent(t, provider, "system")
+
+	if err := runtime.ReplaceWorkingContext(replacement); err != nil {
+		t.Fatalf("ReplaceWorkingContext() error = %v", err)
+	}
+	replacement[0] = ai.UserMessage{Content: "caller changed top-level slice"}
+	priorAssistant.Content[0] = ai.TextContent{Text: "caller changed nested content"}
+
+	result, err := runtime.Run(context.Background(), "continue the task")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	wantDelta := []ai.Message{
+		ai.UserMessage{Content: "continue the task"},
+		final,
+	}
+	if !reflect.DeepEqual(result.NewMessages, wantDelta) {
+		t.Fatalf("Run() NewMessages = %#v, want %#v", result.NewMessages, wantDelta)
+	}
+	wantRequest := []ai.Message{
+		ai.UserMessage{Content: "summary of earlier work"},
+		ai.AssistantMessage{
+			Content:    []ai.AssistantContent{ai.TextContent{Text: "retained answer"}},
+			StopReason: ai.StopReasonStop,
+		},
+		ai.UserMessage{Content: "continue the task"},
+	}
+	requests := provider.Requests()
+	if got, want := len(requests), 1; got != want {
+		t.Fatalf("Provider requests = %d, want %d", got, want)
+	}
+	if !reflect.DeepEqual(requests[0].Messages, wantRequest) {
+		t.Fatalf("Provider messages = %#v, want %#v", requests[0].Messages, wantRequest)
+	}
+}
+
+func TestReplaceWorkingContextRejectsActiveRunWithoutChangingContext(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := &blockingProvider{started: started, release: release}
+	runtime := newAgent(t, provider, "system")
+	firstReturned := make(chan agent.RunResult, 1)
+	go func() {
+		result, _ := runtime.Run(context.Background(), "first input")
+		firstReturned <- result
+	}()
+	<-started
+
+	err := runtime.ReplaceWorkingContext([]ai.Message{
+		ai.UserMessage{Content: "must not replace active context"},
+	})
+	if !errors.Is(err, agent.ErrRunActive) {
+		t.Fatalf("ReplaceWorkingContext() error = %v, want ErrRunActive", err)
+	}
+
+	close(release)
+	first := <-firstReturned
+	if got, want := len(first.NewMessages), 2; got != want {
+		t.Fatalf("first NewMessages length = %d, want %d", got, want)
+	}
+	if _, err := runtime.Run(context.Background(), "second input"); err != nil {
+		t.Fatalf("second Run() error = %v", err)
+	}
+
+	requests := provider.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("Provider requests = %d, want %d", got, want)
+	}
+	wantSecondRequest := []ai.Message{
+		ai.UserMessage{Content: "first input"},
+		provider.message(),
+		ai.UserMessage{Content: "second input"},
+	}
+	if !reflect.DeepEqual(requests[1].Messages, wantSecondRequest) {
+		t.Fatalf("second Provider messages = %#v, want %#v", requests[1].Messages, wantSecondRequest)
 	}
 }
 
@@ -517,8 +619,8 @@ func TestConcurrentRunIsRejectedWithoutAppendingSecondInput(t *testing.T) {
 		if !errors.Is(second.err, agent.ErrRunActive) {
 			t.Fatalf("second Run() error = %v, want ErrRunActive", second.err)
 		}
-		if len(second.result.Transcript) != 0 {
-			t.Fatalf("second Run() transcript = %#v, want zero result", second.result.Transcript)
+		if len(second.result.NewMessages) != 0 {
+			t.Fatalf("second Run() NewMessages = %#v, want zero result", second.result.NewMessages)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("second Run() blocked instead of returning ErrRunActive")
@@ -530,8 +632,8 @@ func TestConcurrentRunIsRejectedWithoutAppendingSecondInput(t *testing.T) {
 		ai.UserMessage{Content: "first input"},
 		provider.message(),
 	}
-	if !reflect.DeepEqual(first.Transcript, want) {
-		t.Fatalf("first Run() transcript = %#v, want %#v", first.Transcript, want)
+	if !reflect.DeepEqual(first.NewMessages, want) {
+		t.Fatalf("first Run() NewMessages = %#v, want %#v", first.NewMessages, want)
 	}
 }
 
@@ -613,13 +715,15 @@ func (p *requestMutatingProvider) Stream(_ context.Context, request ai.Request) 
 }
 
 type nestedRequestMutatingProvider struct {
-	responses []ai.AssistantMessage
-	next      int
+	responses     []ai.AssistantMessage
+	previousTexts []string
+	next          int
 }
 
 func (p *nestedRequestMutatingProvider) Stream(_ context.Context, request ai.Request) ai.Stream {
 	if p.next > 0 {
 		previous := request.Messages[1].(ai.AssistantMessage)
+		p.previousTexts = append(p.previousTexts, previous.Content[0].(ai.TextContent).Text)
 		previous.Content[0] = ai.TextContent{Text: "provider nested mutation"}
 	}
 	message := p.responses[p.next]
@@ -694,14 +798,29 @@ func (s *terminalWithErrorStream) Receive() (ai.Event, error) {
 }
 
 type blockingProvider struct {
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
+	started  chan struct{}
+	release  chan struct{}
+	once     sync.Once
+	mu       sync.Mutex
+	requests []ai.Request
 }
 
-func (p *blockingProvider) Stream(context.Context, ai.Request) ai.Stream {
+func (p *blockingProvider) Stream(_ context.Context, request ai.Request) ai.Stream {
 	p.once.Do(func() { close(p.started) })
+	p.mu.Lock()
+	p.requests = append(p.requests, ai.CloneRequest(request))
+	p.mu.Unlock()
 	return &blockingStream{release: p.release, message: p.message()}
+}
+
+func (p *blockingProvider) Requests() []ai.Request {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	requests := make([]ai.Request, len(p.requests))
+	for index, request := range p.requests {
+		requests[index] = ai.CloneRequest(request)
+	}
+	return requests
 }
 
 func (p *blockingProvider) message() ai.AssistantMessage {
