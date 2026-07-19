@@ -2,7 +2,7 @@
 
 ## 课程目标
 
-第一期通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。后续课程继续迁移 coding-relevant 能力，并以受控评测证明 pi-go 最终能在 coding 任务上超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为。
+第一期通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。后续课程继续迁移 coding-relevant 能力，以 Pi parity 为下限，并通过受控评测追求稳定超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为；长期产品方向、指标和投入领域以根目录 [`STRATEGY.md`](../../STRATEGY.md) 为准。
 
 固定参考基线：
 
@@ -13,7 +13,7 @@
 
 如果上游 Pi 或 DeepSeek 在课程期间变化，先记录差异，再决定是否更新基线。已经通过的课程不会静默跟随上游漂移。
 
-当前权威顺序是：
+`STRATEGY.md` 负责产品方向与取舍原则，不定义具体 API、课程状态或实施细节。技术与课程契约的当前权威顺序是：
 
 1. Lesson 06 的命令、prompt、输出、trace 和验收行为以 [`pia` one-shot 实施计划](../plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md)为准；
 2. 其余第一阶段契约以[基础实施计划](../plans/2026-07-15-001-pi-core-go-learning-port-plan.md)为准；
@@ -130,7 +130,7 @@ flowchart LR
 | 阶段内课次 | 全局课次 | 解锁的闭环 | Pi 的大致做法 | pi-go 本课边界 | 结束信号 | 依赖 | 规模 | 状态 |
 |---|---:|---|---|---|---|---|---|---|
 | 二期 01 | 07 | [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md) | `SessionManager` 保存完整 session entries 并构造上下文，core `Agent` 持有 working messages，每次模型调用再生成 request-local view | 只建立三种角色的内存所有权边界；不做 compaction、持久化或 Skills | history 与 working context 的所有权独立，Provider 不能反向修改任何 owner | 06 | Large | 已提交 |
-| 二期 02 | 08 | Context budget 与 compaction 核心 | `compaction.ts` 在预算触发时摘要较旧内容并保留近期上下文，由 `AgentSession` 接入运行 | 只完成请求前的预算判断和一次 compaction 闭环；不含 Provider 重试、branch summary 或持久化 | 人为缩小 context window 后可触发压缩并继续任务，同时保留权威 history | 07 | Large | 待开始 |
+| 二期 02 | 08 | Context budget 与 compaction 核心 | `AgentSession` 在 `agent_end` 后和新 prompt 前检查阈值；`compaction.ts` 摘要旧内容并保留近期后缀，`SessionManager` 重建 model context | 只完成 settled Run 后、下一次 Provider call 前的 threshold compaction 闭环；不含 context-overflow retry、branch summary 或持久化 | 人为缩小 budget 后，两次顺序 Run 之间可触发压缩；下一次 request 使用 summary 加保留后缀，完整 History 仍保留原始消息 | 07 | Large | 待开始 |
 | 二期 03 | 09 | Skills 与渐进披露 | `skills.ts` 发现有界 metadata，system prompt 只暴露索引，模型匹配后再读取正文 | 只建设最小 Skills 发现与按需读取；不扩成完整 ResourceLoader、extensions 或 MCP | 适用 Skill 可被发现和读取，而未使用 Skill 的正文不占据初始上下文 | 07 | Medium | 待开始 |
 
 这些行有意不回答具体 Go 类型、package 布局、token estimator、摘要 prompt、Skills 搜索优先级或全部 corner cases。真正进入某课时，先把那一行扩展为本课文档；如果扩展后估算变成 XLarge，就在实现前重新拆课和编号。
@@ -142,14 +142,15 @@ flowchart LR
 | Runtime 韧性 | `AgentSession` 对可恢复 Provider 错误做有界退避，并把 context overflow 交给 compaction 路径 | Provider retry、执行预算与循环保险丝可能不是同一课，不能现在打包 | Lesson 09 完成后，依据真实长任务失败重新拆分 |
 | 事件与文本交互 | core Agent 和 `AgentSession` 发出语义事件，并用 steering/follow-up queues 接收运行中的输入 | 整体是 XLarge 方向；事件契约和文本交互至少需要分别形成闭环 | 出现第一个真实 headless consumer 时细化 |
 | Session 持久化与恢复 | `SessionManager` 保存版本化记录，并从记录重建 active context | 存储格式与恢复生命周期是两个候选责任，不预先合课 | 内存上下文和 compaction 契约稳定后细化 |
+| Orchestration、Gateway 与 IM | Pi 的 coding core 提供 Session 生命周期与事件，但不替 pi-go 定义外部服务拓扑 | Orchestrator 需要协调多个隔离 Session，Gateway 与 IM adapters 只做外层接入；整体是 XLarge 方向，必须按已证明的 Session、事件和任务生命周期责任拆分 | Session 持久化/恢复和非 UI 事件消费者稳定后细化 |
 | TUI | Pi 的 interactive mode 订阅 Session 事件并处理 terminal、渲染和输入 | 整体是 XLarge 方向，进入独立后续阶段且必须拆课；TUI 只做外层投影 | 事件、交互和恢复均有非 TUI 消费者验证后细化 |
 | 稳定对照评测 | Pi 没有替 pi-go 定义对照协议；需要在两个 agent 外建立公平实验 | 评测契约、runner/corpus 和对照迭代是多个能力，不提前塞进一课 | coding-relevant Pi 能力完成覆盖审计后细化 |
 
-Goal Runtime、Agent Manager、公共 SDK、gRPC、IM、多用户、多仓库、worktree/GitHub 管理、extensions 和 MCP 仍未进入已编号课程。第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于已经确定后续公开 API。
+Goal Runtime、Orchestrator/Agent Manager、Gateway、公共 SDK、gRPC、IM、多用户、多仓库、worktree/GitHub 管理、extensions 和 MCP 仍未进入已编号课程。它们是否属于长期策略与它们何时进入实施是两个问题；第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于已经确定后续公开 API。
 
 ### 长期 coding 能力与评测目标
 
-最终目标不是“代码结构像 Pi”，而是在完成 coding-relevant 能力迁移后，用稳定、可重复的评测证明 pi-go 的 coding 能力高于冻结的 Pi coding-agent 基线。Codex 和 Grok Build 用来提供候选机制与工程经验；Pi 仍是语义基线和主要对照组。
+最终目标不是“代码结构像 Pi”，而是在完成 coding-relevant 能力迁移后，让 Pi parity 成为能力下限，并用稳定、可重复的评测追求 pi-go 的 coding 能力持续超过冻结的 Pi coding-agent 基线。Pi 仍是语义基线和主要对照组；其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据用来提供候选机制与工程经验。
 
 正式评测至少遵守以下约束：
 
@@ -200,4 +201,4 @@ pi-go/
 
 冻结 Pi commit 和 package version 只保存在课程文档，不进入 Runtime package。Lesson 06 的真实验收项目、运行副本和 trace 只保存在被忽略的 `tmp/` 中，不提交 fixture 或 harness。正式 Pi 对照评测属于尚未编号的后续方向；其可重复设施和产物边界在对应课程开始时另行决定。
 
-第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)，当前第 07 课记录见 [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md)。
+第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)，第 07 课记录见 [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md)。下一课 Lesson 08 仍只保留在滚动式大纲中，尚未开始，也尚未建立单课实施文档。

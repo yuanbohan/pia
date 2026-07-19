@@ -284,14 +284,14 @@
 ### D42. Lesson 06 由 coding application 拥有稳定 prompt 和 one-shot composition
 
 - 日期：2026-07-19
-- 决定：`internal/coding` 根据真实 tool definitions 构建稳定 system prompt，持有 canonical workspace、四个 tools、固定 DeepSeek product profile 和 Agent composition；`cmd/pia` 只处理进程边界。workspace 根目录 project instructions 按 `AGENTS.md`、`AGENTS.MD`、`CLAUDE.md`、`CLAUDE.MD` 顺序选择第一个存在的 UTF-8 regular file，不搜索 ancestor 或全局配置。可选 `PIA_TRACE_PATH` 只在 Run settlement 后 create-new 一个 `0600` 调试文件，保存完整 prompt、schema、transcript 和顶层错误但不保存 API key；trace schema 不稳定且可能包含敏感内容。第一版不增加自动执行预算。
+- 决定：`internal/coding` 根据真实 tool definitions 构建稳定 system prompt，持有 canonical workspace、四个 tools、固定 DeepSeek product profile 和 Agent composition；`cmd/pia` 只处理进程边界。workspace 根目录 project instructions 按 `AGENTS.md`、`AGENTS.MD`、`CLAUDE.md`、`CLAUDE.MD` 顺序选择第一个存在的 UTF-8 regular file，不搜索 ancestor 或全局配置。可选 `PIA_TRACE_PATH` 只在 Run settlement 后 create-new 一个 `0600` 调试文件，保存完整 prompt、schema、Conversation History（JSON 字段名为 `transcript`）和顶层错误但不保存 API key；trace schema 不稳定且可能包含敏感内容。第一版不增加自动执行预算。
 - 原因：Pi 的 coding system prompt 和 print mode 证明这些责任属于 coding/host 层，而不是模型协议。只加载一个 root instruction 文件、固定产品 profile 和 post-run trace 足以支持当前真实闭环与诊断，不需要提前移植 resource registry、配置矩阵、event audit log 或 policy engine。
 
 ### D43. 后续课程采用滚动式大纲，只编号近期闭环
 
 - 日期：2026-07-19
-- 决定：目前只为二期前三课分配稳定编号：Lesson 07 建立完整 conversation history、Agent working context 与 Provider request snapshot 的所有权边界；Lesson 08 完成请求前的 context budget/compaction 核心闭环；Lesson 09 完成 Skills 渐进披露。Skills 保持为二期第 03 课。Runtime 韧性、事件与文本交互、Session 持久化/恢复、TUI 和稳定评测只保留为后续方向，等前三课产生真实证据后再拆分和编号。
-- 范围：Lesson 07 不做 compaction、持久化或 Skills；Lesson 08 不同时吸收 Provider retry、branch summary 或持久化；Lesson 09 不扩建完整 ResourceLoader、extensions 或 MCP。大纲不预先决定具体 Go API、package、算法和完整测试矩阵，开课时才根据冻结 Pi 与当前实现补齐。
+- 决定：目前只为二期前三课分配稳定编号：Lesson 07 建立完整 Conversation History、Core Agent Working Context 与 Provider Request Snapshot 的所有权边界；Lesson 08 完成 settled Run 后、下一次 Provider call 前的 threshold context-budget/compaction 核心闭环；Lesson 09 完成 Skills 渐进披露。Skills 保持为二期第 03 课。Runtime 韧性、事件与文本交互、Session 持久化/恢复、TUI 和稳定评测只保留为后续方向，等前三课产生真实证据后再拆分和编号。
+- 范围：Lesson 07 不做 compaction、持久化或 Skills；Lesson 08 不同时吸收 context-overflow retry、其他 Provider retry、branch summary 或持久化；Lesson 09 不扩建完整 ResourceLoader、extensions 或 MCP。大纲不预先决定具体 Go API、package、算法和完整测试矩阵，开课时才根据冻结 Pi 与当前实现补齐。
 - 原因：context ownership 到 compaction 仍是解锁长任务的主线，Skills 是已经确认的第三个独立闭环。更远能力的依赖和责任会被这些实现改变；现在给它们固定课次或详细设计，只会制造很快失效的计划。
 
 ### D44. 课程规模是拆分门槛，不是工期估算
@@ -300,12 +300,12 @@
 - 决定：未来已编号课程表至少记录解锁能力、Pi 大致做法、pi-go 当前边界与非目标、结束信号、依赖、相对规模和状态。规模使用 Small、Medium、Large、XLarge；XLarge 不能直接开课，必须先讨论并拆成能独立讲解和验收的闭环。越远的阶段信息越粗，不因为表格列更多而提前设计实现细节。
 - 原因：这些字段让后续实施者理解“为什么这样排”和“何时算完成”，同时保留根据真实源码与代码推翻早期假设的空间。把多个状态所有权、生命周期或消费者塞进一课，会让讲解、review 和验收同时失焦。
 
-### D45. 长期目标是用受控评测证明 coding 能力超过 Pi
+### D45. 以 Pi parity 为能力下限，并用受控评测追求稳定超过 Pi
 
 - 日期：2026-07-19
-- 决定：完成 coding-relevant Pi 能力覆盖后，建立稳定、可重复的 pi-go 与冻结 Pi 对照评测。公平比较固定模型/Provider profile、任务与初始仓库并做多次独立运行；以客观 resolve rate 为主要能力指标，同时记录成本、turn、时延、tool error、恢复和长上下文表现，并把协议完整性与安全回归作为门槛。Codex 和 Grok Build 只提供候选机制与工程证据，不替代 Pi 对照组。
+- 决定：完成 coding-relevant Pi 能力覆盖后，建立稳定、可重复的 pi-go 与冻结 Pi 对照评测。Pi parity 是不可退让的能力下限，稳定超过是演进目标。公平比较固定模型/Provider profile、任务与初始仓库并做多次独立运行；以客观 resolve rate 为主要能力指标，同时记录成本、turn、时延、tool error、恢复和长上下文表现，并把协议完整性与安全回归作为门槛。其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据只提供候选机制与工程经验，不替代 Pi 对照组。
 - 范围：当前只确定目标和公平性原则，不提前确定 benchmark corpus、runner 架构、统计阈值、trace schema 或产物存储。Lesson 06 的本地 fixture 仍只是第一期验收；正式评测方向在前置能力稳定后另行拆课。
-- 原因：项目目标是比 Pi 完成 coding 任务更强，而不是仅达到文件结构或功能清单相似。没有同模型、同任务、重复运行和客观判据，“超过 Pi”只能是主观印象，不能指导后续优化。
+- 原因：项目目标是先确保不弱于 Pi，再通过可验证机制变得更强，而不是仅达到文件结构或功能清单相似。没有同模型、同任务、重复运行和客观判据，“达到或超过 Pi”都只能是主观印象，不能指导后续优化。
 
 ### D46. 完整 Conversation History 与 Core Agent Working Context 分属不同 owner
 
@@ -349,6 +349,13 @@
 - 范围：这是 Lesson 08 compaction 投影可接入的状态边界，不在本课实现摘要、token budget、overflow recovery 或通用 message-graph validator。方法是即时内存操作，不接收 `context.Context`，也不返回旧 context 或暴露可变 Agent state。
 - Pi 差异：冻结 Pi 通过赋值 `agent.state.messages` 替换 working messages，setter 只复制顶层数组；coding-agent 的实际 compaction replacement 位于 `agent_end` 之后、下一次 prompt 之前。pi-go 保留这一 idle-time 使用时序，但用显式 Go 方法、active guard 和深复制收紧所有权，而不暴露可变 state object。
 - 原因：Run 内后续 Turn 依赖前面 Turn 和 tool results；中途替换会让同一 Run 使用两套上下文，破坏 delta 与 Provider request 的可推理关系。等待式 API 又会隐式引入生命周期和排队语义；调用方本就应由 Conversation Owner 在 Run settlement 之后协调 replacement，因此 fail-fast 最清晰。
+
+### D52. 长期产品是由 Orchestrator 驱动的多 Session coding-agent service
+
+- 日期：2026-07-19
+- 决定：长期产品允许用户通过 IM 创建和推进 coding task，由 Gateway 提供外部服务边界，由 Orchestrator 协调多个可持久化、可恢复且相互隔离的 Sessions。当前 one-shot CLI、单进程内存 Conversation 和单 active Run 是演进基础，不是最终产品边界。
+- 范围：这项决定只固定长期责任方向，不预先确定 Gateway 协议、部署拓扑、Session 存储格式、任务状态机、队列策略、租户模型或 IM 平台。相关能力继续作为未编号方向，待 Core Agent、Session persistence/recovery、事件与任务生命周期分别出现真实证据后拆分。
+- 原因：最终 coding capability 需要能被用户从日常聊天入口持续驱动，并在多个长任务之间保持独立历史、恢复能力和可观察状态；把这些责任塞回 Core Agent 会破坏已经建立的通用模型/tool loop 边界。
 
 ## 变更记录
 
@@ -402,3 +409,4 @@
 - 2026-07-19：学习者确认 Core Agent 使用 idle-only `ReplaceWorkingContext`：输入深复制、替换原子化、active 时立即失败，不允许一个 Run 的不同 Turns 使用两套 context；Pi 的可变 state setter 不机械移植到 Go。
 - 2026-07-19：Lesson 07 按 D46–D51 完成实现：Core Agent 改为 Working Context 加 run-local `NewMessages`，coding-owned 私有 Conversation Owner 提交完整 History，idle-only replacement 提供 Lesson 08 接入点。完整 tests、vet 和 race 通过，课程进入待理解确认且尚未提交。
 - 2026-07-19：学习者确认理解 Lesson 07 的 Core Agent delta、Conversation History commit 与 idle-only replacement 主线，并明确要求提交；课程状态更新为已提交，不夹带 Lesson 08 工作。
+- 2026-07-19：学习者确认长期产品方向为 Orchestrator 驱动的多 Session coding-agent service：通过 Gateway 和 IM 创建、推进任务，并要求 Session 持久化、恢复、并发隔离；当前只记录策略与责任方向，不提前设计实现。

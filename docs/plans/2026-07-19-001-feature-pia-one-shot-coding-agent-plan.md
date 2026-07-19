@@ -45,7 +45,7 @@ pi-go 已有模型协议、DeepSeek Provider、Agent loop 和 `read`、`write`�
 - **任务成功由外部验收判断。** (session-settled: user-directed — chosen over 从 assistant 文本或 Agent loop 退出推断任务成功: 模型声明与项目事实可能不一致。) 正常完成 model/tool loop 即可返回成功进程状态。
 - **真实验收项目只保存在被忽略的 `tmp/`。** (session-settled: user-directed — chosen over 提交 fixture、生成器、隐藏测试或 harness: 当前目标是由专家迭代首个真实能力，而不是维护 benchmark 子系统。)
 - **要求两次连续全新运行成功。** (session-settled: user-approved — chosen over 一次成功即完成: 真实模型存在随机性，一次通过不足以证明闭环已收敛。)
-- **诊断采用可选的运行后 trace。** (session-settled: user-approved — chosen over 为诊断提前实现实时 Agent events 或完全没有证据: 本地迭代需要看到 transcript 和工具结果，但默认用户体验仍应安静。)
+- **诊断采用可选的运行后 trace。** (session-settled: user-approved — chosen over 为诊断提前实现实时 Agent events 或完全没有证据: 本地迭代需要看到完整 Conversation History 和工具结果，但默认用户体验仍应安静。)
 
 ### Actors
 
@@ -90,14 +90,14 @@ flowchart TB
 **Provider and execution safety**
 
 - R10. 第一版必须固定使用 `deepseek-v4-pro`，明确启用 thinking，并请求 high reasoning effort，不提供运行时模型覆盖入口。
-- R11. Provider 凭据必须只从进程继承的 `DEEPSEEK_API_KEY` 读取；程序不得解析 shell 配置文件，也不得主动把 Provider 配置中的凭据复制到参数、工具配置、transcript、trace 字段、日志或错误。命令主动输出的环境内容遵循 R12，不受这一窄边界保证。
+- R11. Provider 凭据必须只从进程继承的 `DEEPSEEK_API_KEY` 读取；程序不得解析 shell 配置文件，也不得主动把 Provider 配置中的凭据复制到参数、工具配置、Conversation History、Working Context、trace metadata、日志或错误。命令主动输出的环境内容遵循 R12，不受这一窄边界保证。
 - R12. Bash 必须继续继承启动 `pia` 的完整父进程环境；Provider 生成的命令以启动用户的主机和网络权限执行，可以读取凭据、访问 workspace 外资源、连接外部服务并产生不可逆副作用。第一版不增加 sandbox、approval、secret detector 或通用 redactor。
 - R13. 程序不得显示 workspace 数据披露警告或确认流程；操作者负责只在允许发送所选内容和 tool results 给 Provider 的目录运行。
 
 **Diagnostics and acceptance**
 
 - R14. 一个明确的开发用环境变量必须允许操作者指定本地 trace 文件；未设置时不得产生 trace 或改变默认输出。
-- R15. Trace 必须在 Run 结束后记录实际 system prompt、canonical workspace、无凭据的模型与工具配置、带类型标记的完整 transcript 和顶层 Run error；不要求实时事件、Session 恢复或稳定公共 schema。
+- R15. Trace 必须在 Run 结束后记录实际 system prompt、canonical workspace、无凭据的模型与工具配置、带类型标记的完整 Conversation History 和顶层 Run error；当前 JSON 字段继续命名为 `transcript`，不要求实时事件、Session 恢复或稳定公共 schema。
 - R16. 仓库必须忽略 `tmp/`；真实验收 fixture、每次运行副本和 trace 都只保存在该目录并留给操作者检查，不提交 harness 或 fixture。
 - R17. 本地验收的初始项目必须是一个没有测试的可执行 Go 项目，其中公开 `Fibonacci` 实现错误；任务要求修复标准非负 Fibonacci、保留公开签名、添加有意义的测试，并运行测试和程序。
 - R18. 每次真实验收必须从不可变错误基线复制全新 workspace，检查最终 diff，运行 `go test ./...` 和程序，并证明 Agent 新增的测试在原始错误实现上失败。
@@ -136,7 +136,7 @@ flowchart TB
 - AE2. **Covers:** R3. **Given** Agent 正常结束但生成的 Fibonacci 代码仍然错误，**when** CLI 返回，**then** 它仍可返回零；随后由 A4 的独立测试判定该次任务失败。
 - AE3. **Covers:** R7. **Given** 根目录同时存在 `AGENTS.md` 和 `CLAUDE.md`，**when** Coding Application 组装 prompt，**then** 只使用 `AGENTS.md`；子目录或祖先目录同名文件不参与发现。
 - AE4. **Covers:** R3, R11. **Given** `DEEPSEEK_API_KEY` 没有被启动进程继承，**when** 操作者运行 `pia`，**then** Provider 不启动，错误写入 stderr，退出码非零，程序也不读取 `.zshrc` 补救。
-- AE5. **Covers:** R14-R16. **Given** 未设置 trace 路径，**when** Agent 运行，**then** 不产生 trace artifact；设置后，同一运行在结束时留下完整本地 transcript 和工具证据，但不额外打印实时进度。Bash 既有的截断输出临时文件不属于 trace 契约。
+- AE5. **Covers:** R14-R16. **Given** 未设置 trace 路径，**when** Agent 运行，**then** 不产生 trace artifact；设置后，同一运行在结束时留下完整本地 Conversation History 和工具证据，但不额外打印实时进度。Bash 既有的截断输出临时文件不属于 trace 契约。
 - AE6. **Covers:** R17-R19. **Given** Agent 添加的测试在修复后通过，**when** A4 把这些测试放回原始错误实现，**then** 至少一个测试失败，否则该次验收因测试无辨别力而失败。
 - AE7. **Covers:** R19. **Given** 一次全新运行已通过，**when** 第二次运行从另一个原始基线副本开始，**then** 只有第二次也独立通过所有检查才达到真实验收停止条件。
 - AE8. **Covers:** R3、R22. **Given** 操作者在 Provider 或 tool 执行期间发送中断信号，**when** Run 收敛，**then** CLI 返回取消错误和非零状态，不把中止伪装成正常最终回答。
@@ -201,7 +201,7 @@ Product Contract changed in R3, R11, R12 and R15 without changing the settled pr
 - KTD6. **Keep process success separate from task success.** A nil Agent Run error maps to a zero CLI exit even when later expert checks reject the code; no assistant phrase, tool sequence or Goal Runtime field can self-certify the task. (session-settled: user-directed — chosen over inferring success from the assistant response or loop termination: repository facts are authoritative.)
 - KTD7. **Keep real acceptance local and ignored.** Only `.gitignore` changes in the repository; baseline, run copies, prompts and traces live under ignored `tmp/` and no fixture or harness package is added. (session-settled: user-directed — chosen over a tracked benchmark fixture and hidden harness: the current milestone needs expert iteration, not permanent eval infrastructure.)
 - KTD8. **Require two fresh consecutive successes.** Each success starts a new `pia` process and copies the same untouched baseline; any product code, system prompt or acceptance-task change resets the count. (session-settled: user-approved — chosen over accepting one successful model sample: one pass is too sensitive to model variance.)
-- KTD9. **Use an opt-in post-run trace.** The trace captures the settled coding context and transcript without changing stdout/stderr or introducing real-time events. It is deliberately created after settlement as diagnostics, not reserved before Run as an execution or audit gate. (session-settled: user-approved — chosen over speculative event infrastructure or no diagnostic evidence: prompt and loop iteration need a local audit trail.)
+- KTD9. **Use an opt-in post-run trace.** The trace captures the settled coding context and complete Conversation History without changing stdout/stderr or introducing real-time events. Its JSON field remains named `transcript`; it is deliberately created after settlement as diagnostics, not reserved before Run as an execution or audit gate. (session-settled: user-approved — chosen over speculative event infrastructure or no diagnostic evidence: prompt and loop iteration need a local audit trail.)
 - KTD10. **Let one coding Run own the workspace lifetime.** The coding application opens one canonical `Workspace`, constructs the four existing tools and Agent, waits for Run settlement, materializes the result, then closes the workspace and joins cleanup failures without hiding the primary error. This follows `internal/coding/workspace.go` and the settlement patterns already used by the Agent and Bash.
 - KTD11. **Inject Faux only behind the package test seam.** The exported Phase 1 coding entry constructs the fixed DeepSeek product profile; an unexported provider-injected path gives `internal/coding` deterministic integration tests without exposing Provider selection as a `pia` feature.
 - KTD12. **Keep one-shot product concerns out of generic AI and Agent contracts.** Final projection, typed trace conversion and project-context loading remain coding-application concerns; `internal/agent/events.go`, new request fields and workflow-specific tools are out of scope. Lesson 07 later changed the generic ownership/result contract for its own context-boundary requirement, not for one-shot presentation.
@@ -289,10 +289,10 @@ flowchart TB
 
 - **Prompt context:** Every Provider turn receives the same pre-Run prompt snapshot even if a tool later edits a root instruction file; this preserves the Agent's stable prompt contract.
 - **Credential boundary:** `pia` reads the key from its parent process and passes it only to Provider configuration, while Bash independently inherits the same parent environment. Documentation must not describe this as credential isolation.
-- **Trust and egress boundary:** The task, canonical host path, selected root instruction file, tool schemas and accumulated transcript are model-visible automatically. Other workspace files and the parent environment are not automatic context, but root instructions or Provider-generated tool calls can use unsandboxed Bash with the invoking user's host and network authority to expose or mutate them. Resulting output can reach later Provider requests, trace, final text and Bash's existing full-output temp file. Phase 1 therefore trusts the selected workspace, its root instructions and the Provider; workspace trust is not containment.
+- **Trust and egress boundary:** The task, canonical host path, selected root instruction file, tool schemas and current Working Context are model-visible automatically. The complete Conversation History is not a separate Provider field; before compaction the current coding composition projects the same messages into Working Context. Other workspace files and the parent environment are not automatic context, but root instructions or Provider-generated tool calls can use unsandboxed Bash with the invoking user's host and network authority to expose or mutate them. Resulting output can reach later Provider requests, trace, final text and Bash's existing full-output temp file. Phase 1 therefore trusts the selected workspace, its root instructions and the Provider; workspace trust is not containment.
 - **Filesystem lifecycle:** File tools share one borrowed `os.Root`; Bash uses the same canonical host path. The coding Run owns closing the root only after Provider and tool work has settled.
 - **Diagnostics:** A trace is a sensitive diagnostic artifact, not a guaranteed audit trail, safe log or stable machine interface. Its path is validated only after Run settlement, so failure to write it affects process status and suppresses final stdout but never reverts completed Provider calls or tool side effects. Mode `0600` restricts new-file access; it does not encrypt, redact, rotate or delete the artifact.
-- **Course authority:** `AGENTS.md`, the older Phase 1 plan and course records currently contain opposite Lesson 06 requirements; those documents must be aligned before code implementation proceeds.
+- **Course authority:** U1 aligned `AGENTS.md`, the older Phase 1 plan and course records before implementation. Lesson 07 later refined only internal message ownership through D46-D51; the one-shot prompt, output, trace and acceptance contract remains authoritative here.
 
 ### Risks and Mitigations
 
@@ -313,7 +313,7 @@ flowchart TB
 ### Sources Shaping the Plan
 
 - `internal/coding/workspace.go`, `internal/coding/tools/*/tool.go` and `internal/agent/types.go` establish the existing composition inputs and resource ownership.
-- `internal/agent/loop.go` and `internal/agent/tool.go` establish final transcript, call-local failure and cancellation settlement behavior.
+- `internal/agent/loop.go` and `internal/agent/tool.go` establish terminal-message, run-local delta, call-local failure and cancellation settlement behavior.
 - `internal/ai/provider/deepseek/provider.go` and `internal/ai/provider/openaicompatible/request.go` already support fixed model input, thinking and reasoning replay.
 - Frozen Pi `packages/coding-agent/src/core/system-prompt.ts` and `packages/coding-agent/src/modes/print-mode.ts` support coding-owned prompt assembly and final-only print behavior without requiring a literal package port.
 - DeepSeek's V4 release, thinking guide and model-list references in the Product Contract determine the current model and replay constraints.
@@ -385,18 +385,18 @@ flowchart TB
 
 **Test scenarios:**
 
-1. A Faux run observes the same system prompt and four real schemas on every request, with complete ordered transcript growth across read, edit, write and bash stages.
-2. Tool mutations are visible to later tools in the same canonical workspace, and the final on-disk state matches the trace transcript.
+1. A Faux run observes the same system prompt and four real schemas on every request, with complete ordered Working Context growth across read, edit, write and bash stages.
+2. Tool mutations are visible to later tools in the same canonical workspace, and the final on-disk state matches the complete Conversation History serialized in the trace `transcript` field.
 3. Thinking and earlier assistant text remain in diagnostic data, while final projection concatenates only the last terminal assistant's text blocks in source order.
 4. A normal empty assistant projects an empty string; a `length` terminal projects its completed text and remains a nil Run error.
-5. Provider failure, malformed protocol and cancellation return a materialized transcript plus an error; completed tool calls receive existing settlement results and no final text is projected by the caller.
+5. Provider failure, malformed protocol and cancellation return a materialized complete Conversation History plus an error; completed tool calls receive existing settlement results and no final text is projected by the caller.
 6. A root instruction file changed by a tool does not alter the stable prompt in subsequent requests.
 7. Any construction, Run or cancellation path closes the Workspace only after workers and Bash settle; the private ownership seam proves the root stays usable through settlement, becomes closed afterward, and a cleanup failure joins rather than replaces the primary cause.
 8. The typed trace covers user, assistant text, thinking, valid or malformed tool-call arguments, tool results, usage, stop reason and top-level error while never copying the configured fake API key into metadata.
 9. A capture Provider proves the initial request contains the task, prompt, canonical path and schemas but not an unrelated file or environment sentinel; after a tool explicitly returns the sentinel, the next request contains it.
-10. A configured fake credential that no component emits is absent from coding-owned request data, transcript and trace metadata, while a different synthetic secret deliberately returned by a tool remains in the next request and trace, documenting the no-general-redactor boundary.
+10. A configured fake credential that no component emits is absent from coding-owned request data, Working Context, Conversation History and trace metadata, while a different synthetic secret deliberately returned by a tool remains in the next request and trace, documenting the no-general-redactor boundary.
 11. The private product-config helper fixes the exact model ID `deepseek-v4-pro` and reasoning effort `high`; existing DeepSeek profile tests remain the authority that thinking is enabled on the wire.
-12. Error and cancellation transcripts ending in not-executed tool results remain available to trace, while the CLI never invokes or emits final projection when the composed Run error is non-nil.
+12. Error and cancellation Conversation Histories ending in not-executed tool results remain available to trace, while the CLI never invokes or emits final projection when the composed Run error is non-nil.
 
 **Verification:** Offline coding tests prove shared context/action parity, final projection, trace completeness and lifecycle settlement; existing DeepSeek request tests continue to prove thinking/high serialization and reasoning replay.
 
@@ -428,7 +428,7 @@ flowchart TB
 8. Covers AE5. With no trace variable, no trace artifact is created; with a fresh path, success and failure traces contain actual coding context and do not change normal output.
 9. An existing regular file, symlink, directory, special file, missing-parent or unwritable trace path is rejected without modifying its target; any partial newly created file is removed.
 10. If Run and trace both fail, stderr reports both while the error chain retains the primary Run/cancel cause; if only trace fails after a successful Run, final stdout is suppressed and workspace side effects remain documented as non-rollbackable.
-11. A canceled Run can still persist its settled partial transcript and top-level cancellation cause because trace finalization does not inherit the canceled Run context.
+11. A canceled Run can still persist its settled partial Conversation History and top-level cancellation cause because trace finalization does not inherit the canceled Run context.
 12. A process-boundary test exercises the real signal-context helper for both `SIGINT` and `SIGTERM`, proving the host wiring cancels before `os.Exit` can terminate cleanup.
 
 **Verification:** Command tests lock final-only output and failure ordering; a local build produces `pia` without adding flags, public SDK or event infrastructure.

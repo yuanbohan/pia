@@ -38,7 +38,7 @@ The Agent Loop defines ordering, settlement, cancellation, and tool-execution be
 
 ### Run
 
-One accepted Core Agent execution initiated by new input or an explicit continuation and ending only after the Agent Loop stops producing messages and all work started by that execution has settled.
+One accepted Core Agent execution ending only after the Agent Loop stops producing messages and all work started by that execution has settled. In current pi-go, a Run is initiated by one new user input; an input-free explicit continuation is deferred and is not part of the current Core Agent API.
 
 A Run may contain multiple Turns. A non-nil Run error describes its outcome but does not erase Messages already accepted during the Run.
 
@@ -104,7 +104,7 @@ Before compaction it may equal the complete Conversation History. After compacti
 
 ### Provider Request Snapshot
 
-An ownership-independent, request-local copy of the complete model-visible inputs for one Provider call: the system prompt, current Working Context, tool schemas, and any request-scoped options.
+An ownership-independent, request-local copy of the complete model-visible inputs for one Provider call: the system prompt, current Working Context, and tool schemas. Provider configuration, model identity, workspace objects, and the original task as a separate field are outside this snapshot in current pi-go.
 
 It is disposable after that call and never becomes an authoritative history source. Provider-side mutation or protocol conversion must not modify the Working Context or Conversation History.
 
