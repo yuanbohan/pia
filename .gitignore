@@ -33,3 +33,5 @@ go.work.sum
 
 # Local real-model acceptance workspaces and traces.
 tmp/
+
+.worktrees/
