@@ -8,6 +8,8 @@
 
 第一阶段不实现 Goal Runtime、Session 持久化、TUI、公共 SDK、RPC/IM、多用户、多仓库、worktree/GitHub 管理、权限策略矩阵或 Pi 对比工具。bash 不是 sandbox；具体安全边界和验收约束记录在完整实施计划中。
 
+长期目标是在迁移 coding-relevant Pi 能力后，通过同模型、同任务、多次独立运行的稳定评测，证明 pi-go 的 coding 能力高于冻结的 Pi 基线；Codex 和 Grok Build 作为其他能力设计的证据来源。当前不提前宣称结论，也不在后续大纲中预设计完整评测设施。
+
 - [课程总纲](docs/course/README.md)
 - [设计决策](docs/course/decisions.md)
 - [第一阶段基础实施计划](docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md)
@@ -48,4 +50,4 @@ make check
 make race
 ```
 
-当前进度：第 00 至 06 课已完成并提交；第 06 课“Headless one-shot Coding Task”已通过两次连续真实 DeepSeek 验收和学习者的独立手动运行复核。
+当前进度：第 00 至 06 课已完成并提交；第 06 课“Headless one-shot Coding Task”已通过两次连续真实 DeepSeek 验收和学习者的独立手动运行复核。后续采用滚动式大纲，目前只固定 Lesson 07 至 09 的 context ownership、compaction 核心和 Skills 三个闭环；更远方向等前课产生证据后再拆分。详细信息见[课程总纲](docs/course/README.md#后续课程的滚动式大纲)。

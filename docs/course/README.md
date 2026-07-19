@@ -2,7 +2,7 @@
 
 ## 课程目标
 
-通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，最终得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为。
+第一期通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。后续课程继续迁移 coding-relevant 能力，并以受控评测证明 pi-go 最终能在 coding 任务上超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为。
 
 固定参考基线：
 
@@ -107,7 +107,58 @@ flowchart LR
 | 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 已提交 |
 | 06 | Headless coding task | 临时 `pia` 入口、coding prompt、final-only 输出和本地 Go bug-fix 验收 | 已提交 |
 
-原计划中的 Agent 生命周期、subscription、steering/follow-up、Goal Runtime 和 Session 课程保留为二期候选，不占用第一期课次。第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于第一期必须实现。
+## 后续课程的滚动式大纲
+
+后续课程不一次性写成详细实施计划。大纲只给最近、边界已经基本明确的课程分配稳定课次；越远的内容只保留阶段方向，等前面课程产生真实代码和问题后再决定如何拆课。表格增加信息是为了说明判断依据，不是提前锁定接口、package、算法或完整测试矩阵。
+
+更新大纲不等于开始课程。每一课仍需学习者明确要求开始；开课时再重新核对冻结 Pi、当前 pi-go 结构以及 Codex/Grok Build 中与该能力直接相关的证据，并允许据此修正原大纲。
+
+### 规模约定
+
+规模描述责任范围和架构影响，不表示人工工期：
+
+| 规模 | 含义 |
+|---|---|
+| Small | 单一叶子责任，通常不改变跨 package 所有权或生命周期 |
+| Medium | 一个聚焦能力，边界清楚，可用一组确定性验收闭环 |
+| Large | 一个仍然不可再少的核心契约，但会跨层改变状态、所有权或生命周期 |
+| XLarge | 混合了多个可独立讲解和验收的能力；不是可开课规模，必须先讨论并拆分 |
+
+### 已编号的近期课程
+
+| 阶段内课次 | 全局课次 | 解锁的闭环 | Pi 的大致做法 | pi-go 本课边界 | 结束信号 | 依赖 | 规模 | 状态 |
+|---|---:|---|---|---|---|---|---|---|
+| 二期 01 | 07 | Conversation History 与 Active Context 所有权 | `AgentSession` 协调运行，`SessionManager` 从完整记录投影本轮模型上下文 | 只建立内存中的权威 history 与 active context 边界；不做 compaction、持久化或 Skills | 连续 Run 不丢完整 history，Provider 明确只接收当前 active context | 06 | Large | 待开始 |
+| 二期 02 | 08 | Context budget 与 compaction 核心 | `compaction.ts` 在预算触发时摘要较旧内容并保留近期上下文，由 `AgentSession` 接入运行 | 只完成请求前的预算判断和一次 compaction 闭环；不含 Provider 重试、branch summary 或持久化 | 人为缩小 context window 后可触发压缩并继续任务，同时保留权威 history | 07 | Large | 待开始 |
+| 二期 03 | 09 | Skills 与渐进披露 | `skills.ts` 发现有界 metadata，system prompt 只暴露索引，模型匹配后再读取正文 | 只建设最小 Skills 发现与按需读取；不扩成完整 ResourceLoader、extensions 或 MCP | 适用 Skill 可被发现和读取，而未使用 Skill 的正文不占据初始上下文 | 07 | Medium | 待开始 |
+
+这些行有意不回答具体 Go 类型、package 布局、token estimator、摘要 prompt、Skills 搜索优先级或全部 corner cases。真正进入某课时，先把那一行扩展为本课文档；如果扩展后估算变成 XLarge，就在实现前重新拆课和编号。
+
+### 尚未编号的后续方向
+
+| 阶段方向 | Pi 的大致做法 | 当前判断 | 何时细化 |
+|---|---|---|---|
+| Runtime 韧性 | `AgentSession` 对可恢复 Provider 错误做有界退避，并把 context overflow 交给 compaction 路径 | Provider retry、执行预算与循环保险丝可能不是同一课，不能现在打包 | Lesson 09 完成后，依据真实长任务失败重新拆分 |
+| 事件与文本交互 | core Agent 和 `AgentSession` 发出语义事件，并用 steering/follow-up queues 接收运行中的输入 | 整体是 XLarge 方向；事件契约和文本交互至少需要分别形成闭环 | 出现第一个真实 headless consumer 时细化 |
+| Session 持久化与恢复 | `SessionManager` 保存版本化记录，并从记录重建 active context | 存储格式与恢复生命周期是两个候选责任，不预先合课 | 内存上下文和 compaction 契约稳定后细化 |
+| TUI | Pi 的 interactive mode 订阅 Session 事件并处理 terminal、渲染和输入 | 整体是 XLarge 方向，进入独立后续阶段且必须拆课；TUI 只做外层投影 | 事件、交互和恢复均有非 TUI 消费者验证后细化 |
+| 稳定对照评测 | Pi 没有替 pi-go 定义对照协议；需要在两个 agent 外建立公平实验 | 评测契约、runner/corpus 和对照迭代是多个能力，不提前塞进一课 | coding-relevant Pi 能力完成覆盖审计后细化 |
+
+Goal Runtime、Agent Manager、公共 SDK、gRPC、IM、多用户、多仓库、worktree/GitHub 管理、extensions 和 MCP 仍未进入已编号课程。第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于已经确定后续公开 API。
+
+### 长期 coding 能力与评测目标
+
+最终目标不是“代码结构像 Pi”，而是在完成 coding-relevant 能力迁移后，用稳定、可重复的评测证明 pi-go 的 coding 能力高于冻结的 Pi coding-agent 基线。Codex 和 Grok Build 用来提供候选机制与工程经验；Pi 仍是语义基线和主要对照组。
+
+正式评测至少遵守以下约束：
+
+- 两个 agent 使用相同的模型版本、Provider profile、初始仓库、任务文字和资源限制，并记录所有有意差异；
+- 同一任务进行多次独立运行，以自动测试或隐藏验证作为主要成功判据，不以一次演示或主观观感下结论；
+- coding resolve rate 是“能力更强”的主要指标，同时记录 token/cost、turn 数、wall time、tool-call 错误、恢复能力和长上下文完成率；
+- 协议完整性、安全边界和可恢复性是门槛，不能用更高的任务通过率掩盖明显回归；
+- 具体任务集、重复次数、统计门槛、trace 规范和评测产物位置留到正式评测课程决定，不在当前大纲中提前设计。
+
+Lesson 06 被忽略的本地 fixture 和人工复核只证明第一期闭环，不承担上述对照结论。后续每课仍做本课的确定性验收；正式 benchmark 设施等评测方向被拆成可实施课程后再建设。
 
 ## 课程记录约定
 
@@ -146,6 +197,6 @@ pi-go/
 
 `internal/` 是当前的有意选择：接口会随学习不断校正。临时 `cmd/pia` 把启动时的当前目录作为 workspace，只接收一条 task prompt，用于本地运行与验收，不承诺名称、参数或稳定外部协议。等核心语义稳定并出现真实调用方后，再决定公共 Go SDK、gRPC 或 Agent Manager。
 
-冻结 Pi commit 和 package version 只保存在课程文档，不进入 Runtime package。真实验收项目、运行副本和 trace 只保存在被忽略的 `tmp/` 中，不提交 fixture 或 harness。Pi 与 pi-go 的效果比较由学习者在仓库外手动执行，不在本项目创建 benchmark、eval 或比较协议。
+冻结 Pi commit 和 package version 只保存在课程文档，不进入 Runtime package。Lesson 06 的真实验收项目、运行副本和 trace 只保存在被忽略的 `tmp/` 中，不提交 fixture 或 harness。正式 Pi 对照评测属于尚未编号的后续方向；其可重复设施和产物边界在对应课程开始时另行决定。
 
 第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)。

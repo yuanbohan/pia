@@ -36,11 +36,12 @@
 - 决定：临时入口位于 `cmd/pia`，实现包位于 `internal/`；该命令只用于本地运行和验收，名称、参数和输出都不向其他项目承诺稳定协议。公共 Go SDK、gRPC、其他网络 RPC 和 IM 适配均推迟设计。
 - 原因：核心 API 尚处于学习和校正阶段，过早公开会固化错误抽象。出现真实外部调用方后，再根据同进程嵌入或跨进程服务选择接口。
 
-### D6. 不移植 TUI
+### D6. 第一期不移植 TUI；后续 TUI 保持为外层投影
 
 - 日期：2026-07-15
-- 决定：不实现主题、按键、命令提示、交互式选择器和 slash command UI。
-- 原因：它们不决定 coding loop 是否能完成任务，会稀释当前课程对核心语义的关注。
+- 修正日期：2026-07-19
+- 决定：第一期不实现主题、按键、命令提示、交互式选择器和 slash command UI。后续 TUI 进入独立阶段，消费 application/session 的事件和状态，不拥有 Agent Loop、权威 history、compaction 或持久化；其具体课次和拆法等前置契约稳定后再决定。
+- 原因：这些能力不决定第一期 coding loop 是否能完成任务。TUI 整体是 XLarge 方向，必须建立在已经由非 TUI consumer 验证的事件、交互和 Session 契约之上；现在固定两课或更多实现细节都缺少真实证据，提前把状态放进 UI 还会破坏核心与展示层边界。
 
 ### D7. 第一期是单目录、单 active Run，不建立持久化 Session
 
@@ -141,7 +142,7 @@
 - 决定：Run 开始时用 `os.Root` 打开固定 workspace；`read`、`write`、`edit` 只执行 root-relative I/O 并拒绝非 regular-file 目标，不使用“先检查绝对路径再普通 open”的易竞态模式。bash 只从 workspace 启动，仍可访问当前用户资源。
 - 原因：文件工具需要抵抗路径穿越和 symlink TOCTOU；cwd 不是命令 sandbox，不能把 fixture diff 或 canary 误写成主机级隔离。
 
-### D23. 最终验收使用固定 bug-fix fixture，不在仓库内实现 Pi 比较
+### D23. Lesson 06 最终验收使用固定 bug-fix fixture，不在仓库内实现 Pi 比较
 
 - 日期：2026-07-15
 - 修正日期：2026-07-19
@@ -286,6 +287,26 @@
 - 决定：`internal/coding` 根据真实 tool definitions 构建稳定 system prompt，持有 canonical workspace、四个 tools、固定 DeepSeek product profile 和 Agent composition；`cmd/pia` 只处理进程边界。workspace 根目录 project instructions 按 `AGENTS.md`、`AGENTS.MD`、`CLAUDE.md`、`CLAUDE.MD` 顺序选择第一个存在的 UTF-8 regular file，不搜索 ancestor 或全局配置。可选 `PIA_TRACE_PATH` 只在 Run settlement 后 create-new 一个 `0600` 调试文件，保存完整 prompt、schema、transcript 和顶层错误但不保存 API key；trace schema 不稳定且可能包含敏感内容。第一版不增加自动执行预算。
 - 原因：Pi 的 coding system prompt 和 print mode 证明这些责任属于 coding/host 层，而不是模型协议。只加载一个 root instruction 文件、固定产品 profile 和 post-run trace 足以支持当前真实闭环与诊断，不需要提前移植 resource registry、配置矩阵、event audit log 或 policy engine。
 
+### D43. 后续课程采用滚动式大纲，只编号近期闭环
+
+- 日期：2026-07-19
+- 决定：目前只为二期前三课分配稳定编号：Lesson 07 建立完整 conversation history 与 active model context 的所有权边界；Lesson 08 完成请求前的 context budget/compaction 核心闭环；Lesson 09 完成 Skills 渐进披露。Skills 保持为二期第 03 课。Runtime 韧性、事件与文本交互、Session 持久化/恢复、TUI 和稳定评测只保留为后续方向，等前三课产生真实证据后再拆分和编号。
+- 范围：Lesson 07 不做 compaction、持久化或 Skills；Lesson 08 不同时吸收 Provider retry、branch summary 或持久化；Lesson 09 不扩建完整 ResourceLoader、extensions 或 MCP。大纲不预先决定具体 Go API、package、算法和完整测试矩阵，开课时才根据冻结 Pi 与当前实现补齐。
+- 原因：context ownership 到 compaction 仍是解锁长任务的主线，Skills 是已经确认的第三个独立闭环。更远能力的依赖和责任会被这些实现改变；现在给它们固定课次或详细设计，只会制造很快失效的计划。
+
+### D44. 课程规模是拆分门槛，不是工期估算
+
+- 日期：2026-07-19
+- 决定：未来已编号课程表至少记录解锁能力、Pi 大致做法、pi-go 当前边界与非目标、结束信号、依赖、相对规模和状态。规模使用 Small、Medium、Large、XLarge；XLarge 不能直接开课，必须先讨论并拆成能独立讲解和验收的闭环。越远的阶段信息越粗，不因为表格列更多而提前设计实现细节。
+- 原因：这些字段让后续实施者理解“为什么这样排”和“何时算完成”，同时保留根据真实源码与代码推翻早期假设的空间。把多个状态所有权、生命周期或消费者塞进一课，会让讲解、review 和验收同时失焦。
+
+### D45. 长期目标是用受控评测证明 coding 能力超过 Pi
+
+- 日期：2026-07-19
+- 决定：完成 coding-relevant Pi 能力覆盖后，建立稳定、可重复的 pi-go 与冻结 Pi 对照评测。公平比较固定模型/Provider profile、任务与初始仓库并做多次独立运行；以客观 resolve rate 为主要能力指标，同时记录成本、turn、时延、tool error、恢复和长上下文表现，并把协议完整性与安全回归作为门槛。Codex 和 Grok Build 只提供候选机制与工程证据，不替代 Pi 对照组。
+- 范围：当前只确定目标和公平性原则，不提前确定 benchmark corpus、runner 架构、统计阈值、trace schema 或产物存储。Lesson 06 的本地 fixture 仍只是第一期验收；正式评测方向在前置能力稳定后另行拆课。
+- 原因：项目目标是比 Pi 完成 coding 任务更强，而不是仅达到文件结构或功能清单相似。没有同模型、同任务、重复运行和客观判据，“超过 Pi”只能是主观印象，不能指导后续优化。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -328,3 +349,4 @@
 - 2026-07-19：Lesson 06 以新的 one-shot 实施计划修正旧设定：临时入口改为 `cmd/pia`，只输出最终 assistant 文本，不增加 event sink 或启动 warning；真实 Fibonacci 验收只保存在被忽略的 `tmp/`，连续两次 fresh 运行通过后完成。
 - 2026-07-19：Lesson 06 在最终产品代码、system prompt 和任务文字冻结后完成两次连续真实 DeepSeek 验收；两个新进程都从 untouched baseline 修复通用 Fibonacci base case、增加能让原错误实现失败的测试，并通过独立测试与程序输出 `55`。本地 workspace 和 trace 保留在 ignored `tmp/`，课程进入待理解确认且尚未提交。
 - 2026-07-19：学习者独立运行第三个 `pia` acceptance workspace，复核了最终修改、测试与 trace，并确认理解 stable system prompt、每轮完整 transcript 重放、结构化 tool schemas、thinking replay 与 final-only 输出的组合流程；随后明确要求提交并推送第 06 课。
+- 2026-07-19：完成第一期后重新核对 Pi、Codex 和 Grok Build 的长任务与交互边界；学习者确认后续课程采用滚动式大纲，只固定最近三个闭环，Skills 位于二期第 03 课。所有 XLarge 方向必须在开课前拆分，远期 TUI 与稳定 Pi 对照评测暂不绑定课次和实现细节。

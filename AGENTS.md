@@ -6,10 +6,16 @@ pi-go is a learning-driven Go semantic port of Pi's core coding loop. Preserve o
 
 Phase 1 is a DeepSeek-first, headless coding agent for one workspace and one active task at a time. The Agent keeps the complete ordered in-memory transcript across sequential user inputs; the local acceptance command exercises one initial coding task. Phase 1 includes the AI protocol, Faux and DeepSeek providers, the generic model/tool loop, coding tools, and a local acceptance command. Goal Runtime, Session persistence, TUI, public SDK, network RPC, IM adapters, multi-tenant Agent Manager, worktree/GitHub management, and additional providers are deferred.
 
+The long-term product goal is to demonstrate, through controlled and repeatable evaluation, coding capability beyond the pinned Pi coding-agent baseline. Codex and Grok Build are additional evidence sources for candidate mechanisms, not contracts to copy. Do not claim superiority from a single fixture, model run, or subjective review.
+
 ## Course Workflow
 
 - Treat `docs/course/README.md` as the course index and progress record.
 - Treat `docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` as the Phase 1 base contract. For Lesson 06 command, prompt, output, trace, and acceptance behavior, `docs/plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md` is authoritative where the plans conflict. Align older course documents before implementing conflicting behavior.
+- Maintain the future course map as a rolling outline. Give stable lesson numbers only to the nearest lessons whose dependency and responsibility boundaries are understood; keep later phases as coarse directions until earlier implementation evidence justifies a split and order.
+- For each numbered future lesson, record the capability it unlocks, Pi's approximate approach and source area, the current pi-go boundary and non-goals, a concise completion signal, dependencies, relative size, and status. These fields add decision context; they must not pre-design APIs, package layouts, algorithms, or exhaustive test cases before the lesson starts.
+- Size lessons as Small, Medium, Large, or XLarge by responsibility and architectural reach, not estimated human time. XLarge is not an enterable lesson size: discuss and split it before the learner can start it. Keep every resulting lesson centered on one independently explainable and testable capability.
+- Revisit a lesson's outline against the frozen Pi source and current pi-go structure when the learner asks to start it. Update the outline and decisions first when new evidence invalidates the earlier estimate or boundary.
 - Only enter a lesson when the learner explicitly asks to start that lesson.
 - For each implementation lesson, proceed through explanation, discussion, implementation, tests, and documentation. Lesson 00 is the documented module/baseline exception and intentionally has no Runtime package.
 - Teach each concept before asking the learner to predict or answer: define the terms, trace the relevant Pi path, and work through at least one concrete example before an understanding check.
