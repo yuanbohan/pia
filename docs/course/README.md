@@ -15,10 +15,11 @@
 
 当前权威顺序是：
 
-1. [完整实施计划](../plans/2026-07-15-001-pi-core-go-learning-port-plan.md)中的 Product Contract 与 Planning Contract；
-2. [课程与架构决策](decisions.md)；
-3. 本课程总纲和单课文档；
-4. 冻结 Pi 源码、文档与测试。
+1. Lesson 06 的命令、prompt、输出、trace 和验收行为以 [`pia` one-shot 实施计划](../plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md)为准；
+2. 其余第一阶段契约以[基础实施计划](../plans/2026-07-15-001-pi-core-go-learning-port-plan.md)为准；
+3. [课程与架构决策](decisions.md)；
+4. 本课程总纲和单课文档；
+5. 冻结 Pi 源码、文档与测试。
 
 出现冲突时先修正文档，不让实现静默选择一套语义。
 
@@ -34,12 +35,13 @@ task + system prompt + transcript + tool schemas + workspace context
   -> next model turn
   -> assistant response without tool calls
   -> loop terminal result
-  -> independent fixture acceptance
+  -> final assistant text
+  -> local ignored acceptance project
 ```
 
 核心术语：
 
-- `Agent Runtime`：当前课程的本地核心，拥有同一对话的完整有序内存 transcript，并负责 Provider 调用、工具循环、事件和取消。
+- `Agent Runtime`：当前课程的本地核心，拥有同一对话的完整有序内存 transcript，并负责 Provider 调用、工具循环和取消。
 - `Run`：一次任务 prompt 启动的完整循环，可以包含多个模型 Turn；课程使用 `run_start/run_end`，引用 Pi 源码时保留 `agent_start/agent_end`。
 - `Turn`：一次 assistant response，以及它触发的 tool calls 和 tool results。
 - `Tool stage`：同一 assistant message 中的一个执行阶段。连续 parallel-safe calls 构成并行阶段，其他调用分别构成串行屏障。
@@ -102,8 +104,8 @@ flowchart LR
 | 02 | 单次 Provider Turn 与 transcript | 一次模型流、assistant message、request context 和 Run 终态 | 已提交 |
 | 03 | 多轮 Tool Loop 与屏障式调度 | schema、参数校验、tool results、错误继续、只读并行和串行屏障 | 已提交 |
 | 04 | DeepSeek Provider | OpenAI-compatible 消息转换、SSE、reasoning、tool calls、usage 和错误映射 | 已提交 |
-| 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 待理解确认 |
-| 06 | Headless coding task | 本地入口和固定 Go bug-fix 验收 | 待开始 |
+| 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 已提交 |
+| 06 | Headless coding task | 临时 `pia` 入口、coding prompt、final-only 输出和本地 Go bug-fix 验收 | 已提交 |
 
 原计划中的 Agent 生命周期、subscription、steering/follow-up、Goal Runtime 和 Session 课程保留为二期候选，不占用第一期课次。第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于第一期必须实现。
 
@@ -127,7 +129,7 @@ flowchart LR
 
 ```text
 pi-go/
-├── cmd/pi-go/                 # 本地运行与固定验收入口
+├── cmd/pia/                   # 临时 one-shot 本地入口
 ├── internal/
 │   ├── ai/                    # 消息、ai.Provider、stream 和通用模型协议
 │   │   └── provider/          # 具体 Provider 实现的归类目录，不是 registry
@@ -136,13 +138,14 @@ pi-go/
 │   │       └── deepseek/      # DeepSeek 配置和兼容 profile
 │   ├── agent/                 # 通用模型与工具循环
 │   └── coding/                # prompt、workspace、Runtime 装配和 coding tools
-├── testdata/                  # Provider fixtures 和固定 coding acceptance fixture
 ├── docs/
 │   ├── course/                # 课程、讨论与决策
 │   └── plans/                 # 当前实施计划
 └── go.mod
 ```
 
-`internal/` 是当前的有意选择：接口会随学习不断校正。`cmd/pi-go` 只接受工作目录和任务 prompt，用于本地运行与验收，不承诺稳定外部协议。等核心语义稳定并出现真实调用方后，再决定公共 Go SDK、gRPC 或 Agent Manager。
+`internal/` 是当前的有意选择：接口会随学习不断校正。临时 `cmd/pia` 把启动时的当前目录作为 workspace，只接收一条 task prompt，用于本地运行与验收，不承诺名称、参数或稳定外部协议。等核心语义稳定并出现真实调用方后，再决定公共 Go SDK、gRPC 或 Agent Manager。
 
-冻结 Pi commit 和 package version 只保存在课程文档，不进入 Runtime package。Pi 与 pi-go 的效果比较由学习者在仓库外手动执行，不在本项目创建 benchmark、eval 或比较协议。
+冻结 Pi commit 和 package version 只保存在课程文档，不进入 Runtime package。真实验收项目、运行副本和 trace 只保存在被忽略的 `tmp/` 中，不提交 fixture 或 harness。Pi 与 pi-go 的效果比较由学习者在仓库外手动执行，不在本项目创建 benchmark、eval 或比较协议。
+
+第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)。

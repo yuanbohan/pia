@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-待理解确认；`read`、`write` 与 `edit` 子阶段已经完成并提交，`bash` 也已完成冻结 Pi 源码核对、corner-case 讨论、测试先行实现和全仓验证。第 05 课代码已完成但尚未 commit，等待学习者 review 实现并确认理解。
+已提交；`read`、`write`、`edit` 与 `bash` 子阶段都已完成冻结 Pi 源码核对、corner-case 讨论、测试先行实现、全仓验证和学习者确认。
 
 开课记录：第 04 课已经完成、提交并 push 到 `main`。学习者确认第 05 课主要进入具体 Tool 实现，并要求按 `read`、`write`、`edit`、`bash` 一个个讲解和推进；本课先对齐共同 Tool 契约与 workspace 所有权，再逐个完成解释、讨论、实现和测试。
 
@@ -178,15 +178,15 @@ Successfully wrote 7 bytes to nested/hello.txt
 
 此前课程材料在尚未进入 `bash` 子阶段、也未与学习者讨论时，就写入了“最小 allowlist 环境”“Provider 凭据不能进入子进程”和“正常 shell exit 后清理全部 descendants”。进入本子阶段重新核对冻结 Pi 后确认，这些不是上游行为：`bash.ts` 的本地 operations 使用 `getShellEnv()` 复制完整 `process.env`；每次调用启动 detached shell，只有 abort 或可选 timeout 调用 `killProcessTree`；正常 shell exit 后不会主动 kill 该进程组。`waitForChildProcess` 在 shell 已 exit 但 descendant 仍持有 stdout/stderr 时等待 pipe output idle，而不是等待所有 descendants 退出。学习者也明确指出此前安全边界从未讨论，因此旧结论不能继续作为实现依据。
 
-讨论从最终产品形态出发：pi-go 是由用户在 Ghostty/zsh 等终端中启动的本地 coding-agent CLI。导出的环境变量属于进程环境，会按 `zsh -> pi-go -> bash` 继承；Bash 无需再次读取 `.zshrc`。未导出的 shell variable、alias、function 和 zsh option 不会继承。基于这个区别，学习者逐项确认下面的第一期契约：
+讨论从最终产品形态出发：pi-go 是由用户在 Ghostty/zsh 等终端中启动的本地 coding-agent CLI。Lesson 06 暂时把命令命名为 `pia`；导出的环境变量属于进程环境，会按 `zsh -> pia -> bash` 继承，Bash 无需再次读取 `.zshrc`。未导出的 shell variable、alias、function 和 zsh option 不会继承。基于这个区别，学习者逐项确认下面的第一期契约：
 
 - bash tool 启用后直接执行模型命令，不增加逐次审批、trust/yolo matrix 或 sandbox。文件工具仍受 `os.Root` 限制，bash 只保证每次调用从 workspace 开始，可以访问当前用户有权访问的 workspace 外文件、网络和其他资源。
 - 每次调用使用新建的非交互、非 login shell，stdin 为空且不分配 PTY；`cd`、`export`、virtualenv activation 和 alias 不跨调用保留，文件、Git 状态、外部服务和后台进程等真实副作用会保留。shell 支持显式 path，默认按 `/bin/bash`、PATH 中的 `bash`、`sh` 回退。
-- 子进程完整继承 pi-go 的进程环境。环境来源可以是启动 zsh、配置工具或上层 launcher；Provider 只需在内存中持有 key 并为 HTTP request 设置 Authorization，并不要求 key 一定存在环境中。反过来，如果 key 已在父环境中，bash 就能看到；如果 Pi-style auth storage 把 key 存在文件中，unsandboxed bash 也可能直接读取该文件。本阶段不声称 credential isolation。
+- 子进程完整继承 `pia` 的进程环境。环境来源可以是启动 zsh、配置工具或上层 launcher；Provider 只需在内存中持有 key 并为 HTTP request 设置 Authorization，并不要求 key 一定存在环境中。反过来，如果 key 已在父环境中，bash 就能看到；如果 Pi-style auth storage 把 key 存在文件中，unsandboxed bash 也可能直接读取该文件。本阶段不声称 credential isolation。
 - 输入为 `command` 与可选秒数 `timeout`，没有默认 timeout。timeout、Run cancellation 或 CLI cancellation 直接 hard-kill 原进程组；正常 exit 不清理后台进程。`server >server.log 2>&1 &` 可以继续运行，而 `go test &` 的后续失败不会改变 shell 已返回的成功；后台文件修改可能与后续工具竞态，`setsid`/daemonize 还可能逃出原进程组。
 - stdout/stderr 合并并持续 drain。非零 shell exit 保留输出并形成 call-local error，Agent 继续；`grep` 的 no-match、pipeline 的最后命令以及 `cmd1; cmd2` 的最终 exit status 都服从 shell 自身语义，不由工具猜测业务成功。
 - 模型 final result 只保留最后 2000 行或 50 KiB，完整 raw output 从首次超限开始写入系统临时文件并回填此前 chunks。该文件没有大小上限、不会自动删除，也可能包含命令打印的敏感内容；在无默认 timeout 的选择下，`yes` 等命令可以持续占用临时磁盘。学习者在看到该 corner case 后仍选择沿用 Pi。
-- 最终 CLI 要像 Pi 一样节流展示实时 bash output，但第 05 课不提前增加 Agent event sink 或 Tool callback。当前实现必须在进程运行期间增量读取 pipe，使用独立 accumulator 形成有界 tail 与完整临时文件，从数据流上保留实时展示能力；第 06 课有真实 CLI consumer 时再决定 call identity、投递顺序和展示接口。
+- bash 必须在进程运行期间增量读取 pipe，使用独立 accumulator 形成有界 tail 与完整临时文件。这是为了避免 pipe 阻塞并构造稳定 tool result，不要求第一版 one-shot CLI 实时展示 output。第 06 课已经确定只投影 Run 结束后的最终 assistant 文本；Agent event sink 和 Tool callback 继续推迟到未来交互式 UI 出现真实消费者时再设计。
 
 Go 机制不会机械复制 TypeScript API：macOS/Linux 通过 `exec.Cmd.SysProcAttr.Setpgid` 建立独立进程组，取消时对负 PID 发送 `SIGKILL`，并始终调用 `Wait` 回收直接 shell。只调用 `exec.CommandContext` 不足以满足该契约，因为它不能保证终止 shell 启动的整个进程组。stdout 与 stderr pipe 必须并发 drain 到同步 accumulator；正常 shell exit 后使用短 output-idle grace 处理仍持有 pipe 的 descendant，不能因等待 pipe close 永久挂住，也不能在 output 仍持续到达时过早丢弃尾部。
 
@@ -215,4 +215,4 @@ Go 机制不会机械复制 TypeScript API：macOS/Linux 通过 `exec.Cmd.SysPro
 
 简化审查将阈值前 raw chunks 收敛为 `bytes.Buffer`，移除重复的 stream-error 状态，并避免为字符串 byte length 创建临时 `[]byte`；复用审查确认现有 `toolargs` 已用于真正共享的参数边界，而 shell resolution、进程组与 accumulator 没有其他生产消费者，不应提前上移。可靠性审查补上了已重定向 descendant 的取消路径和 threshold-crossing 多 chunk 测试；还锁定完整输出临时文件首次创建失败后不能重试生成缺失 chunks 的误导文件，footer 也不声称存在完整路径。修复后没有剩余 actionable finding。
 
-最终 `make check` 完成 `go fmt ./...`、`go vet ./...`、`go test ./...` 与 `golangci-lint run ./...`，lint 为 0 issues；`make race` 全部通过，bash package 重复运行通过，Windows cross-build 也确认 portable unsupported 分支保持可构建。Windows 执行语义仍明确不属于第一期支持范围。第 05 课现在停在待理解确认，只有学习者明确要求后才 commit。
+最终 `make check` 完成 `go fmt ./...`、`go vet ./...`、`go test ./...` 与 `golangci-lint run ./...`，lint 为 0 issues；`make race` 全部通过，bash package 重复运行通过，Windows cross-build 也确认 portable unsupported 分支保持可构建。Windows 执行语义仍明确不属于第一期支持范围。第 05 课已经由学习者确认，并以 commit `b95356a`（`feat(coding): add cancellable bash tool`）完成最后一个子阶段。

@@ -83,7 +83,7 @@ Go 版本不复制这些机制。我们会根据契约选择 `context.Context`�
 
 ### Headless 讨论给出的第一个例子
 
-“没有 TUI，能够在本地驱动 Agent Runtime”是当前产品边界；必须保留。“现在就提供外部调用协议”不是当前需求，因此没有进入设计。`cmd/pi-go` 只承担本地运行与验收，未来 Agent Manager 如何调用 Runtime 留待 gRPC 或公共 SDK 设计。
+“没有 TUI，能够在本地驱动 Agent Runtime”是当前产品边界；必须保留。“现在就提供外部调用协议”不是当前需求，因此没有进入设计。Lesson 06 把临时本地运行与验收入口命名为 `cmd/pia`，但名称、参数和输出都不构成稳定兼容协议；未来 Agent Manager 如何调用 Runtime 留待 gRPC 或公共 SDK 设计。
 
 ## 概念层级：Agent、Run、Turn、Event、Handler 与 Idle
 
@@ -388,7 +388,7 @@ github.com/yuanbohan/pi-go
 ### 00-E 范围修正：当前不提供外部调用
 
 - 学习者决定：当前 pi-go 不给外部项目调用；以后根据真实需求考虑 gRPC 或公共 Go SDK。
-- 课程结论：`cmd/pi-go` 只作为本地运行和验收入口，其输入输出不构成稳定兼容协议。`internal/` 保留核心实现可调整性。
+- 课程结论：本地命令只作为运行和验收入口，其输入输出不构成稳定兼容协议；Lesson 06 暂时使用 `cmd/pia`。`internal/` 保留核心实现可调整性。
 - 后续边界：跨进程、跨语言调用更可能使用 gRPC；同进程 Go 嵌入更可能使用公共 SDK。两者可以共存，但当前课程不做选择或预留虚构接口。
 
 ### 00-F 理解确认

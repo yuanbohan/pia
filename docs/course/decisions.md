@@ -13,13 +13,14 @@
 ### D2. 第一期只实现模型与工具循环
 
 - 日期：2026-07-15
-- 决定：`internal/agent` 负责通用 Provider turn、transcript 和 tool loop；第一期不实现结构化 plan/progress/replan/done/blocked Goal Runtime。模型停止调用工具时只表示 loop 正常结束，coding task 是否成功由固定外部验收独立判断。
+- 决定：`internal/agent` 负责通用 Provider turn、transcript 和 tool loop；第一期不实现结构化 plan/progress/replan/done/blocked Goal Runtime。模型停止调用工具时只表示 loop 正常结束，coding task 是否成功由本地、独立的真实项目验收判断。
 - 原因：当前目标是证明最小 coding loop 能完成真实任务。提前增加 Goal 状态机会把 Agent Loop 能力和上层目标策略混在一起。
 
 ### D3. DeepSeek-first，但 Provider 边界可替换
 
 - 日期：2026-07-15
-- 决定：第一个真实 Provider 只实现 DeepSeek；模型 ID、base URL 和密钥来自运行配置。非本地 base URL 默认必须使用 HTTPS，测试服务器需要显式开发覆盖。实现 Provider 课程时重新核对官方模型和协议，不把当前模型别名写成课程契约。
+- 修正日期：2026-07-19
+- 决定：第一个真实 Provider 只实现 DeepSeek；底层 Provider 保留显式模型、base URL 和密钥配置，非本地 base URL 默认必须使用 HTTPS，测试服务器需要显式开发覆盖。Lesson 06 的产品命令不暴露配置矩阵，固定使用 `deepseek-v4-pro`、thinking mode 和 high reasoning effort；只有 Provider package tests 继续使用其他模型或 endpoint。
 - 原因：先减少兼容矩阵，同时保留未来扩展其他 Provider 的边界。
 
 ### D4. Faux Provider 是 Agent Loop 的首要验证设施
@@ -31,7 +32,8 @@
 ### D5. 当前交付 headless Agent Runtime，不做 SDK-first
 
 - 日期：2026-07-15
-- 决定：入口位于 `cmd/pi-go`，实现包位于 `internal/`；该命令只用于本地运行和验收，当前不向其他项目承诺调用协议。公共 Go SDK、gRPC、其他网络 RPC 和 IM 适配均推迟设计。
+- 修正日期：2026-07-19
+- 决定：临时入口位于 `cmd/pia`，实现包位于 `internal/`；该命令只用于本地运行和验收，名称、参数和输出都不向其他项目承诺稳定协议。公共 Go SDK、gRPC、其他网络 RPC 和 IM 适配均推迟设计。
 - 原因：核心 API 尚处于学习和校正阶段，过早公开会固化错误抽象。出现真实外部调用方后，再根据同进程嵌入或跨进程服务选择接口。
 
 ### D6. 不移植 TUI
@@ -43,14 +45,15 @@
 ### D7. 第一期是单目录、单 active Run，不建立持久化 Session
 
 - 日期：2026-07-16
-- 决定：`cmd/pi-go` 的第一期验收仍只接收一个 workspace 和一条初始 task prompt，但核心 `Agent` 拥有当前进程内的完整有序 transcript，并可按顺序接收后续 user input；同一时刻只允许一个 active Run。Session 创建、持久化、恢复、分支、多用户并发和 Agent Manager 延后。
+- 修正日期：2026-07-19
+- 决定：`cmd/pia` 把启动时的当前工作目录作为唯一 workspace，只接收一条位置参数形式的初始 task prompt。核心 `Agent` 仍拥有当前进程内的完整有序 transcript，并可按顺序接收后续 user input；同一时刻只允许一个 active Run。Session 创建、持久化、恢复、分支、多用户并发和 Agent Manager 延后。
 - 原因：内存 transcript 是 Agent 保持目标和工具上下文的核心执行状态，不是可删减的 Session 附加能力；推迟的是持久化与管理层，而不是正确的消息所有权。
 
 ### D8. 第一期没有审批或 trust/yolo 策略系统
 
 - 日期：2026-07-15
 - 修正日期：2026-07-18
-- 决定：模型选择的工具直接执行，不逐次请求批准，也不提供 trust/yolo 配置矩阵。`read`、`write`、`edit` 强制 workspace 文件边界；bash 只固定每次调用的初始 cwd，不是 sandbox，可以访问当前用户有权访问的 workspace 外资源。bash 与冻结 Pi 一样继承 CLI 的完整进程环境，因此已经存在于环境中的 Provider 凭据也对命令可见；只存在于 Provider 内存配置中的凭据不会被额外注入 argv、tool config、transcript、事件、日志或错误。
+- 决定：模型选择的工具直接执行，不逐次请求批准，也不提供 trust/yolo 配置矩阵。`read`、`write`、`edit` 强制 workspace 文件边界；bash 只固定每次调用的初始 cwd，不是 sandbox，Provider 生成的命令拥有启动用户的完整主机和网络权限，可以访问 workspace 外资源并产生不可逆副作用。bash 与冻结 Pi 一样继承 CLI 的完整进程环境，因此已经存在于环境中的 Provider 凭据也对命令可见；只存在于 Provider 内存配置中的凭据不会被额外注入 argv、tool config、transcript、trace、日志或错误。若命令主动读取或打印父环境中的 secret，第一期也没有 redactor 阻止它进入 tool result 或 trace。
 - 原因：学习者在 bash 子阶段确认本地 CLI 信任当前 workspace、模型和命令，选择冻结 Pi 的直接执行与完整环境语义，而不是此前未经讨论就写入文档的最小 allowlist。逐工具审批会阻断自动 coding loop；完整环境还能保留从 Ghostty/zsh 启动 CLI 时已经导出的 PATH、代理和语言工具链配置。这不是 credential isolation，操作者仍需理解命令拥有当前用户权限。
 
 ### D9. 课程与代码按同一个提交节奏推进
@@ -68,9 +71,9 @@
 ### D11. Provider stream 使用 pull boundary；Agent event sink 延后设计
 
 - 日期：2026-07-16
-- 修正日期：2026-07-18
-- 决定：Provider 对 Agent 暴露可取消的 pull/receive 流抽象。最终本地 CLI 已确认需要节流展示实时 bash 输出，但第 05 课只让 bash 增量 drain 并构造有界最终结果，不为尚未存在的 CLI 消费者提前修改通用 Tool/Agent progress 接口；第 06 课组装本地入口时再根据 call identity、串行投递、错误和 settlement 语义接通 event sink。
-- 原因：pull boundary 直接参与模型调用、结束、错误和取消，属于基础执行数据流。增量读取现在就能避免 pipe deadlock 并保留未来实时数据路径；event API 的形状仍取决于真实 CLI 消费者，提前增加 callback 或 context value 只会固化猜测。
+- 修正日期：2026-07-19
+- 决定：Provider 对 Agent 暴露可取消的 pull/receive 流抽象。Lesson 06 的 one-shot CLI 只在 Run settlement 后投影最终 assistant 文本；bash 增量 drain 只负责避免 pipe deadlock 并构造有界 tool result，不新增通用 Tool/Agent progress 接口或 event sink。实时展示继续推迟到未来 TUI 或 interactive consumer。
+- 原因：pull boundary 直接参与模型调用、结束、错误和取消，属于基础执行数据流；实时 presentation 则没有第一期消费者。把两者分开可以保留正确执行语义，而不为未知 call identity、投递顺序和 UI 状态提前固化 callback。
 
 ### D12. 工具 schema 与 Go 参数校验分离
 
@@ -129,7 +132,7 @@
 ### D21. Run 取消必须等待所有已启动工作收敛
 
 - 日期：2026-07-16；2026-07-17 修正未启动调用和 Provider-turn tool call 的 settlement 规则
-- 决定：Run 取消停止新的 Provider 调用和工具副作用，取消所有已启动 child contexts，等待 stream、tool workers 和 bash process group 收敛，然后返回明确的 canceled 非成功结果。工具阶段已经完成的调用保留实际结果，执行中调用记录 canceled，未启动调用不执行但记录明确的 not-executed settlement result；若 Provider aborted terminal 自身保留了已经组装完成、尚未进入工具阶段的 calls，这些调用全部不执行并追加同 ID not-executed results。未来引入 event sink 时，再把观察通道的 settlement 纳入该取消契约。
+- 决定：Run 取消停止新的 Provider 调用和工具副作用，取消所有已启动 child contexts，等待 stream、tool workers 和 bash process group 收敛，然后返回明确的 canceled 非成功结果。工具阶段已经完成的调用保留实际结果，执行中调用记录 canceled，未启动调用不执行但记录明确的 not-executed settlement result；若 Provider aborted terminal 自身保留了已经组装完成、尚未进入工具阶段的 calls，这些调用全部不执行并追加同 ID not-executed results。未来只有真实交互式消费者引入 event sink 时，才扩展观察通道的 settlement 契约。
 - 原因：取消请求不是完成信号。过早返回会遗留 goroutine、进程或晚到事件，并允许新旧副作用重叠；漏掉未启动调用的 settlement result 又会让持久 transcript 出现 orphaned tool calls，阻断同一 Agent 后续 Run。
 
 ### D22. 文件工具使用 os.Root；bash 不宣称 workspace containment
@@ -141,14 +144,16 @@
 ### D23. 最终验收使用固定 bug-fix fixture，不在仓库内实现 Pi 比较
 
 - 日期：2026-07-15
-- 决定：最终验收使用 checked-in prompt 和一个初始测试失败的固定小型 Go fixture。Agent 必须自主读取、修改并运行测试；独立 harness 检查测试成功、不可修改文件哈希、生产文件 allowlist、相邻 canary 和遗留进程。Pi 与 pi-go 的效果比较由学习者在仓库外手动执行，不创建 benchmark、eval package、进程比较协议或评分工具。
-- 原因：固定 fixture 同时提供可重复的 Runtime 验收和人工对比材料，而不会把一次主观效果比较污染成产品代码。
+- 修正日期：2026-07-19
+- 决定：真实验收只在被忽略的 `tmp/pia-acceptance/` 下保存一个能构建但 Fibonacci 实现错误、且没有测试的本地 Go baseline。每次从 untouched baseline 建立新副本并启动新 `pia` 进程，要求 Agent 修复函数、增加有意义的测试并验证；导师独立检查测试、程序输出以及新增测试在原始错误实现上确实失败。必须连续两次成功，任何产品代码、system prompt 或任务文字调整都会重置计数。仓库不提交 fixture、prompt、harness、trace 或模型修改结果。
+- 原因：当前里程碑需要专家反复诊断 prompt、模型、loop 与 tools 的首个真实闭环，但还没有维护长期 benchmark 基础设施的需求；保留本地证据即可让学习者检查，同时不把一次验收题固化进产品树。
 
-### D24. DeepSeek 数据外发必须明确，默认事件必须有界
+### D24. DeepSeek 数据外发与本地命令权限必须明确
 
 - 日期：2026-07-15
-- 决定：运行前明确提示 system prompt、task、模型选择的文件内容、命令和 tool output 会发送给 DeepSeek；操作者自行选择可披露 workspace，Runtime 不增加确认或审批交互。read/bash 内容在进入 transcript、Provider request 或 event preview 前完成大小限制；默认事件只呈现 metadata、状态和有界 preview。第一期没有通用 secret detector 或 redactor。
-- 原因：操作者必须理解真实数据边界；减少重复输出能降低额外泄漏，但不能被描述为阻止模型看到完成任务所需的 tool results。
+- 修正日期：2026-07-19
+- 决定：README 和 Lesson 06 明确披露 system prompt、task、模型选择的文件内容、命令和 tool output 会发送给 DeepSeek；操作者自行选择可披露 workspace。one-shot 命令不显示启动 warning，也不增加确认或审批交互。Provider 生成的 bash 命令继承完整父环境并拥有启动用户的主机和网络权限；第一期没有 sandbox、secret detector 或通用 redactor。read/bash 内容仍在进入 transcript 和 Provider request 前执行既有大小限制。
+- 原因：final-only 命令不应混入未被用户要求的过程输出；披露责任仍必须持久存在于操作者文档。内容限制减少单次模型输入，却不是 secret isolation，也不能约束 unsandboxed bash 的主机副作用。
 
 ### D25. 第一阶段 AssistantMessage 只保留 Loop 可观察字段
 
@@ -159,7 +164,7 @@
 ### D26. Partial assistant 不属于正式 transcript
 
 - 日期：2026-07-16
-- 决定：第一阶段正式 transcript 对每个 Provider turn 只追加一条 terminal final/aborted assistant message，不保存、持久化或暴露可查询的完整 partial assistant view。第 03 课增加的 tool-result settlement 不属于 partial 或第二条 assistant；error/aborted terminal 中已完成但未执行的 tool calls 会在该 assistant 后得到同 ID not-executed results。如何把 formation events 提供给本地终端、未来 TUI 或日志，等课程处理真实展示过程时再讨论，不在第 02 课建立 event sink。
+- 决定：第一阶段正式 transcript 对每个 Provider turn 只追加一条 terminal final/aborted assistant message，不保存、持久化或暴露可查询的完整 partial assistant view。第 03 课增加的 tool-result settlement 不属于 partial 或第二条 assistant；error/aborted terminal 中已完成但未执行的 tool calls 会在该 assistant 后得到同 ID not-executed results。formation events 与实时展示明确推迟到未来 TUI 或其他交互式消费者，不在第一阶段建立 event sink。
 - 原因：冻结 Pi 的低层 loop 会把 partial 临时放进私有 working context，但高层 `Agent.state.messages` 只在 `message_end` 追加 terminal message，并用独立 `streamingMessage` 服务 UI。pi-go 第一期是 headless Runtime，没有必须查询完整 partial snapshot 的消费者；把权威 transcript 与临时展示状态分开可以避免半成品 text、thinking 或 tool-call 参数成为下一轮上下文事实。
 
 ### D27. RunResult 携带数据，Go error 表达调用终态
@@ -269,11 +274,17 @@
 ### D41. bash 沿用冻结 Pi 的受信任本地 CLI 语义
 
 - 日期：2026-07-18
-- 信任与进程环境：bash tool 暴露 `command` 和可选秒数 `timeout`，不逐次审批，也不提供 sandbox。每次调用从固定 workspace 启动一个新的非交互、无 PTY shell，stdin 为空，并完整继承启动 pi-go 的父进程环境；zsh 已导出的 PATH、代理和变量会传入 Bash，未导出的 shell variable、alias 和 function 不会。shell 支持显式 path；默认按 `/bin/bash`、PATH 中的 `bash`、`sh` 回退。第一期不移植 Pi 的 remote operations、command prefix、spawn hook 或 Windows transport。
+- 信任与进程环境：bash tool 暴露 `command` 和可选秒数 `timeout`，不逐次审批，也不提供 sandbox。每次调用从固定 workspace 启动一个新的非交互、无 PTY shell，stdin 为空，并完整继承启动 `pia` 的父进程环境；zsh 已导出的 PATH、代理和变量会传入 Bash，未导出的 shell variable、alias 和 function 不会。Provider 生成的命令拥有启动用户的主机与网络权限。shell 支持显式 path；默认按 `/bin/bash`、PATH 中的 `bash`、`sh` 回退。第一期不移植 Pi 的 remote operations、command prefix、spawn hook 或 Windows transport。
 - 生命周期：macOS/Linux 为每次调用建立独立进程组。可选 timeout 没有默认值；timeout、Run cancellation 或 CLI cancellation 直接以 `SIGKILL` 终止原进程组并等待 shell 回收，不承诺运行 cleanup handler。正常 shell exit 不主动清理进程组，因此重定向输出的后台服务可以继续运行，后续失败不改变已经返回的 shell exit code，后台文件修改也可能与后续工具竞态；创建新 session 的 daemon 还可能逃出原进程组。每次调用都是新 shell，`cd`、`export` 和 virtualenv activation 不跨调用保留。
 - 输出与错误：stdout/stderr 按到达顺序合并并在运行期间持续 drain；跨 pipe 的相对顺序不作确定性承诺。模型最终只看到最后 2000 行或 50 KiB，完整 raw output 在首次超限后写入无大小上限、不会自动删除的系统临时文件；单个超长行可能只保留尾部。正常 shell exit 后，继承 pipe 的 descendant 以冻结 Pi 的短 idle grace 收敛读取，持续输出的后台进程会让调用继续等待，除非 timeout 或取消。非零 exit 形成保留有界输出的 call-local error，Agent 继续运行；shell pipeline 和命令列表仍服从自身的最后命令 exit status。
-- CLI 展示边界：最终 CLI 必须节流展示实时 bash 输出，同时只有有界 final result 进入 transcript。第 05 课实现增量 drain、tail accumulator 和完整临时文件，不提前修改通用 Agent/Tool progress API；第 06 课出现真实 CLI 消费者时再接通事件。这个边界避免 `CombinedOutput` 式结束后读取和 pipe deadlock，也避免为未知 call identity 与展示顺序提前设计 callback。
+- CLI 展示边界：Lesson 06 的 one-shot CLI 只输出 Run settlement 后的最终 assistant 文本，不实时展示 bash output。第 05 课的增量 drain、tail accumulator 和完整临时文件继续用于避免 `CombinedOutput` 式结束后读取和 pipe deadlock，并向模型提供有界结果；它不再被解释为第一版必须接入 event sink 的承诺。
 - Pi 证据与修正：冻结 `bash.ts` 使用完整 `process.env`、可选无默认 timeout、detached process group、取消/超时 hard kill、合并输出、tail truncation 和完整临时文件；`waitForChildProcess` 用 output-idle grace 避免 descendant 持有 pipe 时永久等待。此前课程计划中的最小 allowlist、Provider key 对命令不可见和正常退出清理全部 descendants 没有经过学习者讨论，也不符合该源码，现由本决定取代。
+
+### D42. Lesson 06 由 coding application 拥有稳定 prompt 和 one-shot composition
+
+- 日期：2026-07-19
+- 决定：`internal/coding` 根据真实 tool definitions 构建稳定 system prompt，持有 canonical workspace、四个 tools、固定 DeepSeek product profile 和 Agent composition；`cmd/pia` 只处理进程边界。workspace 根目录 project instructions 按 `AGENTS.md`、`AGENTS.MD`、`CLAUDE.md`、`CLAUDE.MD` 顺序选择第一个存在的 UTF-8 regular file，不搜索 ancestor 或全局配置。可选 `PIA_TRACE_PATH` 只在 Run settlement 后 create-new 一个 `0600` 调试文件，保存完整 prompt、schema、transcript 和顶层错误但不保存 API key；trace schema 不稳定且可能包含敏感内容。第一版不增加自动执行预算。
+- 原因：Pi 的 coding system prompt 和 print mode 证明这些责任属于 coding/host 层，而不是模型协议。只加载一个 root instruction 文件、固定产品 profile 和 post-run trace 足以支持当前真实闭环与诊断，不需要提前移植 resource registry、配置矩阵、event audit log 或 policy engine。
 
 ## 变更记录
 
@@ -314,3 +325,6 @@
 - 2026-07-18：`edit` 完成测试先行实现和审查；多段原文件匹配、唯一性、overlap、失败不落盘、普通文件替换、workspace/symlink/FIFO 边界、取消和 read 可见性测试通过。审查将重复 occurrence 检测收敛为最多寻找两个位置，避免为非唯一诊断扫描全部高度重复内容。
 - 2026-07-18：进入 `bash` 子阶段后纠正未经讨论的最小环境与 descendant cleanup 结论；学习者逐项确认沿用冻结 Pi 的直接执行、完整父环境、新 shell、无 stdin/PTY、可选无默认 timeout、正常退出保留后台进程、取消/超时 hard-kill 进程组、合并 tail 加完整临时文件、非零 call-local error 和最终 CLI 实时展示语义。
 - 2026-07-18：`bash` 完成测试先行实现：独立 package 接收 canonical workspace host path，Darwin/Linux 进程组负责 timeout/cancel，正常退出使用 output-idle grace 且保留后台进程，增量 accumulator 提供 2000 行/50 KiB tail 与完整 raw 临时文件；CLI live event 接口仍按决定延后到第 06 课的真实消费者。
+- 2026-07-19：Lesson 06 以新的 one-shot 实施计划修正旧设定：临时入口改为 `cmd/pia`，只输出最终 assistant 文本，不增加 event sink 或启动 warning；真实 Fibonacci 验收只保存在被忽略的 `tmp/`，连续两次 fresh 运行通过后完成。
+- 2026-07-19：Lesson 06 在最终产品代码、system prompt 和任务文字冻结后完成两次连续真实 DeepSeek 验收；两个新进程都从 untouched baseline 修复通用 Fibonacci base case、增加能让原错误实现失败的测试，并通过独立测试与程序输出 `55`。本地 workspace 和 trace 保留在 ignored `tmp/`，课程进入待理解确认且尚未提交。
+- 2026-07-19：学习者独立运行第三个 `pia` acceptance workspace，复核了最终修改、测试与 trace，并确认理解 stable system prompt、每轮完整 transcript 重放、结构化 tool schemas、thinking replay 与 final-only 输出的组合流程；随后明确要求提交并推送第 06 课。
