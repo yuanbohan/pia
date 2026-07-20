@@ -23,6 +23,7 @@ const (
 	piaSkillFilename   = "SKILL.md"
 
 	maxPiaSkillCandidates          = 64
+	maxPiaSkillDirectoryEntries    = maxPiaSkillCandidates * 4
 	maxSkillFrontmatterBytes       = 16 << 10
 	maxPortableSkillNameCharacters = 64
 	maxSkillNameCharacters         = 256
@@ -60,7 +61,7 @@ func discoverPiaSkills(workspace *Workspace) (piaSkillDiscovery, error) {
 		return piaSkillDiscovery{}, fmt.Errorf("coding: discover Pia skills: workspace is required")
 	}
 
-	entries, err := fs.ReadDir(workspace.Root().FS(), piaSkillsDirectory)
+	skillsDirectory, err := workspace.Root().Open(piaSkillsDirectory)
 	if errors.Is(err, fs.ErrNotExist) {
 		return piaSkillDiscovery{}, nil
 	}
@@ -72,6 +73,33 @@ func discoverPiaSkills(workspace *Workspace) (piaSkillDiscovery, error) {
 			}},
 		}, nil
 	}
+	entries, readErr := skillsDirectory.ReadDir(maxPiaSkillDirectoryEntries + 1)
+	closeErr := skillsDirectory.Close()
+	if errors.Is(readErr, io.EOF) {
+		readErr = nil
+	}
+	if joined := errors.Join(readErr, closeErr); joined != nil {
+		return piaSkillDiscovery{
+			Diagnostics: []SkillDiagnostic{{
+				Path:    piaSkillsDirectory,
+				Message: "could not read project Skills directory: " + boundedDiagnosticText(joined.Error()),
+			}},
+		}, nil
+	}
+	if len(entries) > maxPiaSkillDirectoryEntries {
+		return piaSkillDiscovery{
+			Diagnostics: []SkillDiagnostic{{
+				Path: piaSkillsDirectory,
+				Message: fmt.Sprintf(
+					"project Skills were ignored because the directory contains more than %d direct entries",
+					maxPiaSkillDirectoryEntries,
+				),
+			}},
+		}, nil
+	}
+	sort.Slice(entries, func(left, right int) bool {
+		return entries[left].Name() < entries[right].Name()
+	})
 
 	var directories []fs.DirEntry
 	var candidateDiagnostics []SkillDiagnostic

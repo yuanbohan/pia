@@ -419,7 +419,7 @@
 ### D60. read 支持 workspace-relative 与 absolute host path
 
 - 日期：2026-07-20
-- 决定：Pia 的 model-facing `read` 同时接受 workspace-relative path 和 absolute host path。relative path 继续经 workspace `os.Root` 打开，拒绝 `..` 与逃逸 symlink；absolute path 由 host filesystem 直接解析，可以读取 workspace 外的 regular file。成功结果对 relative input 保留规范化 relative path，对 absolute input 返回规范化 absolute path。
+- 决定：Pia 的 model-facing `read` 同时接受 workspace-relative path 和 absolute host path。relative path 继续经 workspace `os.Root` 打开，拒绝 `..` 与逃逸 symlink；absolute path 由 host filesystem 直接解析，可以读取 workspace 外的 regular file。成功结果对 relative input 保留规范化 relative path；absolute input 在 host open 和结果显示中保留原始路径语义（显示时只转换分隔符），不能在 symlink-aware host resolution 前用 lexical `filepath.Clean` 改写 `..`。
 - 保留契约：目标仍必须是 opened-handle 验证过的 regular file 和合法 UTF-8；arguments、单页行数/bytes、errors、cancellation 与 concurrency 仍保持有界。`write` 与 `edit` 继续受 workspace `os.Root` 限制，bash 的既有 host authority 不变。
 - 安全与数据外发：absolute `read` 明确授予模型调用用户的 host read authority，不是 sandbox 或 trusted-root allowlist。模型选择的外部文件内容和 tool result 可能发送给 Provider；operator documentation 必须直说这项边界。此扩权支持显式 absolute reads 与外部 references，但不再被解释为 Skill discovery 扫描或 external-symlink 支持的理由，也不是宣称读取外部文件天然安全。
 
@@ -456,7 +456,7 @@
 ### D65. Pia Skill v1 采用一次性有界 snapshot 和非阻塞 diagnostics
 
 - 日期：2026-07-20
-- Discovery 与解析：每个 Conversation 只在创建 Core Agent 前读取一次 selected workspace 的 `.pia/skills`，按目录名 lexical order 最多检查 64 个直接、非 symlink Skill directories；没有 watcher 或 Run 中途 reload。每个入口必须是 `os.Root` 内可安全打开的 regular `SKILL.md`。discovery 只从最多 16 KiB 的 prefix 提取 YAML frontmatter，使用 `go.yaml.in/yaml/v3`，只消费 string `name` 与 `description`；其他字段 warning 后忽略，正文及 supporting files 不被解析、验证或注入。
+- Discovery 与解析：每个 Conversation 只在创建 Core Agent 前读取一次 selected workspace 的 `.pia/skills`。source enumeration 在输入侧最多读取 257 个 direct entries：超过 256 时整个可选 Skill source 以一条 warning 忽略；未超限时先按目录名 lexical sort，再最多检查 64 个直接、非 symlink Skill directories。没有 watcher 或 Run 中途 reload。每个入口必须是 `os.Root` 内可安全打开的 regular `SKILL.md`。discovery 只从最多 16 KiB 的 prefix 提取 YAML frontmatter，使用 `go.yaml.in/yaml/v3`，只消费 string `name` 与 `description`；其他字段 warning 后忽略，正文及 supporting files 不被解析、验证或注入。
 - Validation：缺少/空 name、缺少/空 description、无法解析的 YAML、重复 mapping key、非 string 必需字段、不安全目标或超限 frontmatter 跳过。Agent Skills 的 1–64 个小写字母/数字/连字符、无首尾/连续连字符并与目录名一致仍是规范诊断；Pia 对 65–256 characters、字符形式或目录 mismatch 只 warning 并加载 frontmatter name，超过 256 characters 才按 hard safety 跳过。同名 Skill 选择 workspace-relative location lexical 较小者。description 超过 1024 characters 时只在 catalog 中截断并 warning。
 - Catalog budget：稳定 system prompt 只加入 XML-escaped name、description 和 workspace-relative `SKILL.md` location，并指导模型匹配时用现有 `read` 获取完整文件；没有有效 Skill 时整个 section 省略。catalog 使用 D58 的 `ceil(characters / 4)` 估算，最多 4096 estimated tokens；超限时先统一缩短 descriptions，仍放不下才省略 lexical tail entries，所有实际裁剪都有 warning。该值只是首版 ceiling，必须随真实大型项目和 Skills-enabled context 分桶继续复评。
 - Diagnostics 与 trust：单个 Skill 或整个可选 source 的发现失败不阻塞普通 coding task。最多保留 64 条有界 `SkillDiagnostic`，进入内部 `RunResult` 和可选 trace；`cmd/pia` 只在 Run 和 trace 都成功后把它们作为简短 warning 写入 stderr。首版没有 trust UI 或逐 Skill approval；选择 workspace 是操作者的 trust decision，metadata 可能自动发送给 Provider，完整 `SKILL.md` 在模型选择普通 `read` 后可能发送，Skill instructions 可以进一步引导现有高权限 tools。
@@ -539,3 +539,4 @@
 - 2026-07-20：学习者进一步收紧 Lesson 09：当前只做 Pia 自己的 project-local Skills，不做 `.agents`/`.claude` community compatibility，也不因 Skill 可能包含大量 resources 与厂商 runtime 而一次性扩建完整引擎。课程改为 Pia Skill v1 discovery/catalog 加普通 `read` 基础使用闭环；managed activation 留在 Lesson 10，完整 Agent Skills、community/global scopes 与 resources 进入后续未编号方向，记录为 D64。
 - 2026-07-20：Lesson 09 按 D65 完成实现与最终审查：project-local snapshot、YAML metadata、宽松 name diagnostics、重复名 lexical winner、catalog/diagnostic ceilings、普通 `read` 基础使用、trace 和 success-time stderr warnings 均有确定性测试。审查额外拒绝重复 YAML mapping key 并收紧 unknown-field warning；`make check` 与 `go test -race ./...` 全部通过，课程进入待理解确认且尚未提交。
 - 2026-07-21：学习者确认理解 Lesson 09，并明确要求通过 feature branch 提交 PR；Lesson 09 至此结束，Lesson 10 仍未开始。
+- 2026-07-21：PR review 发现两个边界实现仍会在限制生效前改变或放大输入：absolute `read` 在 host open 前 lexical-clean path 会改变 symlink parent 后的 `..` 解析目标，`fs.ReadDir` 则会在 64-candidate ceiling 前物化整个 Skill directory。实现改为保留 absolute input 的 host path 语义，并为 Skill source 增加 256-entry input ceiling；两项均补充回归测试。

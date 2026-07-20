@@ -139,8 +139,10 @@ func normalizeReadPath(path string) (openPath, displayPath string, absolute bool
 		return "", "", false, fmt.Errorf("path is required")
 	}
 	if filepath.IsAbs(path) {
-		cleaned := filepath.Clean(path)
-		return cleaned, filepath.ToSlash(cleaned), true, nil
+		// Preserve the original path for host resolution. Lexically cleaning a
+		// path before open changes .. semantics when an earlier component is a
+		// symlink, and can therefore select a different file than the caller named.
+		return path, filepath.ToSlash(path), true, nil
 	}
 	rootPath, displayPath, err := fileutil.NormalizeWorkspacePath(path)
 	if err != nil {

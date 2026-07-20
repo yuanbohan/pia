@@ -257,6 +257,40 @@ func TestDiscoverPiaSkillsEnforcesCandidateAndCatalogBudgets(t *testing.T) {
 	}
 }
 
+func TestDiscoverPiaSkillsBoundsDirectoryEnumerationAtInput(t *testing.T) {
+	directory := t.TempDir()
+	writePiaSkill(t, directory, "valid", `name: valid
+description: Would be valid below the source ceiling.
+`, "VALID_BODY_SENTINEL")
+	skillsDirectory := filepath.Join(directory, piaSkillsDirectory)
+	for index := 0; index < maxPiaSkillDirectoryEntries; index++ {
+		name := filepath.Join(skillsDirectory, fmt.Sprintf("ordinary-%03d.txt", index))
+		if err := os.WriteFile(name, []byte("ordinary project file"), 0o600); err != nil {
+			t.Fatalf("write oversized directory entry: %v", err)
+		}
+	}
+
+	workspace := openPromptWorkspace(t, directory)
+	discovery, err := discoverPiaSkills(workspace)
+	if err != nil {
+		t.Fatalf("discover Pia skills: %v", err)
+	}
+	if discovery.Catalog != "" {
+		t.Fatalf("oversized Skill source entered catalog\n%s", discovery.Catalog)
+	}
+	if got, want := len(discovery.Diagnostics), 1; got != want {
+		t.Fatalf("diagnostic count = %d, want %d: %#v", got, want, discovery.Diagnostics)
+	}
+	for _, fragment := range []string{"more than", fmt.Sprint(maxPiaSkillDirectoryEntries), "ignored"} {
+		if !skillDiagnosticsContain(discovery.Diagnostics, fragment) {
+			t.Errorf("diagnostics do not contain %q: %#v", fragment, discovery.Diagnostics)
+		}
+	}
+	if strings.Contains(fmt.Sprint(discovery.Diagnostics), "VALID_BODY_SENTINEL") {
+		t.Fatalf("diagnostics exposed Skill body: %#v", discovery.Diagnostics)
+	}
+}
+
 func TestBuildPiaSkillCatalogReportsOnlyAppliedBudgetActions(t *testing.T) {
 	skills := make([]piaSkill, maxPiaSkillCandidates)
 	for index := range skills {

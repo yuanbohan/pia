@@ -114,7 +114,7 @@ discovery 只在 Conversation 创建 Core Agent 前执行一次。后续 Provide
 
 ### 数量、catalog 与 diagnostics budget
 
-- 只按 lexical order 检查前 64 个直接、非 symlink Skill directories，多出的 lexical tail 不读取并 warning。
+- source enumeration 最多读取 257 个 direct entries；超过 256 时整个可选 source 忽略并 warning，避免在 candidate ceiling 生效前无界物化目录。未超限时按 lexical order 检查前 64 个直接、非 symlink Skill directories，多出的 lexical tail 不读取并 warning。
 - catalog entries 按 frontmatter name 再按 location 确定性排序；同名时 workspace-relative lexical path 较小者获胜。所有 name、description 和 location 都做 XML escaping。
 - 完整 catalog ceiling 为 4096 estimated tokens。先通过统一 character cap 尽量保留所有 descriptions；即使 description 为空仍超限时，再省略确定性 lexical tail entries，并只为真实发生的 shortening/omission 产生 warning。
 - 最多返回 64 条有界 `SkillDiagnostic`，额外 warning 聚合为 omission summary。单个 Skill 或可选 `.pia/skills` source 的错误不阻塞普通 coding task；diagnostics 保存到内部 `RunResult` 与可选 trace，`cmd/pia` 只在 Run/trace 成功时写到 stderr。
