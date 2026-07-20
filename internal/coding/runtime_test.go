@@ -138,6 +138,91 @@ func TestRunWithProviderDoesNotSendUnselectedFileOrEnvironmentContent(t *testing
 	}
 }
 
+func TestRunWithProviderDisclosesThenReadsPiaSkill(t *testing.T) {
+	directory := t.TempDir()
+	writePiaSkill(t, directory, "review-go", `name: review-go
+description: Review Go changes.
+`, "SKILL_INSTRUCTIONS_SENTINEL")
+	referencePath := filepath.Join(directory, piaSkillsDirectory, "review-go", "references")
+	if err := os.MkdirAll(referencePath, 0o755); err != nil {
+		t.Fatalf("create unsupported reference directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(referencePath, "notes.md"), []byte("REFERENCE_SENTINEL"), 0o600); err != nil {
+		t.Fatalf("write unsupported reference: %v", err)
+	}
+
+	provider := newRuntimeFaux(t,
+		fauxToolStep(ai.ToolCall{
+			ID:        "read-skill",
+			Name:      "read",
+			Arguments: json.RawMessage(`{"path":".pia/skills/review-go/SKILL.md"}`),
+		}),
+		fauxFinalStep("", "used the project skill"),
+	)
+	result, err := runWithProvider(
+		context.Background(),
+		RunInput{WorkspacePath: directory, Task: "review this Go change"},
+		provider,
+	)
+	if err != nil {
+		t.Fatalf("run with provider: %v", err)
+	}
+	if len(result.SkillDiagnostics) != 0 {
+		t.Fatalf("Skill diagnostics = %#v, want none", result.SkillDiagnostics)
+	}
+	for _, fragment := range []string{
+		"<name>review-go</name>",
+		"<description>Review Go changes.</description>",
+		"<location>.pia/skills/review-go/SKILL.md</location>",
+	} {
+		if !strings.Contains(result.SystemPrompt, fragment) {
+			t.Errorf("system prompt does not contain %q\n%s", fragment, result.SystemPrompt)
+		}
+	}
+	for _, forbidden := range []string{"SKILL_INSTRUCTIONS_SENTINEL", "REFERENCE_SENTINEL"} {
+		if strings.Contains(result.SystemPrompt, forbidden) {
+			t.Fatalf("initial system prompt contains undisclosed content %q", forbidden)
+		}
+	}
+
+	requests := provider.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("provider request count = %d, want %d", got, want)
+	}
+	toolResult, ok := requests[1].Messages[len(requests[1].Messages)-1].(ai.ToolResultMessage)
+	if !ok || !strings.Contains(toolResult.Content, "SKILL_INSTRUCTIONS_SENTINEL") {
+		t.Fatalf("second request last message = %#v, want on-demand SKILL.md read", requests[1].Messages[len(requests[1].Messages)-1])
+	}
+	if strings.Contains(toolResult.Content, "REFERENCE_SENTINEL") {
+		t.Fatalf("Skill read implicitly included an unsupported reference: %q", toolResult.Content)
+	}
+}
+
+func TestRunWithProviderReturnsSkillDiagnosticsWithoutBlockingTask(t *testing.T) {
+	directory := t.TempDir()
+	writePiaSkill(t, directory, "broken", `description: Missing name.
+`, "BROKEN_BODY_SENTINEL")
+	provider := newRuntimeFaux(t, fauxFinalStep("", "ordinary task completed"))
+
+	result, err := runWithProvider(
+		context.Background(),
+		RunInput{WorkspacePath: directory, Task: "complete an ordinary task"},
+		provider,
+	)
+	if err != nil {
+		t.Fatalf("run with provider: %v", err)
+	}
+	if got, want := result.FinalText(), "ordinary task completed"; got != want {
+		t.Fatalf("FinalText() = %q, want %q", got, want)
+	}
+	if !skillDiagnosticsContain(result.SkillDiagnostics, "required name") {
+		t.Fatalf("Skill diagnostics = %#v, want missing-name warning", result.SkillDiagnostics)
+	}
+	if strings.Contains(result.SystemPrompt, "BROKEN_BODY_SENTINEL") || strings.Contains(result.SystemPrompt, "<available_skills>") {
+		t.Fatalf("invalid Skill entered system prompt\n%s", result.SystemPrompt)
+	}
+}
+
 func TestRunWithProviderReturnsTranscriptAndJoinsCloseError(t *testing.T) {
 	provider := newRuntimeFaux(t, faux.Step{Events: []ai.Event{
 		ai.ErrorEvent{Message: ai.AssistantMessage{

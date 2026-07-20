@@ -58,7 +58,7 @@ func codingToolPromptMetadata(name string) (toolPromptMetadata, bool) {
 	}
 }
 
-func buildSystemPrompt(workspace *Workspace, tools []agent.Tool) (string, error) {
+func buildSystemPrompt(workspace *Workspace, tools []agent.Tool, skillCatalog string) (string, error) {
 	if workspace == nil || workspace.Root() == nil {
 		return "", fmt.Errorf("coding: build system prompt: workspace is required")
 	}
@@ -123,6 +123,10 @@ func buildSystemPrompt(workspace *Workspace, tools []agent.Tool) (string, error)
 		prompt.WriteByte('\n')
 		prompt.WriteString("</project_instructions>\n\n")
 		prompt.WriteString("</project_context>\n")
+	}
+	if strings.TrimSpace(skillCatalog) != "" {
+		prompt.WriteByte('\n')
+		prompt.WriteString(skillCatalog)
 	}
 
 	fmt.Fprintf(&prompt, "\nCurrent working directory: %s", workspace.Path())

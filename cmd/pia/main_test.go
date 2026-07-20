@@ -32,7 +32,7 @@ func TestExecuteValidatesArgumentsBeforeReadingConfiguration(t *testing.T) {
 				},
 			}
 			var stdout bytes.Buffer
-			err := execute(context.Background(), test.args, &stdout, deps)
+			err := execute(context.Background(), test.args, &stdout, io.Discard, deps)
 			if err == nil || !strings.Contains(err.Error(), "exactly one") {
 				t.Fatalf("execute() error = %v, want argument error", err)
 			}
@@ -57,7 +57,7 @@ func TestExecuteRequiresInheritedKeyBeforeReadingWorkspace(t *testing.T) {
 		},
 	}
 
-	err := execute(context.Background(), []string{"task"}, io.Discard, deps)
+	err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps)
 	if err == nil || !strings.Contains(err.Error(), deepSeekAPIKeyEnv) {
 		t.Fatalf("execute() error = %v, want missing-key error", err)
 	}
@@ -72,7 +72,7 @@ func TestExecuteReturnsWorkingDirectoryFailureBeforeRun(t *testing.T) {
 		return coding.RunResult{}, nil
 	}
 
-	err := execute(context.Background(), []string{"task"}, io.Discard, deps)
+	err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps)
 	if !errors.Is(err, getwdErr) {
 		t.Fatalf("execute() error = %v, want getwd error", err)
 	}
@@ -100,7 +100,7 @@ func TestExecutePassesRawTaskAndPrintsOnlyFinalText(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	if err := execute(context.Background(), []string{task}, &stdout, deps); err != nil {
+	if err := execute(context.Background(), []string{task}, &stdout, io.Discard, deps); err != nil {
 		t.Fatalf("execute() error = %v", err)
 	}
 	if !reflect.DeepEqual(gotInput, wantInput) {
@@ -123,7 +123,7 @@ func TestExecuteDoesNotAddBlankLineToFinalTextWithNewline(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	if err := execute(context.Background(), []string{"task"}, &stdout, deps); err != nil {
+	if err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps); err != nil {
 		t.Fatalf("execute() error = %v", err)
 	}
 	if got, want := stdout.String(), "finished\n"; got != want {
@@ -139,7 +139,7 @@ func TestExecuteAllowsEmptyFinalText(t *testing.T) {
 		}}, nil
 	}
 	var stdout bytes.Buffer
-	if err := execute(context.Background(), []string{"task"}, &stdout, deps); err != nil {
+	if err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps); err != nil {
 		t.Fatalf("execute() error = %v", err)
 	}
 	if stdout.Len() != 0 {
@@ -167,7 +167,7 @@ func TestExecuteDoesNotBuildTraceWhenPathIsUnsetOrEmpty(t *testing.T) {
 				t.Fatal("trace was written without a non-empty trace path")
 				return nil
 			}
-			if err := execute(context.Background(), []string{"task"}, io.Discard, deps); err != nil {
+			if err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps); err != nil {
 				t.Fatalf("execute() error = %v", err)
 			}
 		})
@@ -208,7 +208,7 @@ func TestExecuteWritesRequestedTraceAfterFailedRunAndSuppressesFinal(t *testing.
 	}
 
 	var stdout bytes.Buffer
-	err := execute(context.Background(), []string{"task"}, &stdout, deps)
+	err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps)
 	if !errors.Is(err, runErr) {
 		t.Fatalf("execute() error = %v, want Run error", err)
 	}
@@ -251,7 +251,7 @@ func TestExecuteWritesRequestedTraceAfterSuccessfulRunAndPrintsFinal(t *testing.
 	}
 
 	var stdout bytes.Buffer
-	if err := execute(context.Background(), []string{"task"}, &stdout, deps); err != nil {
+	if err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps); err != nil {
 		t.Fatalf("execute() error = %v", err)
 	}
 	if !traceWritten {
@@ -275,7 +275,7 @@ func TestExecuteJoinsRunAndTraceErrors(t *testing.T) {
 	}
 	deps.writeTrace = func(string, coding.Trace) error { return traceErr }
 
-	err := execute(context.Background(), []string{"task"}, io.Discard, deps)
+	err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps)
 	if !errors.Is(err, runErr) || !errors.Is(err, traceErr) {
 		t.Fatalf("execute() error = %v, want joined Run and trace errors", err)
 	}
@@ -291,7 +291,7 @@ func TestExecuteTraceFailureSuppressesSuccessfulFinalText(t *testing.T) {
 	deps.writeTrace = func(string, coding.Trace) error { return traceErr }
 	var stdout bytes.Buffer
 
-	err := execute(context.Background(), []string{"task"}, &stdout, deps)
+	err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps)
 	if !errors.Is(err, traceErr) {
 		t.Fatalf("execute() error = %v, want trace error", err)
 	}
@@ -315,7 +315,7 @@ func TestExecuteTraceBuildFailureDoesNotCallWriter(t *testing.T) {
 		return nil
 	}
 
-	err := execute(context.Background(), []string{"task"}, io.Discard, deps)
+	err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps)
 	if !errors.Is(err, buildErr) {
 		t.Fatalf("execute() error = %v, want trace-build error", err)
 	}
@@ -324,9 +324,68 @@ func TestExecuteTraceBuildFailureDoesNotCallWriter(t *testing.T) {
 func TestExecuteReturnsStdoutFailure(t *testing.T) {
 	writeErr := errors.New("stdout unavailable")
 	deps := successfulDependencies()
-	err := execute(context.Background(), []string{"task"}, errorWriter{err: writeErr}, deps)
+	err := execute(context.Background(), []string{"task"}, errorWriter{err: writeErr}, io.Discard, deps)
 	if !errors.Is(err, writeErr) {
 		t.Fatalf("execute() error = %v, want stdout error", err)
+	}
+}
+
+func TestRunProcessPrintsSkillDiagnosticsOnSuccessfulRun(t *testing.T) {
+	deps := successfulDependencies()
+	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
+		return coding.RunResult{
+			SkillDiagnostics: []coding.SkillDiagnostic{{
+				Path:    ".pia/skills/broken/SKILL.md",
+				Message: "required name is missing",
+			}},
+			Transcript: []ai.Message{ai.AssistantMessage{
+				Content:    []ai.AssistantContent{ai.TextContent{Text: "done"}},
+				StopReason: ai.StopReasonStop,
+			}},
+		}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	if got := runProcess(context.Background(), []string{"task"}, &stdout, &stderr, deps); got != 0 {
+		t.Fatalf("runProcess() code = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	if got, want := stdout.String(), "done\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := stderr.String(), "pia: warning: .pia/skills/broken/SKILL.md: required name is missing\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestRunProcessDoesNotPrintSkillDiagnosticsWhenRunFails(t *testing.T) {
+	runErr := errors.New("run failed")
+	deps := successfulDependencies()
+	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
+		return coding.RunResult{SkillDiagnostics: []coding.SkillDiagnostic{{
+			Path:    ".pia/skills/broken/SKILL.md",
+			Message: "required name is missing",
+		}}}, runErr
+	}
+	var stderr bytes.Buffer
+	if got := runProcess(context.Background(), []string{"task"}, io.Discard, &stderr, deps); got != 1 {
+		t.Fatalf("runProcess() code = %d, want 1", got)
+	}
+	if got, want := stderr.String(), "pia: run failed\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestExecuteWithDiagnosticsReturnsStderrFailure(t *testing.T) {
+	writeErr := errors.New("stderr unavailable")
+	deps := successfulDependencies()
+	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
+		return coding.RunResult{SkillDiagnostics: []coding.SkillDiagnostic{{
+			Path:    ".pia/skills/broken/SKILL.md",
+			Message: "required name is missing",
+		}}}, nil
+	}
+	err := execute(context.Background(), []string{"task"}, io.Discard, errorWriter{err: writeErr}, deps)
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("execute() error = %v, want stderr failure", err)
 	}
 }
 

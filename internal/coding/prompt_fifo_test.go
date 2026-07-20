@@ -18,7 +18,7 @@ func TestBuildSystemPromptRejectsFIFOWithoutFallingThrough(t *testing.T) {
 	writePromptFile(t, directory, "CLAUDE.md", []byte("lower-priority guidance"))
 	workspace := openPromptWorkspace(t, directory)
 
-	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace))
+	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
 	if err == nil {
 		t.Fatalf("build system prompt unexpectedly succeeded\n%s", prompt)
 	}
@@ -41,7 +41,7 @@ func TestBuildSystemPromptRejectsUnreadableFileWithoutFallingThrough(t *testing.
 	writePromptFile(t, directory, "CLAUDE.md", []byte("lower-priority guidance"))
 	workspace := openPromptWorkspace(t, directory)
 
-	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace))
+	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
 	if err == nil {
 		t.Fatalf("build system prompt unexpectedly succeeded\n%s", prompt)
 	}

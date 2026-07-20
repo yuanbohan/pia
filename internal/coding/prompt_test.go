@@ -19,7 +19,7 @@ func TestBuildSystemPromptUsesCanonicalWorkspaceAndRealTools(t *testing.T) {
 
 	workspace := openPromptWorkspace(t, link)
 	tools := promptTools(t, workspace)
-	prompt, err := buildSystemPrompt(workspace, tools)
+	prompt, err := buildSystemPrompt(workspace, tools, "")
 	if err != nil {
 		t.Fatalf("build system prompt: %v", err)
 	}
@@ -55,6 +55,50 @@ Additional pia guidelines:
 Current working directory: %s`, workspace.Path())
 	if prompt != want {
 		t.Fatalf("system prompt does not match the adapted frozen-Pi baseline\ngot:\n%s\n\nwant:\n%s", prompt, want)
+	}
+	if strings.Contains(prompt, link) {
+		t.Fatalf("prompt contains non-canonical workspace path %q\n%s", link, prompt)
+	}
+	if strings.Contains(prompt, "Project instructions from") {
+		t.Fatalf("prompt contains an empty project-instructions section\n%s", prompt)
+	}
+}
+
+func TestBuildSystemPromptIncludesOnlyNonEmptyPiaSkillCatalog(t *testing.T) {
+	directory := t.TempDir()
+	writePiaSkill(t, directory, "review-go", `name: review-go
+description: Review Go changes.
+`, "SKILL_BODY_SENTINEL")
+	workspace := openPromptWorkspace(t, directory)
+	discovery, err := discoverPiaSkills(workspace)
+	if err != nil {
+		t.Fatalf("discover Pia skills: %v", err)
+	}
+
+	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), discovery.Catalog)
+	if err != nil {
+		t.Fatalf("build system prompt: %v", err)
+	}
+	for _, fragment := range []string{
+		"Project skills:",
+		"<name>review-go</name>",
+		"<location>.pia/skills/review-go/SKILL.md</location>",
+		"use the read tool",
+	} {
+		if !strings.Contains(prompt, fragment) {
+			t.Errorf("prompt does not contain %q\n%s", fragment, prompt)
+		}
+	}
+	if strings.Contains(prompt, "SKILL_BODY_SENTINEL") {
+		t.Fatalf("prompt contains undisclosed Skill body\n%s", prompt)
+	}
+
+	emptyPrompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
+	if err != nil {
+		t.Fatalf("build empty-catalog system prompt: %v", err)
+	}
+	if strings.Contains(emptyPrompt, "Project skills:") || strings.Contains(emptyPrompt, "<available_skills>") {
+		t.Fatalf("empty catalog produced a Skill prompt section\n%s", emptyPrompt)
 	}
 }
 
@@ -112,7 +156,7 @@ func TestBuildSystemPromptInstructionPrecedence(t *testing.T) {
 			}
 			workspace := openPromptWorkspace(t, directory)
 
-			prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace))
+			prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
 			if err != nil {
 				t.Fatalf("build system prompt: %v", err)
 			}
@@ -144,7 +188,7 @@ func TestBuildSystemPromptAcceptsInstructionSizeLimit(t *testing.T) {
 	writePromptFile(t, directory, "AGENTS.md", []byte(instructions))
 	workspace := openPromptWorkspace(t, directory)
 
-	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace))
+	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
 	if err != nil {
 		t.Fatalf("build system prompt: %v", err)
 	}
@@ -163,7 +207,7 @@ func TestBuildSystemPromptIgnoresAncestorAndChildInstructions(t *testing.T) {
 	writePromptFile(t, filepath.Join(directory, "child"), "AGENTS.md", []byte("child guidance"))
 
 	workspace := openPromptWorkspace(t, directory)
-	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace))
+	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
 	if err != nil {
 		t.Fatalf("build system prompt: %v", err)
 	}
@@ -180,7 +224,7 @@ func TestBuildSystemPromptFollowsInternalInstructionSymlink(t *testing.T) {
 	}
 	workspace := openPromptWorkspace(t, directory)
 
-	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace))
+	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
 	if err != nil {
 		t.Fatalf("build system prompt: %v", err)
 	}
@@ -243,7 +287,7 @@ func TestBuildSystemPromptRejectsInvalidHigherPriorityCandidate(t *testing.T) {
 			writePromptFile(t, directory, "CLAUDE.md", []byte("lower-priority guidance"))
 			workspace := openPromptWorkspace(t, directory)
 
-			prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace))
+			prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
 			if err == nil {
 				t.Fatalf("build system prompt unexpectedly succeeded\n%s", prompt)
 			}
@@ -259,7 +303,7 @@ func TestBuildSystemPromptReturnsStableString(t *testing.T) {
 	writePromptFile(t, directory, "AGENTS.md", []byte("original guidance"))
 	workspace := openPromptWorkspace(t, directory)
 
-	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace))
+	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), "")
 	if err != nil {
 		t.Fatalf("build system prompt: %v", err)
 	}
