@@ -77,6 +77,33 @@ func TestDiscoverPiaSkillsTreatsMissingRootAsEmpty(t *testing.T) {
 	}
 }
 
+func TestDiscoverPiaSkillsRejectsSymlinkSource(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "skill-store")
+	writePiaSkillFile(t, target, "review-go", `name: review-go
+description: Must remain undiscovered through a source symlink.
+`, "SYMLINKED_SOURCE_BODY")
+	piaDirectory := filepath.Join(directory, ".pia")
+	if err := os.MkdirAll(piaDirectory, 0o755); err != nil {
+		t.Fatalf("create .pia directory: %v", err)
+	}
+	if err := os.Symlink("../skill-store", filepath.Join(piaDirectory, "skills")); err != nil {
+		t.Fatalf("create project-local Skill source symlink: %v", err)
+	}
+
+	workspace := openPromptWorkspace(t, directory)
+	discovery, err := discoverPiaSkills(workspace)
+	if err != nil {
+		t.Fatalf("discover Pia skills: %v", err)
+	}
+	if discovery.Catalog != "" {
+		t.Fatalf("symlinked Skill source entered catalog\n%s", discovery.Catalog)
+	}
+	if !skillDiagnosticsContain(discovery.Diagnostics, "source is a symlink") {
+		t.Fatalf("diagnostics = %#v, want source-symlink warning", discovery.Diagnostics)
+	}
+}
+
 func TestDiscoverPiaSkillsDoesNotRecurseWithinPiaRoot(t *testing.T) {
 	directory := t.TempDir()
 	nestedDirectory := filepath.Join(directory, piaSkillsDirectory, "group", "nested")
@@ -340,7 +367,13 @@ func TestBuildPiaSkillCatalogShortensDescriptionsBeforeOmittingEntries(t *testin
 
 func writePiaSkill(t *testing.T, workspace, directory, frontmatter, body string) {
 	t.Helper()
-	skillDirectory := filepath.Join(workspace, piaSkillsDirectory, directory)
+	skillRoot := filepath.Join(workspace, piaSkillsDirectory)
+	writePiaSkillFile(t, skillRoot, directory, frontmatter, body)
+}
+
+func writePiaSkillFile(t *testing.T, skillRoot, directory, frontmatter, body string) {
+	t.Helper()
+	skillDirectory := filepath.Join(skillRoot, directory)
 	if err := os.MkdirAll(skillDirectory, 0o755); err != nil {
 		t.Fatalf("create skill directory: %v", err)
 	}
