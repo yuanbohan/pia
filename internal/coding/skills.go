@@ -104,6 +104,13 @@ func discoverPiaSkills(workspace *Workspace) (piaSkillDiscovery, error) {
 	var directories []fs.DirEntry
 	var candidateDiagnostics []SkillDiagnostic
 	for _, entry := range entries {
+		if entry.IsDir() && !utf8.ValidString(entry.Name()) {
+			candidateDiagnostics = append(candidateDiagnostics, SkillDiagnostic{
+				Path:    piaSkillsDirectory,
+				Message: "a direct Skill directory with a name that is not valid UTF-8 was ignored",
+			})
+			continue
+		}
 		// IsDir intentionally excludes directory symlinks. Pia Skill v1 has one
 		// concrete project-owned directory per Skill and no symlink source model.
 		if entry.IsDir() {
