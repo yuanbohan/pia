@@ -34,7 +34,7 @@ func TestProcessMainCancelsOnSignalsAndWritesTraceAfterSettlement(t *testing.T) 
 			directory := t.TempDir()
 			readyPath := filepath.Join(directory, "ready")
 			tracePath := filepath.Join(directory, "trace")
-			command := exec.CommandContext(commandContext, os.Args[0], "-test.run=^TestPIASignalHelperProcess$")
+			command := exec.CommandContext(commandContext, os.Args[0], "-test.run=^TestSignalHelperProcess$")
 			command.Env = append(os.Environ(),
 				"PIA_SIGNAL_HELPER=1",
 				"PIA_SIGNAL_READY="+readyPath,
@@ -65,7 +65,7 @@ func TestProcessMainCancelsOnSignalsAndWritesTraceAfterSettlement(t *testing.T) 
 	}
 }
 
-func TestPIASignalHelperProcess(t *testing.T) {
+func TestSignalHelperProcess(t *testing.T) {
 	if os.Getenv("PIA_SIGNAL_HELPER") != "1" {
 		return
 	}

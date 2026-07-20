@@ -81,6 +81,7 @@ Treat `STRATEGY.md` as the canonical product-direction anchor. Pi parity is the 
 ## Go Quality
 
 - Prefer idiomatic Go behavior over mechanical TypeScript translation.
+- Name Go identifiers and tests after their business behavior or contract responsibility, not after the reference implementation. Do not include `Pi` in type, struct, interface, function, method, variable, field, constant, test-function, or subtest names. Documentation, comments, assertion messages, and source-evidence notes may name Pi when provenance matters. Required external names—such as module and import paths, command names, environment variables, provider or model identifiers, and wire literals—retain their spelling.
 - Pass `context.Context` through cancellable model, tool, process, and persistence operations.
 - Avoid speculative interfaces and helpers; introduce abstractions only when the current lesson establishes their responsibility.
 - Write all code comments in English. Repository documentation may use whichever language best serves its readers.

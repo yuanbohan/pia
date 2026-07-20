@@ -284,8 +284,9 @@
 ### D42. Lesson 06 由 coding application 拥有稳定 prompt 和 one-shot composition
 
 - 日期：2026-07-19
-- 决定：`internal/coding` 根据真实 tool definitions 构建稳定 system prompt，持有 canonical workspace、四个 tools、固定 DeepSeek product profile 和 Agent composition；`cmd/pia` 只处理进程边界。workspace 根目录 project instructions 按 `AGENTS.md`、`AGENTS.MD`、`CLAUDE.md`、`CLAUDE.MD` 顺序选择第一个存在的 UTF-8 regular file，不搜索 ancestor 或全局配置。可选 `PIA_TRACE_PATH` 只在 Run settlement 后 create-new 一个 `0600` 调试文件，保存完整 prompt、schema、Conversation History（JSON 字段名为 `transcript`）和顶层错误但不保存 API key；trace schema 不稳定且可能包含敏感内容。第一版不增加自动执行预算。
-- 原因：Pi 的 coding system prompt 和 print mode 证明这些责任属于 coding/host 层，而不是模型协议。只加载一个 root instruction 文件、固定产品 profile 和 post-run trace 足以支持当前真实闭环与诊断，不需要提前移植 resource registry、配置矩阵、event audit log 或 policy engine。
+- 修正日期：2026-07-20
+- 决定：`internal/coding` 构建稳定 system prompt，持有 canonical workspace、四个 tools、固定 DeepSeek product profile 和 Agent composition；`cmd/pia` 只处理进程边界。Prompt 以冻结 Pi 默认结构和可复用措辞为横向比较基线：identity 只把 `pi` 替换为 `pia`，保持四工具 snippets/guidelines 与两条全局 guidelines 的默认 body 连续，再在 Pi 的 `appendSystemPrompt` seam 加入现有 headless、安全修改、错误恢复和验证指导；project-context 保留 content 之后的 template framing newline 与 cwd 顺序。不声称支持 Pi docs、custom tools、Skills、extensions 或完整 resource loader。Provider schema 与 trace 仍来自真实 tool definitions。workspace 根目录 project instructions 按 `AGENTS.md`、`AGENTS.MD`、`CLAUDE.md`、`CLAUDE.MD` 顺序选择第一个存在的 UTF-8 regular file，不搜索 ancestor 或全局配置。可选 `PIA_TRACE_PATH` 只在 Run settlement 后 create-new 一个 `0600` 调试文件，保存完整 prompt、schema、Conversation History（JSON 字段名为 `transcript`）和顶层错误但不保存 API key；trace schema 不稳定且可能包含敏感内容。第一版不增加自动执行预算。
+- 原因：Pi 的 coding system prompt 和 print mode 证明这些责任属于 coding/host 层，而不是模型协议；后续 Pi 横向评测还要求 Prompt 与 workflow 的非必要差异尽量小。root-only instructions、固定 profile 和 post-run trace 足以支持当前真实闭环与诊断，而 Pi 产品文档、动态工具、Skills、extensions、配置矩阵、event audit log 或 policy engine 仍没有对应能力，不能为了文本一致而虚假加入。
 
 ### D43. 后续课程采用滚动式大纲，只编号近期闭环
 
@@ -450,6 +451,10 @@
 - 2026-07-19：Lesson 06 以新的 one-shot 实施计划修正旧设定：临时入口改为 `cmd/pia`，只输出最终 assistant 文本，不增加 event sink 或启动 warning；真实 Fibonacci 验收只保存在被忽略的 `tmp/`，连续两次 fresh 运行通过后完成。
 - 2026-07-19：Lesson 06 在最终产品代码、system prompt 和任务文字冻结后完成两次连续真实 DeepSeek 验收；两个新进程都从 untouched baseline 修复通用 Fibonacci base case、增加能让原错误实现失败的测试，并通过独立测试与程序输出 `55`。本地 workspace 和 trace 保留在 ignored `tmp/`，课程进入待理解确认且尚未提交。
 - 2026-07-19：学习者独立运行第三个 `pia` acceptance workspace，复核了最终修改、测试与 trace，并确认理解 stable system prompt、每轮完整 transcript 重放、结构化 tool schemas、thinking replay 与 final-only 输出的组合流程；随后明确要求提交并推送第 06 课。
+- 2026-07-20：为后续 Pi 横向评测复核 Lesson 06 system prompt 后，学习者明确要求以 pi-go 能力为边界但尽量保留冻结 Pi 默认 Prompt，且不改 one-shot workflow。D42 因此从自由 pi-go wording 修正为“冻结 Pi 基线加窄适配”，并以完整字符串测试固定 identity、四工具 snippets/guidelines、project-context 与 cwd 顺序。
+- 2026-07-20：Prompt 修正使此前真实验收 streak 按 D23 清零。当前分支构建的 `pia` 在 fresh `attempts/004` 中仍 one-shot 修复 Fibonacci、添加能让原实现失败的测试，并通过独立测试与程序输出 `55`；`evidence/004.json` 确认实际使用新 prompt 和四工具 schema。当前新基线计数为 `1/2`，不与旧 prompt 的历史运行合并。
+- 2026-07-20：进一步逐段 review 发现 `004` 使用的 prompt 仍有三项可避免的 Pi 差异：identity 额外描述、pia guidance 插入默认 body、instruction trailing-newline framing 不同。修正后再次清零，并以同一最终二进制和固定任务连续运行 fresh `attempts/005`、`006`；两次都修复通用 Fibonacci base case、增加能让原错误实现失败的测试、通过独立 `go test ./...` 且程序输出 `55`。`evidence/005.json`、`006.json` 确认最终 prompt、四工具 schema、正常 `stop` 和空 Run error，新基线完成 `2/2`。
+- 2026-07-20：代码命名进一步收敛为业务行为和契约职责；文档、注释和断言可保留 Pi 来源说明，但 Go 标识符、测试函数与 subtest 不使用参考实现名称。此次纯命名重构未改变 prompt、workflow 或任务文字，但仍按 D23 清零；当前二进制在 fresh `attempts/007`、`008` 中再次连续完成通用 Fibonacci 修复、测试判别、独立测试和程序输出验证，规范化路径后的 prompt 与 `006` 一致，新基线重新达到 `2/2`。
 - 2026-07-19：完成第一期后重新核对 Pi、Codex 和 Grok Build 的长任务与交互边界；学习者确认后续课程采用滚动式大纲，只固定最近三个闭环，Skills 位于二期第 03 课。所有 XLarge 方向必须在开课前拆分，远期 TUI 与稳定 Pi 对照评测暂不绑定课次和实现细节。
 - 2026-07-19：学习者明确开始 Lesson 07，并要求把“每课开课先重读对应 Pi 源码、再修正甚至推翻大纲”的流程写入 `AGENTS.md`。冻结源码校准确认 Pi 实际区分完整 session entries、Agent working messages 与 request-local transformed messages，Lesson 07 因此从含糊的两层 active-context 表述修正为三种角色的所有权课程，但仍不引入 compaction 或持久化。
 - 2026-07-19：学习者接受 Lesson 07 的 owner 分离方向：外层最小内存 Conversation Owner 保存完整 Conversation History，Core Agent 保存可替换 Working Context，Provider Request Snapshot 保持 request-local；同步机制留待本课下一步讨论。仓库新增 `CONCEPTS.md`，为 Agent、Core Agent、Coding Agent、Conversation、Working Context、Session 等跨课程词汇记录明确包含项和排除项。

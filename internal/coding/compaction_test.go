@@ -128,7 +128,7 @@ func TestChooseCompactionPlanReducesRetainedSuffixToFitSoftCeiling(t *testing.T)
 	}
 }
 
-func TestSummarySerializationAndFileOperationsFollowPiFormat(t *testing.T) {
+func TestSummarySerializationAndFileOperationsUseCompactionFormat(t *testing.T) {
 	t.Parallel()
 
 	longResult := strings.Repeat("界", toolResultSummaryMaxCharacters+1)

@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestDefinitionExposesPiBashProtocol(t *testing.T) {
+func TestDefinitionExposesCommandAndTimeoutSchema(t *testing.T) {
 	t.Parallel()
 
 	tool := newTestTool(t, t.TempDir())
