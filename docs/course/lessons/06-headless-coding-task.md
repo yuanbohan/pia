@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-Lesson 06 的原始实现、真实验收和学习者理解确认均已完成并提交。2026-07-20 为后续 Pi 横向评测重新对齐 coding prompt；此前运行继续作为历史证据，但不计入最终 prompt 的 streak。最终 prompt 已由两个连续的 fresh DeepSeek 进程从 untouched baseline 独立完成同一 bug 修复，当前验收状态为 `2/2`。
+Lesson 06 的原始实现、真实验收和学习者理解确认均已完成并提交。2026-07-20 为后续 Pi 横向评测重新对齐 coding prompt；随后只做业务职责命名重构，prompt、workflow 与任务文字均未改变。两次调整都按 D23 重置旧 streak，当前二进制已由两个连续的 fresh DeepSeek 进程从 untouched baseline 独立完成同一 bug 修复，验收状态为 `2/2`。
 
 ## 学习目标
 
@@ -142,6 +142,12 @@ trace 保存实际 model profile、system prompt、task、tool schemas、完整 
 2. `tmp/pia-acceptance/attempts/006/workspace` 把 base case 修为 `n <= 1` 时返回 `n`，增加覆盖 `F(0)` 至 `F(10)` 的 table test；独立 `go test ./...` 通过，`go run .` 输出 `55`。
 
 两次新增测试分别复制到对应 `original-with-tests` 后都在原始错误实现上失败。`evidence/005.json` 与 `006.json` 均确认 `deepseek-v4-pro`、thinking、high reasoning effort、真实 `read` / `bash` / `edit` / `write` schemas、最终 `stop`、空 Run error，以及最终 identity、append-block 顺序和 unsupported-section omission。最终 prompt 的连续验收状态为 `2/2`。
+
+### 2026-07-20 业务职责命名回归
+
+后续代码审查明确了新的命名边界：文档、注释和断言可以在来源说明中提到 Pi，但 Go 标识符、测试函数和 subtest 必须按业务行为或契约职责命名。此次重构没有改变 prompt 文本、one-shot workflow 或任务文字；完整字符串测试继续固定同一 prompt。由于 D23 对任何产品代码调整都会清零，`005`、`006` 只保留为 prompt 对齐的历史证据。
+
+当前二进制随后连续运行 fresh `attempts/007`、`008`。两次都把 base case 修为 `n < 2` 时返回 `n`，增加覆盖 `F(0)` 至 `F(10)` 的 table test，独立 `go test ./...` 通过且 `go run .` 输出 `55`；把各自新增测试复制到对应 `original-with-tests` 后，原始错误实现均失败。`evidence/007.json` 与 `008.json` 确认固定 DeepSeek profile、四工具 schema、最终 `stop` 和空 Run error；规范化 workspace 路径后，两次 system prompt 与 `006` 一致。当前连续验收状态重新达到 `2/2`。
 
 ## 明确不做
 

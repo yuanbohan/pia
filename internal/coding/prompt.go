@@ -27,7 +27,7 @@ type toolPromptMetadata struct {
 	guidelines []string
 }
 
-func frozenPiToolPromptMetadata(name string) (toolPromptMetadata, bool) {
+func codingToolPromptMetadata(name string) (toolPromptMetadata, bool) {
 	switch name {
 	case "read":
 		return toolPromptMetadata{
@@ -78,7 +78,7 @@ func buildSystemPrompt(workspace *Workspace, tools []agent.Tool) (string, error)
 		}
 		name := definition.Schema.Name
 		toolNames[name] = struct{}{}
-		metadata, found := frozenPiToolPromptMetadata(name)
+		metadata, found := codingToolPromptMetadata(name)
 		if !found {
 			metadata.snippet = definition.Schema.Description
 		}

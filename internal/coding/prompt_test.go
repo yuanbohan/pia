@@ -77,7 +77,7 @@ func TestBuildSystemPromptInstructionPrecedence(t *testing.T) {
 			notContent:  "claude guidance",
 		},
 		{
-			name: "newline-terminated AGENTS md preserves Pi framing",
+			name: "newline-terminated AGENTS md preserves template framing",
 			files: map[string]string{
 				"AGENTS.md": "newline-terminated guidance\n",
 			},

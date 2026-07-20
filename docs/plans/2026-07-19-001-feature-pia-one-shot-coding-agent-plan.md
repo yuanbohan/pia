@@ -16,7 +16,7 @@ deepened: 2026-07-19
 - **Objective:** 交付第一版可真实使用的 one-shot coding agent，让临时命令 `pia` 在当前工作目录中接收一个任务、调用 DeepSeek 和四个 coding tools，并只输出最终回答。
 - **Product authority:** 本计划的 Product Contract 是本次工作的产品契约；它在冲突处取代 `docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 的 Lesson 06 旧设定。冻结 Pi 源码只提供语义和设计证据，不自动成为 pi-go 的需求。
 - **Later ownership refinement:** Lesson 07 的 D46–D51 后续修正了内部消息所有权：`internal/coding` 的私有 Conversation Owner 保存完整 History，`internal/agent` 保存 Working Context 并返回 run-local delta。本计划的 one-shot prompt、输出、trace 和验收契约不变；下文旧的“Agent owns transcript”只描述 Lesson 06 当时的实现，不再定义当前内部 API。
-- **Prompt correction evidence:** 2026-07-20 的冻结 Pi prompt 对齐使更早的 streak 失效；逐段 review 并消除 identity、append placement 与 instruction newline 的可避免差异后，最终 prompt 在 fresh `attempts/005`、`006` 中连续完成相同 Fibonacci 修复、测试判别和程序验证，新基线计数为 `2/2`。
+- **Current regression evidence:** 2026-07-20 的冻结 Pi prompt 对齐先由 fresh `attempts/005`、`006` 建立 `2/2`；随后仅做业务职责命名重构，prompt、workflow 与任务文字均未改变，但仍按 KTD8 重置计数。当前二进制又在 fresh `attempts/007`、`008` 中连续完成相同 Fibonacci 修复、测试判别和程序验证，新基线计数为 `2/2`。
 - **Execution profile:** 在现有 `internal/ai`、`internal/agent`、`internal/coding` 分层上完成代码、离线测试、文档与本地真实模型验收。
 - **Stop condition:** 只有两个互相独立、从原始错误项目复制出的全新 workspace 连续通过专家验收，才算达到本计划的真实模型里程碑。
 - **Open blockers:** 无阻塞规划的问题；临时 trace 契约和具体文件布局可在技术规划中收敛。
@@ -464,6 +464,8 @@ flowchart TB
 **Execution result (2026-07-19):** After the final product, prompt and task freeze, `attempts/001` and `attempts/002` each started a new `pia` process from a fresh copy of the untouched baseline. Both produced a general non-negative Fibonacci base-case fix, added meaningful table tests, passed `go test ./...`, and printed `55` from `go run .`; moving each generated test file back onto its original buggy copy failed on incorrect Fibonacci values. The retained evidence is under ignored `tmp/pia-acceptance/attempts/{001,002}` and `tmp/pia-acceptance/evidence/{001,002}.json`, and no acceptance artifact is tracked.
 
 **Prompt-alignment execution result (2026-07-20):** After a line-by-line frozen-Pi review, the final prompt narrowed identity to `pi -> pia`, moved all pia-only guidance to the application append seam, and restored instruction-content newline framing. `attempts/005` and `attempts/006` then used the same rebuilt binary and unchanged task in separate fresh baseline copies. Both produced a general non-negative Fibonacci base-case fix, added meaningful tests, passed `go test ./...`, printed `55`, and supplied tests that failed on the original buggy implementation. The retained evidence is under ignored `tmp/pia-acceptance/attempts/{005,006}` and `tmp/pia-acceptance/evidence/{005,006}.json`.
+
+**Identifier-naming follow-up result (2026-07-20):** A responsibility-based rename removed reference-implementation names from Go identifiers and tests without changing the prompt text, workflow or acceptance task. KTD8 nevertheless reset the streak because product source changed. The rebuilt binary then passed fresh `attempts/007` and `008`: both fixed the general non-negative Fibonacci base case, added tests that failed on the original buggy implementation, passed `go test ./...`, and printed `55`. Their normalized system prompts match the `006` prompt, and both traces retain the same model and four-tool contracts. Evidence remains ignored under `tmp/pia-acceptance/attempts/{007,008}` and `tmp/pia-acceptance/evidence/{007,008}.json`.
 
 ---
 
