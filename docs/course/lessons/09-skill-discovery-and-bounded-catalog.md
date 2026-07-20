@@ -114,7 +114,7 @@ discovery 只在 Conversation 创建 Core Agent 前执行一次。后续 Provide
 
 ### 数量、catalog 与 diagnostics budget
 
-- source 必须是直接 directory entry 而非 symlink；先 non-following 检查，再以 supported-platform nonblocking policy 打开，最后复核 opened handle 与当前 entry identity，避免 source replacement 竞态。enumeration 最多读取 257 个 direct entries，超过 256 时整个可选 source 忽略并 warning，避免在 candidate ceiling 生效前无界物化目录。未超限时跳过无法经 Provider JSON 保真传递 location 的非 UTF-8 direct directory names，再按 lexical order 检查前 64 个直接、非 symlink Skill directories，多出的 lexical tail 不读取并 warning。
+- source 必须是直接 directory entry 而非 symlink；先 non-following 检查，再以 supported-platform nonblocking policy 打开，最后复核 opened handle 与当前 entry identity，避免 source replacement 竞态。verified source handle 保持到 snapshot 完成，direct Skill directory 和 `SKILL.md` 都用 Darwin/Linux no-follow `openat` 相对父 handle 打开，因此 path rename/replacement 不能把另一 source 的 metadata 混入既有 enumeration。enumeration 最多读取 257 个 direct entries，超过 256 时整个可选 source 忽略并 warning，避免在 candidate ceiling 生效前无界物化目录。未超限时在 type 分支前跳过无法经 Provider JSON 保真传递的非 UTF-8 Skill-like entry names，再按 lexical order 检查前 64 个直接、非 symlink Skill directories，多出的 lexical tail 不读取并 warning。
 - catalog entries 按 frontmatter name 再按 location 确定性排序；同名时 workspace-relative lexical path 较小者获胜。所有 name、description 和 location 都做 XML escaping。
 - 完整 catalog ceiling 为 4096 estimated tokens。先通过统一 character cap 尽量保留所有 descriptions；即使 description 为空仍超限时，再省略确定性 lexical tail entries，并只为真实发生的 shortening/omission 产生 warning。
 - 最多返回 64 条有界 `SkillDiagnostic`，额外 warning 聚合为 omission summary。单个 Skill 或可选 `.pia/skills` source 的错误不阻塞普通 coding task；diagnostics 保存到内部 `RunResult` 与可选 trace，`cmd/pia` 只在 Run/trace 成功时写到 stderr，并在输出边界同时引用 path 与 message 以转义 untrusted control characters。
@@ -129,7 +129,7 @@ discovery 只在 Conversation 创建 Core Agent 前执行一次。后续 Provide
 
 - 新增 `internal/coding/skills.go`，责任保持在 coding-owned composition boundary；没有向 `internal/ai`、通用 Agent Loop 或工具 package 泄漏 Skill policy。
 - `RunResult.SkillDiagnostics` 是 discovery snapshot 的内部诊断投影；trace 使用同一有界结构，CLI 只负责进程级 stderr 展示。
-- discovery/catalog tests 覆盖 deterministic scope、missing root、cosmetic validation、required fields、malformed YAML、frontmatter/name/description limits、duplicate winner、XML escaping、external symlink、source/directory symlink、FIFO、catalog truncation/omission 和 diagnostic bounds。
+- discovery/catalog tests 覆盖 deterministic scope、missing root、cosmetic validation、required fields、malformed YAML、frontmatter/name/description limits、duplicate winner、XML escaping、source replacement、external/source/directory/file symlink、FIFO、Linux 非 UTF-8 directory/symlink、catalog truncation/omission 和 diagnostic bounds。
 - Faux Provider integration test 证明 initial system prompt 不含正文或 supporting files，模型执行普通 `read` 后下一次 request 才得到完整 `SKILL.md`。
 - 最终审查补出并修复了重复 YAML mapping key 静默采用最后值的问题，同时把 unknown-field diagnostic 的完整文本收紧到固定上限；没有剩余 actionable finding。
 - `make check` 与 `go test -race ./...` 全部通过。

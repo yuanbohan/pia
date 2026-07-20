@@ -75,11 +75,11 @@ func discoverPiaSkills(workspace *Workspace) (piaSkillDiscovery, error) {
 		}, nil
 	}
 	entries, readErr := skillsDirectory.ReadDir(maxPiaSkillDirectoryEntries + 1)
-	closeErr := skillsDirectory.Close()
 	if errors.Is(readErr, io.EOF) {
 		readErr = nil
 	}
-	if joined := errors.Join(readErr, closeErr); joined != nil {
+	if readErr != nil {
+		joined := errors.Join(readErr, skillsDirectory.Close())
 		return piaSkillDiscovery{
 			Diagnostics: []SkillDiagnostic{{
 				Path:    piaSkillsDirectory,
@@ -88,59 +88,69 @@ func discoverPiaSkills(workspace *Workspace) (piaSkillDiscovery, error) {
 		}, nil
 	}
 	if len(entries) > maxPiaSkillDirectoryEntries {
+		diagnostics := []SkillDiagnostic{{
+			Path: piaSkillsDirectory,
+			Message: fmt.Sprintf(
+				"project Skills were ignored because the directory contains more than %d direct entries",
+				maxPiaSkillDirectoryEntries,
+			),
+		}}
+		if closeErr := skillsDirectory.Close(); closeErr != nil {
+			diagnostics = append(diagnostics, SkillDiagnostic{
+				Path:    piaSkillsDirectory,
+				Message: "could not close project Skills directory: " + boundedDiagnosticText(closeErr.Error()),
+			})
+		}
 		return piaSkillDiscovery{
-			Diagnostics: []SkillDiagnostic{{
-				Path: piaSkillsDirectory,
-				Message: fmt.Sprintf(
-					"project Skills were ignored because the directory contains more than %d direct entries",
-					maxPiaSkillDirectoryEntries,
-				),
-			}},
+			Diagnostics: diagnostics,
 		}, nil
 	}
 	sort.Slice(entries, func(left, right int) bool {
 		return entries[left].Name() < entries[right].Name()
 	})
 
-	var directories []fs.DirEntry
+	var directoryNames []string
 	var candidateDiagnostics []SkillDiagnostic
 	for _, entry := range entries {
-		if entry.IsDir() && !utf8.ValidString(entry.Name()) {
+		name := entry.Name()
+		isDirectory := entry.IsDir()
+		isSymlink := entry.Type()&fs.ModeSymlink != 0
+		if (isDirectory || isSymlink) && !utf8.ValidString(name) {
 			candidateDiagnostics = append(candidateDiagnostics, SkillDiagnostic{
 				Path:    piaSkillsDirectory,
-				Message: "a direct Skill directory with a name that is not valid UTF-8 was ignored",
+				Message: "a direct Skill entry with a name that is not valid UTF-8 was ignored",
 			})
 			continue
 		}
 		// IsDir intentionally excludes directory symlinks. Pia Skill v1 has one
 		// concrete project-owned directory per Skill and no symlink source model.
-		if entry.IsDir() {
-			directories = append(directories, entry)
-		} else if entry.Type()&fs.ModeSymlink != 0 {
+		if isDirectory {
+			directoryNames = append(directoryNames, name)
+		} else if isSymlink {
 			candidateDiagnostics = append(candidateDiagnostics, SkillDiagnostic{
-				Path:    path.Join(piaSkillsDirectory, entry.Name()),
+				Path:    path.Join(piaSkillsDirectory, name),
 				Message: "symlink Skill directories are unsupported and were ignored",
 			})
 		}
 	}
 
 	var priorityDiagnostics []SkillDiagnostic
-	if len(directories) > maxPiaSkillCandidates {
+	if len(directoryNames) > maxPiaSkillCandidates {
 		priorityDiagnostics = append(priorityDiagnostics, SkillDiagnostic{
 			Path: piaSkillsDirectory,
 			Message: fmt.Sprintf(
 				"only the first %d direct Skill directories were inspected; %d tail directories were omitted",
 				maxPiaSkillCandidates,
-				len(directories)-maxPiaSkillCandidates,
+				len(directoryNames)-maxPiaSkillCandidates,
 			),
 		})
-		directories = directories[:maxPiaSkillCandidates]
+		directoryNames = directoryNames[:maxPiaSkillCandidates]
 	}
 
-	byName := make(map[string]piaSkill, len(directories))
-	for _, directory := range directories {
-		location := path.Join(piaSkillsDirectory, directory.Name(), piaSkillFilename)
-		skill, diagnostics, ok := loadPiaSkill(workspace, directory.Name(), location)
+	byName := make(map[string]piaSkill, len(directoryNames))
+	for _, directoryName := range directoryNames {
+		location := path.Join(piaSkillsDirectory, directoryName, piaSkillFilename)
+		skill, diagnostics, ok := loadPiaSkill(skillsDirectory, directoryName, location)
 		candidateDiagnostics = append(candidateDiagnostics, diagnostics...)
 		if !ok {
 			continue
@@ -157,6 +167,12 @@ func discoverPiaSkills(workspace *Workspace) (piaSkillDiscovery, error) {
 			continue
 		}
 		byName[skill.Name] = skill
+	}
+	if closeErr := skillsDirectory.Close(); closeErr != nil {
+		candidateDiagnostics = append(candidateDiagnostics, SkillDiagnostic{
+			Path:    piaSkillsDirectory,
+			Message: "could not close project Skills directory: " + boundedDiagnosticText(closeErr.Error()),
+		})
 	}
 
 	skills := make([]piaSkill, 0, len(byName))
@@ -213,21 +229,31 @@ func openPiaSkillsDirectory(root *os.Root) (*os.File, error) {
 }
 
 func loadPiaSkill(
-	workspace *Workspace,
+	skillsDirectory *os.File,
 	directoryName string,
 	location string,
 ) (piaSkill, []SkillDiagnostic, bool) {
-	file, err := fileutil.OpenRegularFile(workspace.Root(), location)
+	skillDirectory, err := fileutil.OpenDirectoryAt(skillsDirectory, directoryName)
 	if err != nil {
 		return piaSkill{}, []SkillDiagnostic{{
 			Path:    location,
-			Message: "could not open a regular project Skill: " + boundedDiagnosticText(err.Error()),
+			Message: "could not open a direct project Skill directory: " + boundedDiagnosticText(err.Error()),
+		}}, false
+	}
+
+	file, err := fileutil.OpenRegularFileAt(skillDirectory, piaSkillFilename)
+	if err != nil {
+		joined := errors.Join(err, skillDirectory.Close())
+		return piaSkill{}, []SkillDiagnostic{{
+			Path:    location,
+			Message: "could not open a direct regular project Skill: " + boundedDiagnosticText(joined.Error()),
 		}}, false
 	}
 
 	frontmatter, readErr := readSkillFrontmatter(file)
-	closeErr := file.Close()
-	if joined := errors.Join(readErr, closeErr); joined != nil {
+	fileCloseErr := file.Close()
+	directoryCloseErr := skillDirectory.Close()
+	if joined := errors.Join(readErr, fileCloseErr, directoryCloseErr); joined != nil {
 		return piaSkill{}, []SkillDiagnostic{{
 			Path:    location,
 			Message: "could not read bounded Skill frontmatter: " + boundedDiagnosticText(joined.Error()),

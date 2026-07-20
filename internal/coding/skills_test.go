@@ -3,6 +3,7 @@ package coding
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,6 +102,40 @@ description: Must remain undiscovered through a source symlink.
 	}
 	if !skillDiagnosticsContain(discovery.Diagnostics, "source is a symlink") {
 		t.Fatalf("diagnostics = %#v, want source-symlink warning", discovery.Diagnostics)
+	}
+}
+
+func TestLoadPiaSkillUsesVerifiedSourceHandleAfterReplacement(t *testing.T) {
+	directory := t.TempDir()
+	writePiaSkill(t, directory, "stable", `name: stable
+description: Original metadata from the verified source.
+`, "ORIGINAL_BODY")
+	workspace := openPromptWorkspace(t, directory)
+	source, err := openPiaSkillsDirectory(workspace.Root())
+	if err != nil {
+		t.Fatalf("open verified Skill source: %v", err)
+	}
+
+	sourcePath := filepath.Join(directory, piaSkillsDirectory)
+	if err := os.Rename(sourcePath, sourcePath+"-old"); err != nil {
+		_ = source.Close()
+		t.Fatalf("move verified Skill source: %v", err)
+	}
+	writePiaSkill(t, directory, "stable", `name: stable
+description: Replacement metadata must stay undiscovered.
+`, "REPLACEMENT_BODY")
+
+	location := path.Join(piaSkillsDirectory, "stable", piaSkillFilename)
+	skill, diagnostics, ok := loadPiaSkill(source, "stable", location)
+	closeErr := source.Close()
+	if closeErr != nil {
+		t.Fatalf("close verified Skill source: %v", closeErr)
+	}
+	if !ok || len(diagnostics) != 0 {
+		t.Fatalf("load from verified source = (%#v, %#v, %v), want valid Skill", skill, diagnostics, ok)
+	}
+	if got, want := skill.Description, "Original metadata from the verified source."; got != want {
+		t.Fatalf("description = %q, want pinned source metadata %q", got, want)
 	}
 }
 

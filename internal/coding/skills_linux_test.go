@@ -21,6 +21,10 @@ func TestDiscoverPiaSkillsRejectsNonUTF8DirectoryName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDirectory, piaSkillFilename), []byte(content), 0o600); err != nil {
 		t.Fatalf("write Skill in non-UTF-8 directory: %v", err)
 	}
+	invalidSymlinkName := string([]byte{'l', 'i', 'n', 'k', '-', 0xfe})
+	if err := os.Symlink("invalid-"+string([]byte{0xff}), filepath.Join(skillsDirectory, invalidSymlinkName)); err != nil {
+		t.Fatalf("create non-UTF-8 Skill symlink: %v", err)
+	}
 
 	workspace := openPromptWorkspace(t, directory)
 	discovery, err := discoverPiaSkills(workspace)
@@ -30,8 +34,11 @@ func TestDiscoverPiaSkillsRejectsNonUTF8DirectoryName(t *testing.T) {
 	if discovery.Catalog != "" {
 		t.Fatalf("non-UTF-8 Skill location entered catalog\n%s", discovery.Catalog)
 	}
+	if got, want := len(discovery.Diagnostics), 2; got != want {
+		t.Fatalf("diagnostic count = %d, want %d for directory and symlink: %#v", got, want, discovery.Diagnostics)
+	}
 	if !skillDiagnosticsContain(discovery.Diagnostics, "not valid UTF-8") {
-		t.Fatalf("diagnostics = %#v, want non-UTF-8 directory warning", discovery.Diagnostics)
+		t.Fatalf("diagnostics = %#v, want non-UTF-8 entry warnings", discovery.Diagnostics)
 	}
 	for _, diagnostic := range discovery.Diagnostics {
 		if !utf8.ValidString(diagnostic.Path) || !utf8.ValidString(diagnostic.Message) {
