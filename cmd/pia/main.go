@@ -94,12 +94,12 @@ func execute(
 	}
 	for _, diagnostic := range result.SkillDiagnostics {
 		if diagnostic.Path == "" {
-			if _, err := fmt.Fprintf(stderr, "pia: warning: %s\n", diagnostic.Message); err != nil {
+			if _, err := fmt.Fprintf(stderr, "pia: warning: %q\n", diagnostic.Message); err != nil {
 				return fmt.Errorf("write Skill diagnostic: %w", err)
 			}
 			continue
 		}
-		if _, err := fmt.Fprintf(stderr, "pia: warning: %q: %s\n", diagnostic.Path, diagnostic.Message); err != nil {
+		if _, err := fmt.Fprintf(stderr, "pia: warning: %q: %q\n", diagnostic.Path, diagnostic.Message); err != nil {
 			return fmt.Errorf("write Skill diagnostic: %w", err)
 		}
 	}
