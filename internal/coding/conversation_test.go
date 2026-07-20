@@ -18,8 +18,233 @@ import (
 func TestNewConversationRequiresCoreAgent(t *testing.T) {
 	t.Parallel()
 
-	if _, err := newConversation(nil); err == nil {
+	if _, err := newConversation(conversationConfig{}); err == nil {
 		t.Fatal("newConversation() error = nil, want missing-Core-Agent error")
+	}
+}
+
+func TestConversationCompactsBetweenRunsAndUpdatesPreviousSummary(t *testing.T) {
+	t.Parallel()
+
+	first := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "first answer"}},
+		Usage:      ai.Usage{InputTokens: 20, OutputTokens: 5},
+		StopReason: ai.StopReasonStop,
+	}
+	second := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
+		Usage:      ai.Usage{InputTokens: 110, OutputTokens: 10},
+		StopReason: ai.StopReasonStop,
+	}
+	third := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "third answer"}},
+		Usage:      ai.Usage{InputTokens: 110, OutputTokens: 10},
+		StopReason: ai.StopReasonStop,
+	}
+	fourth := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "fourth answer"}},
+		StopReason: ai.StopReasonStop,
+	}
+	summaryOne := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "checkpoint one"}},
+		StopReason: ai.StopReasonStop,
+	}
+	summaryTwo := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "checkpoint two"}},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := newConversationFaux(t,
+		conversationAssistantStep(first),
+		conversationAssistantStep(second),
+		conversationAssistantStep(summaryOne),
+		conversationAssistantStep(third),
+		conversationAssistantStep(summaryTwo),
+		conversationAssistantStep(fourth),
+	)
+	conversation := newCompactingTestConversation(t, provider)
+
+	var history []ai.Message
+	for _, input := range []string{"first question", "second question", "third question", "fourth question"} {
+		var err error
+		history, err = conversation.run(context.Background(), input)
+		if err != nil {
+			t.Fatalf("run %q error = %v", input, err)
+		}
+	}
+
+	wantHistory := []ai.Message{
+		ai.UserMessage{Content: "first question"}, first,
+		ai.UserMessage{Content: "second question"}, second,
+		ai.UserMessage{Content: "third question"}, third,
+		ai.UserMessage{Content: "fourth question"}, fourth,
+	}
+	if !reflect.DeepEqual(history, wantHistory) {
+		t.Fatalf("complete History = %#v, want original messages %#v", history, wantHistory)
+	}
+
+	requests := provider.Requests()
+	if got, want := len(requests), 6; got != want {
+		t.Fatalf("Provider requests = %d, want %d", got, want)
+	}
+	firstSummaryRequest := requests[2]
+	if firstSummaryRequest.SystemPrompt != summarizationSystemPrompt || len(firstSummaryRequest.Tools) != 0 {
+		t.Fatalf("first summary request = %#v, want isolated summarizer request", firstSummaryRequest)
+	}
+	if got, want := firstSummaryRequest.MaxOutputTokens, int64(13); got != want {
+		t.Fatalf("first summary max output = %d, want %d", got, want)
+	}
+	firstSummaryInput := firstSummaryRequest.Messages[0].(ai.UserMessage).Content
+	for _, required := range []string{
+		"<conversation>",
+		"[User]: first question",
+		"[Assistant]: first answer",
+		initialSummarizationPrompt,
+	} {
+		if !strings.Contains(firstSummaryInput, required) {
+			t.Fatalf("first summary input missing %q\n%s", required, firstSummaryInput)
+		}
+	}
+
+	firstCompactedRequest := requests[3]
+	wantFirstProjection := []ai.Message{
+		syntheticSummaryMessage("checkpoint one"),
+		ai.UserMessage{Content: "second question"},
+		withoutUsage(second),
+		ai.UserMessage{Content: "third question"},
+	}
+	if !reflect.DeepEqual(firstCompactedRequest.Messages, wantFirstProjection) {
+		t.Fatalf("first compacted messages = %#v, want %#v", firstCompactedRequest.Messages, wantFirstProjection)
+	}
+
+	secondSummaryRequest := requests[4]
+	secondSummaryInput := secondSummaryRequest.Messages[0].(ai.UserMessage).Content
+	for _, required := range []string{
+		"[User]: second question",
+		"[Assistant]: second answer",
+		"<previous-summary>\ncheckpoint one\n</previous-summary>",
+		updateSummarizationPrompt,
+	} {
+		if !strings.Contains(secondSummaryInput, required) {
+			t.Fatalf("update summary input missing %q\n%s", required, secondSummaryInput)
+		}
+	}
+	if strings.Contains(secondSummaryInput, "[User]: first question") {
+		t.Fatalf("update summary reserialized already summarized history\n%s", secondSummaryInput)
+	}
+
+	wantSecondProjection := []ai.Message{
+		syntheticSummaryMessage("checkpoint two"),
+		ai.UserMessage{Content: "third question"},
+		withoutUsage(third),
+		ai.UserMessage{Content: "fourth question"},
+	}
+	if !reflect.DeepEqual(requests[5].Messages, wantSecondProjection) {
+		t.Fatalf("second compacted messages = %#v, want %#v", requests[5].Messages, wantSecondProjection)
+	}
+}
+
+func TestConversationCompactsWhenProjectedInputEqualsThreshold(t *testing.T) {
+	t.Parallel()
+
+	first := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "first answer"}},
+		Usage:      ai.Usage{InputTokens: 90, OutputTokens: 8},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := newConversationFaux(t,
+		conversationAssistantStep(first),
+		conversationAssistantStep(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{ai.TextContent{Text: "turn prefix"}},
+			StopReason: ai.StopReasonStop,
+		}),
+		conversationAssistantStep(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
+			StopReason: ai.StopReasonStop,
+		}),
+	)
+	conversation := newCompactingTestConversation(t, provider)
+
+	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+		t.Fatalf("first run error = %v", err)
+	}
+	// The valid usage contributes 98 tokens and the five-character input adds
+	// ceil(5/4) = 2, exactly matching the test policy's threshold of 100.
+	if _, err := conversation.run(context.Background(), "12345"); err != nil {
+		t.Fatalf("threshold run error = %v", err)
+	}
+
+	requests := provider.Requests()
+	if got, want := len(requests), 3; got != want {
+		t.Fatalf("Provider requests = %d, want coding, summary, coding", got)
+	}
+	if requests[1].SystemPrompt != summarizationSystemPrompt {
+		t.Fatalf("request at exact threshold is not a summary request: %#v", requests[1])
+	}
+}
+
+func TestConversationSummaryFailureRejectsNewInputAndCanRetry(t *testing.T) {
+	t.Parallel()
+
+	first := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "first answer"}},
+		Usage:      ai.Usage{InputTokens: 20, OutputTokens: 5},
+		StopReason: ai.StopReasonStop,
+	}
+	second := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
+		Usage:      ai.Usage{InputTokens: 110, OutputTokens: 10},
+		StopReason: ai.StopReasonStop,
+	}
+	recovered := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "recovered"}},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := newConversationFaux(t,
+		conversationAssistantStep(first),
+		conversationAssistantStep(second),
+		faux.Step{Events: []ai.Event{ai.ErrorEvent{Message: ai.AssistantMessage{
+			StopReason:   ai.StopReasonError,
+			ErrorMessage: "summary unavailable",
+		}}}},
+		conversationAssistantStep(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{ai.TextContent{Text: "checkpoint"}},
+			StopReason: ai.StopReasonStop,
+		}),
+		conversationAssistantStep(recovered),
+	)
+	conversation := newCompactingTestConversation(t, provider)
+
+	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+		t.Fatalf("first run error = %v", err)
+	}
+	wantHistory, err := conversation.run(context.Background(), "second question")
+	if err != nil {
+		t.Fatalf("second run error = %v", err)
+	}
+
+	history, err := conversation.run(context.Background(), "must not be accepted")
+	if err == nil || !strings.Contains(err.Error(), "summary unavailable") {
+		t.Fatalf("failed compaction error = %v, want summary failure", err)
+	}
+	if !reflect.DeepEqual(history, wantHistory) {
+		t.Fatalf("History after failed compaction = %#v, want %#v", history, wantHistory)
+	}
+
+	history, err = conversation.run(context.Background(), "accepted after retry")
+	if err != nil {
+		t.Fatalf("retry run error = %v", err)
+	}
+	wantFinal := append(ai.CloneMessages(wantHistory),
+		ai.UserMessage{Content: "accepted after retry"},
+		recovered,
+	)
+	if !reflect.DeepEqual(history, wantFinal) {
+		t.Fatalf("History after retry = %#v, want %#v", history, wantFinal)
+	}
+	for _, message := range history {
+		if user, ok := message.(ai.UserMessage); ok && user.Content == "must not be accepted" {
+			t.Fatal("failed Run input entered complete History")
+		}
 	}
 }
 
@@ -177,11 +402,63 @@ func newTestConversation(t *testing.T, provider ai.Provider) *conversation {
 	if err != nil {
 		t.Fatalf("agent.New() error = %v", err)
 	}
-	conversation, err := newConversation(core)
+	conversation, err := newConversation(conversationConfig{Core: core})
 	if err != nil {
 		t.Fatalf("newConversation() error = %v", err)
 	}
 	return conversation
+}
+
+func newCompactingTestConversation(t *testing.T, provider ai.Provider) *conversation {
+	t.Helper()
+	return newCompactingTestConversationWithPolicy(t, provider, testCompactionPolicy())
+}
+
+func testCompactionPolicy() compactionPolicy {
+	return compactionPolicy{
+		Threshold:                100,
+		SoftCeiling:              70,
+		RetainedRawTarget:        5,
+		SummaryMaxOutput:         13,
+		SplitTurnPrefixMaxOutput: 8,
+	}
+}
+
+func newCompactingTestConversationWithPolicy(
+	t *testing.T,
+	provider ai.Provider,
+	policy compactionPolicy,
+) *conversation {
+	t.Helper()
+	limits := ai.RequestLimits{
+		ContextCapacity: 1000,
+		ModelMaxOutput:  400,
+		ContextSafety:   10,
+	}
+	core, err := agent.New(agent.Config{
+		Provider:      provider,
+		SystemPrompt:  "system",
+		RequestLimits: limits,
+	})
+	if err != nil {
+		t.Fatalf("agent.New() error = %v", err)
+	}
+	conversation, err := newConversation(conversationConfig{
+		Core:          core,
+		Provider:      provider,
+		SystemPrompt:  "system",
+		RequestLimits: limits,
+		Compaction:    policy,
+	})
+	if err != nil {
+		t.Fatalf("newConversation() error = %v", err)
+	}
+	return conversation
+}
+
+func withoutUsage(message ai.AssistantMessage) ai.AssistantMessage {
+	message.Usage = ai.Usage{}
+	return message
 }
 
 func newConversationFaux(t *testing.T, steps ...faux.Step) *faux.Provider {

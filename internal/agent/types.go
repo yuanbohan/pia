@@ -3,6 +3,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/yuanbohan/pi-go/internal/ai"
@@ -13,9 +14,10 @@ var ErrRunActive = errors.New("agent: run already active")
 
 // Config contains the stable dependencies of one Agent loop.
 type Config struct {
-	Provider     ai.Provider
-	SystemPrompt string
-	Tools        []Tool
+	Provider      ai.Provider
+	SystemPrompt  string
+	Tools         []Tool
+	RequestLimits ai.RequestLimits
 }
 
 // RunResult contains the ownership-independent messages accepted by one Run.
@@ -33,6 +35,7 @@ type Agent struct {
 	tools          map[string]registeredTool
 	toolSchemas    []ai.ToolSchema
 	workingContext []ai.Message
+	requestLimits  ai.RequestLimits
 }
 
 // New constructs an Agent with an empty Working Context.
@@ -40,14 +43,18 @@ func New(config Config) (*Agent, error) {
 	if config.Provider == nil {
 		return nil, errors.New("agent: provider is required")
 	}
+	if err := config.RequestLimits.Validate(); err != nil {
+		return nil, fmt.Errorf("agent: request limits: %w", err)
+	}
 	tools, toolSchemas, err := freezeTools(config.Tools)
 	if err != nil {
 		return nil, err
 	}
 	return &Agent{
-		provider:     config.Provider,
-		systemPrompt: config.SystemPrompt,
-		tools:        tools,
-		toolSchemas:  toolSchemas,
+		provider:      config.Provider,
+		systemPrompt:  config.SystemPrompt,
+		tools:         tools,
+		toolSchemas:   toolSchemas,
+		requestLimits: config.RequestLimits,
 	}, nil
 }

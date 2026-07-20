@@ -25,6 +25,7 @@ type requestPayload struct {
 	StreamOptions   *streamOptions   `json:"stream_options,omitempty"`
 	Thinking        *thinkingOption  `json:"thinking,omitempty"`
 	ReasoningEffort string           `json:"reasoning_effort,omitempty"`
+	MaxTokens       int64            `json:"max_tokens,omitempty"`
 }
 
 type requestMessage struct {
@@ -107,6 +108,7 @@ func buildRequestPayload(
 		Tools:           tools,
 		Stream:          true,
 		ReasoningEffort: reasoningEffort,
+		MaxTokens:       request.MaxOutputTokens,
 	}
 	if profile.StreamUsage {
 		payload.StreamOptions = &streamOptions{IncludeUsage: true}

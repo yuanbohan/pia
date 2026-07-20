@@ -81,6 +81,9 @@ func TestRunWithProviderComposesStableMultiTurnCodingContext(t *testing.T) {
 		if got, want := len(request.Messages), 1+2*index; got != want {
 			t.Fatalf("request %d message count = %d, want %d", index, got, want)
 		}
+		if got, want := request.MaxOutputTokens, int64(productModelMaxOutput); got != want {
+			t.Fatalf("request %d MaxOutputTokens = %d, want %d", index, got, want)
+		}
 	}
 
 	trace, err := BuildTrace(result, nil)
@@ -283,6 +286,22 @@ func TestProductDeepSeekConfigIsFixed(t *testing.T) {
 	info := productModelInfo()
 	if !info.Thinking || info.Provider != "deepseek" || info.Name != config.Model || info.ReasoningEffort != config.ReasoningEffort {
 		t.Fatalf("model info = %#v, want fixed DeepSeek thinking profile", info)
+	}
+	if got, want := productRequestLimits(), (ai.RequestLimits{
+		ContextCapacity: 1_000_000,
+		ModelMaxOutput:  384_000,
+		ContextSafety:   4_096,
+	}); got != want {
+		t.Fatalf("request limits = %#v, want %#v", got, want)
+	}
+	if got, want := productCompactionPolicy(), (compactionPolicy{
+		Threshold:                192_000,
+		SoftCeiling:              64_000,
+		RetainedRawTarget:        20_000,
+		SummaryMaxOutput:         13_107,
+		SplitTurnPrefixMaxOutput: 8_192,
+	}); got != want {
+		t.Fatalf("compaction policy = %#v, want %#v", got, want)
 	}
 }
 

@@ -19,11 +19,19 @@ func (a *Agent) ReplaceWorkingContext(messages []ai.Message) error {
 func (a *Agent) requestSnapshot() ai.Request {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return ai.CloneRequest(ai.Request{
+	request := ai.Request{
 		SystemPrompt: a.systemPrompt,
 		Messages:     a.workingContext,
 		Tools:        a.toolSchemas,
-	})
+	}
+	if !a.requestLimits.IsZero() {
+		projectedInput := ai.EstimateRequestTokens(request).Tokens
+		request.MaxOutputTokens = a.requestLimits.ClampOutputTokens(
+			projectedInput,
+			a.requestLimits.ModelMaxOutput,
+		)
+	}
+	return ai.CloneRequest(request)
 }
 
 func (a *Agent) appendAssistant(message ai.AssistantMessage) {

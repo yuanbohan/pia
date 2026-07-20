@@ -13,7 +13,8 @@ func TestBuildRequestPayloadMapsCompleteTranscript(t *testing.T) {
 	t.Parallel()
 
 	request := ai.Request{
-		SystemPrompt: "You are a coding agent.",
+		SystemPrompt:    "You are a coding agent.",
+		MaxOutputTokens: 12345,
 		Messages: []ai.Message{
 			ai.UserMessage{Content: "Say hello."},
 			ai.AssistantMessage{
@@ -111,6 +112,7 @@ func TestBuildRequestPayloadMapsCompleteTranscript(t *testing.T) {
 			}
 		],
 		"stream": true,
+		"max_tokens": 12345,
 		"stream_options": {"include_usage": true},
 		"thinking": {"type": "enabled"},
 		"reasoning_effort": "high"

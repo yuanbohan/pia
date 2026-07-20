@@ -25,6 +25,50 @@ func TestNewRequiresProvider(t *testing.T) {
 	}
 }
 
+func TestRunClampsEachRequestOutputToProjectedContext(t *testing.T) {
+	t.Parallel()
+
+	first := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "first"}},
+		Usage:      ai.Usage{InputTokens: 80, OutputTokens: 5},
+		StopReason: ai.StopReasonStop,
+	}
+	second := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "second"}},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := newFaux(t, assistantStep(first), assistantStep(second))
+	runtime, err := agent.New(agent.Config{
+		Provider:     provider,
+		SystemPrompt: "system",
+		RequestLimits: ai.RequestLimits{
+			ContextCapacity: 100,
+			ModelMaxOutput:  50,
+			ContextSafety:   10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if _, err := runtime.Run(context.Background(), "first"); err != nil {
+		t.Fatalf("first Run() error = %v", err)
+	}
+	if _, err := runtime.Run(context.Background(), "12345"); err != nil {
+		t.Fatalf("second Run() error = %v", err)
+	}
+
+	requests := provider.Requests()
+	if got, want := requests[0].MaxOutputTokens, int64(50); got != want {
+		t.Fatalf("first MaxOutputTokens = %d, want %d", got, want)
+	}
+	// The latest valid usage describes 85 tokens; the new five-character user
+	// message estimates to two more, leaving 3 tokens after the safety margin.
+	if got, want := requests[1].MaxOutputTokens, int64(3); got != want {
+		t.Fatalf("second MaxOutputTokens = %d, want %d", got, want)
+	}
+}
+
 func TestRunSendsCompleteRequestAndReturnsTerminalDelta(t *testing.T) {
 	t.Parallel()
 

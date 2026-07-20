@@ -9,15 +9,23 @@ import (
 // CloneRequest returns an ownership-independent copy of a Provider request.
 func CloneRequest(request Request) Request {
 	cloned := Request{
-		SystemPrompt: request.SystemPrompt,
-		Messages:     CloneMessages(request.Messages),
+		SystemPrompt:    request.SystemPrompt,
+		Messages:        CloneMessages(request.Messages),
+		MaxOutputTokens: request.MaxOutputTokens,
 	}
-	if request.Tools != nil {
-		cloned.Tools = make([]ToolSchema, len(request.Tools))
-		for index, tool := range request.Tools {
-			cloned.Tools[index] = tool
-			cloned.Tools[index].Parameters = bytes.Clone(tool.Parameters)
-		}
+	cloned.Tools = CloneToolSchemas(request.Tools)
+	return cloned
+}
+
+// CloneToolSchemas returns ownership-independent model tool definitions.
+func CloneToolSchemas(tools []ToolSchema) []ToolSchema {
+	if tools == nil {
+		return nil
+	}
+	cloned := make([]ToolSchema, len(tools))
+	for index, tool := range tools {
+		cloned[index] = tool
+		cloned[index].Parameters = bytes.Clone(tool.Parameters)
 	}
 	return cloned
 }

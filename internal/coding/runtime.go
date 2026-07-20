@@ -20,6 +20,16 @@ const (
 	productProviderName   = "deepseek"
 	productModelName      = "deepseek-v4-pro"
 	productReasoningLevel = "high"
+
+	productContextCapacity = 1_000_000
+	productModelMaxOutput  = 384_000
+	productContextSafety   = 4_096
+
+	productCompactionThreshold   = 192_000
+	productCompactionSoftCeiling = 64_000
+	productRetainedRawTarget     = 20_000
+	productSummaryMaxOutput      = 13_107
+	productSplitPrefixMaxOutput  = 8_192
 )
 
 // RunInput contains the one-shot coding application inputs supplied by its
@@ -113,15 +123,24 @@ func runWithWorkspaceOperations(
 	}
 	result.SystemPrompt = prompt
 
+	requestLimits := productRequestLimits()
 	core, err := agent.New(agent.Config{
-		Provider:     provider,
-		SystemPrompt: prompt,
-		Tools:        tools,
+		Provider:      provider,
+		SystemPrompt:  prompt,
+		Tools:         tools,
+		RequestLimits: requestLimits,
 	})
 	if err != nil {
 		return result, fmt.Errorf("coding: create Agent: %w", err)
 	}
-	conversation, err := newConversation(core)
+	conversation, err := newConversation(conversationConfig{
+		Core:          core,
+		Provider:      provider,
+		SystemPrompt:  prompt,
+		Tools:         result.Tools,
+		RequestLimits: requestLimits,
+		Compaction:    productCompactionPolicy(),
+	})
 	if err != nil {
 		return result, err
 	}
@@ -131,6 +150,24 @@ func runWithWorkspaceOperations(
 		return result, fmt.Errorf("coding: run Agent: %w", runErr)
 	}
 	return result, nil
+}
+
+func productRequestLimits() ai.RequestLimits {
+	return ai.RequestLimits{
+		ContextCapacity: productContextCapacity,
+		ModelMaxOutput:  productModelMaxOutput,
+		ContextSafety:   productContextSafety,
+	}
+}
+
+func productCompactionPolicy() compactionPolicy {
+	return compactionPolicy{
+		Threshold:                productCompactionThreshold,
+		SoftCeiling:              productCompactionSoftCeiling,
+		RetainedRawTarget:        productRetainedRawTarget,
+		SummaryMaxOutput:         productSummaryMaxOutput,
+		SplitTurnPrefixMaxOutput: productSplitPrefixMaxOutput,
+	}
 }
 
 func newCodingTools(workspace *Workspace) ([]agent.Tool, error) {

@@ -357,6 +357,57 @@
 - 范围：这项决定只固定长期责任方向，不预先确定 Gateway 协议、部署拓扑、Session 存储格式、任务状态机、队列策略、租户模型或 IM 平台。相关能力继续作为未编号方向，待 Core Agent、Session persistence/recovery、事件与任务生命周期分别出现真实证据后拆分。
 - 原因：最终 coding capability 需要能被用户从日常聊天入口持续驱动，并在多个长任务之间保持独立历史、恢复能力和可观察状态；把这些责任塞回 Core Agent 会破坏已经建立的通用模型/tool loop 边界。
 
+### D53. Threshold compaction 使用 protocol-safe message-level cut
+
+- 日期：2026-07-20
+- 决定：Lesson 08 的 threshold compaction 可以在一个已经 settled 的 Run 的消息序列内选择 retained suffix，而不把完整 Run 当作不可分割单元。第一条 retained 原始消息可以是 user 或 assistant，但不能是 tool result，也不能从一条 message 的 content blocks 内部切分；保留含 tool calls 的 assistant 时，必须同时保留后续所有 matching tool results。cut 之前的较旧 History 和当前 Run prefix 进入 summary，完整 Conversation History 不删除或改写原始消息。
+- 范围：本决定只固定 compaction 对 settled messages 的 cut 语义，不表示 active Run 执行到该位置时触发 compaction。执行时机由 D54 独立规定。本决定也不定义具体 Go API、summary message 表示、cut estimator、projection metadata、overflow retry、branch summary 或 Session persistence。
+- Pi 对齐：冻结 Pi 的 `findCutPoint()` 同样允许 user/assistant cut point、拒绝从 tool result 开始，并在 retained cut 落入 user-started turn 内部时为被移除的 turn prefix 生成补充 summary。
+- 原因：单次 coding Run 可以因多轮 read/edit/bash 调用而独自占满 Working Context；只按 Run 边界压缩会出现“保留则仍超预算、删除则丢掉全部近期原文”的死角。message-level cut 既能继续前移 retained window，又能保持 tool-call/result 协议完整。
+
+### D54. Threshold compaction 在下一次 Run 接受输入前 lazy 执行
+
+- 日期：2026-07-20
+- 决定：Conversation Owner 在下一次 `conversation.run()` 取得自己的 active guard 后、Core Agent 接受新 user input 之前，根据上一份 settled Working Context 检查 threshold 并按需执行 compaction。没有后续 Run 就不调用 summarizer；threshold compaction 成功后不自动调用 `continue`。Conversation guard 持续覆盖 compaction、后续 Core Run、History commit 与返回 snapshot。
+- 失败语义：summary request 不经过 Core Agent loop且不提供 coding tools，其 request、terminal response 和 usage 不进入 Conversation History。summary Provider error、取消、空文本、意外 tool call、无效 candidate context 或 `ReplaceWorkingContext` failure 都不修改 History、Working Context 或 projection metadata，新 user input 保持未接受，并返回当前完整 History snapshot 与错误。candidate 验证及最后一次 cancellation check 通过后，Working Context replacement 与 projection metadata 发布构成同步 commit；commit 之后发生的取消不回滚合法的新 projection，但 Core Agent 仍可拒绝尚未接受的 input。
+- 范围：本决定只覆盖 threshold compaction 的 between-Runs lifecycle；明确不在同一个 active Run 的相邻 Provider Turns 之间 compaction，也不增加后台/eager compaction、manual command、compaction event、overflow compact-and-retry 或输入队列。取得 Conversation active guard 只是 lifecycle 协调，不等于 Core Agent 已接受 user input。
+- Pi 差异：冻结 Pi 通常在 `agent_end` 后立即检查 threshold，并在新 prompt 前补做检查。pi-go 当前 one-shot composition 没有独立 compaction status/event，采用 pre-next-Run lazy 时机可以避免无后续调用时的额外模型成本，也不会把上一次已经成功的 Run 因后处理失败改写成 error，同时仍保持“settled Run 后、下一次 Provider call 前”的外部语义。
+- 原因：当前最小 API 用 `RunResult + error` 表达一次 user input 是否被接受并完成，没有另一个通道承载 eager compaction failure。lazy 检查让失败明确归属于尚未接受的新 Run，旧的 settled result 与完整 History 都保持稳定。
+
+### D55. 首版 between-Runs compaction 使用 192K threshold 与 64K soft ceiling
+
+- 日期：2026-07-20
+- 决定：Lesson 08 以 projected Provider input `192_000` tokens 作为首版 between-Runs quality-oriented compaction threshold；`64_000` tokens 是 compaction 后完整 projected Provider input 的普通情况 soft ceiling，不是 summary size、必须填满的目标或成功所需的硬上限。projected input 包含稳定 system prompt、tool schemas、synthetic summary、retained raw suffix 与尚未接受的新 user input。`1_000_000` model context 仍只表示 Provider hard capacity，不作为日常 coding target。
+- 证据与折中：DeepSeek V4 官方 MRCR 证据显示到 `128K` 基本稳定、之后开始可见退化，而 `256K` 已明显下降；它证明不能把 1M 容量当质量区间，但不足以把 128K 认定为 coding 精确最优点。OpenAI 对 Codex agent loop 的说明和其链接源码显示 Codex 默认以 model context 的 `90%` 触发 auto-compaction，`272K` coding context 对应约 `244.8K`；GPT-5.3-Codex system card 中一项以最大化长任务表现为目标的评测则每 `100K` 触发。pi-go 的普通文本 summary 又弱于 OpenAI 模型原生 opaque compaction item，因此 `192K` 在容量、压缩频率与质量风险之间取中间偏保守位置；达到 `64K` ceiling 时提供约 `128K` 的再增长空间。
+- Soft-ceiling 语义：cut selection 应尽量使 candidate 不超过 `64K`，但不得为了凑该数值丢弃没有进入 summary 的消息。不可压缩的新 input、固定 prompt/tools、单条大 message、实际 summary 或 protocol-safe granularity 使 `64K` 无法达到时，允许以高于 `64K` 但低于 `192K` 的 candidate 成功；连 threshold 都无法降到时按 D54 原子失败，新 input 不被接受。
+- 范围：这是 D54 lifecycle 下的首版产品 policy，不是 active Run hard ceiling，也不改变本课不做 run 内 compaction、overflow compact-and-retry 或模型 registry 的范围。它不宣称一次 active Run 不会从低于 threshold 增长到更高区间。
+- 复评义务：真实 DeepSeek coding traces 可用后，必须按 `<128K`、`128K-192K`、`192K-256K` 与 `>256K` 分桶比较任务成功率、重复 compaction 后的信息损失、成本和频率。`128K-192K` 已显著退化时下调；只有 `192K-256K` 质量稳定且 compaction 过频时才上调。更换模型、reasoning mode、tool schema、Skills 暴露、summary prompt/表示或 tool-result bounds 时必须重新校准。
+
+### D56. 首版 summary prompt 与 model-visible 表达沿用冻结 Pi
+
+- 日期：2026-07-20
+- 决定：没有 DeepSeek 或 pi-go 证据要求偏离时，Lesson 08 原样沿用冻结 Pi commit `dcfe36c79702ec240b146c45f167ab75ecddd205` 的 summarization system prompt、首次 structured checkpoint prompt、已有 summary 时的 update prompt、split-turn prefix prompt，以及 `<conversation>` / `<previous-summary>` 输入组织。待摘要消息按 Pi 规则序列化为带 role labels 的纯文本，每个 tool result 在 summary input 中最多保留 `2000` characters；从 tool calls 确定性提取的 read/modified file lists 追加到模型 summary。
+- Model-visible 表达：成功 summary 在 Working Context 中投影成普通 synthetic user message，沿用 Pi 的 `The conversation history before this point was compacted into the following summary:` preamble 与 `<summary>` tags，随后保留 D53 的 protocol-valid raw suffix。它不进入完整 Conversation History，也不冒充真实 user input；Conversation Owner 私有 projection metadata 分别保存 summary 与 cut boundary。重复 compaction 只把新丢弃的原始消息放入 `<conversation>`，把前次 summary 放入 `<previous-summary>` 交给 update prompt，不把 synthetic summary 当普通对话再次摘要。
+- 范围：本决定不引入新的 `ai.Message` role、custom summary instructions、branch summary、extensions/hooks、持久化 compaction entry 或 Session entry tree。具体预算由 D57 规定；Go constants 与文件拆分在实现设计中继续收敛。D54 对空 summary、意外 tool call、Provider failure 与 cancellation 的严格原子失败语义保持不变。
+- 原因：prompt 直接影响模型保留哪些工作状态，属于需要证据才能改动的行为契约；当前没有真实 DeepSeek 结果证明 Pi prompt 不适用。精确复用还能先建立可比较基线，后续只有结构遵循率、事实保真度或 coding continuation 评测显示具体问题时才做有针对性的修改。
+
+### D57. 首版 budget allocation 沿用 Pi 并对大项目与 Skills 强制复评
+
+- 日期：2026-07-20
+- 决定：固定 DeepSeek coding product profile 拥有 `contextCapacity: 1_000_000` 与 `modelMaxOutput: 384_000`；coding-owned Conversation compaction policy 拥有 D55 的 `threshold: 192_000`、`softCeiling: 64_000`，以及按冻结 Pi 映射的 `retainedRawTarget: 20_000`、`summaryMaxOutput: floor(0.8 * 16_384) = 13_107`、`splitTurnPrefixMaxOutput: 8_192` 和 `providerContextSafety: 4_096`。这些 output 数字都是 request caps，不要求模型填满。
+- Request 边界：`ai.Request` 增加窄的 request-local output limit，由 OpenAI-compatible payload 映射为 `max_tokens`；它只承载调用方已经计算的单次限制，不拥有模型 catalog 或 compaction policy。正常 coding call 参考 Pi 使用 `min(384_000, max(1, 1_000_000 - projectedInput - 4_096))`，summary calls 分别使用 `13_107` 或 `8_192` 并受同一 hard-cap clamp 约束。
+- 预算关系：普通 summary 加 `20K` retained raw 的上限约 `33.1K`；split-turn 两份 summary 加 retained raw 的上限约 `41.3K`。`64K` soft ceiling 的其余空间用于 system prompt、tool schemas、新 input、summary envelope 和确定性 file lists。cut finder 可以为完整 projected budget 减少 retained suffix，但不能丢弃未进入 summary 的消息；D55 规定无法达到 soft ceiling 时的降级与失败语义。
+- 未验证风险：这组数值尚未在真实大型项目或 Skills-enabled context 中证明充分。大项目可能增加 project instructions、相关文件、tool turns 与跨 Run 状态；未来 Skills metadata、按需正文和由 Skills 引导出的 tool results 也会改变静态与动态 context。`20K` retained target、Pi summary 容量和 `64K` soft ceiling 都可能不足，当前不得宣称它们适用于所有项目规模。
+- 延后与复评：Lesson 08 不提高这些值，不实现按仓库大小自动调参，也不提前设计 Skills。至少在 Lesson 09 引入 Skills 时、以及产品声称支持真实长项目任务前，必须用真实仓库和任务测量各 context 来源、compaction 前后 token 分布、soft-ceiling miss rate、compaction 间隔、分桶 coding 完成率、summary continuation 成功率、重复摘要的信息损失和重复读取成本。证据可以要求修改 threshold、soft ceiling、retained target、summary budgets 或 prompt。
+
+### D58. Projected input 以有效 usage 为锚并使 pre-compaction usage 显式失效
+
+- 日期：2026-07-20
+- 决定：`internal/ai` 提供 model-neutral 的 request estimator：优先采用最后一条非 error/aborted 且非零 terminal assistant usage 的 `input + output` 作为已知 prefix，只以 `ceil(characters / 4)` 估算其后的 messages；无有效 usage 时，估算 system prompt、JSON tool schemas、全部 messages 与新 input。coding Conversation 对该完整 projected request 使用 D55 的 `>= 192_000` threshold；Core Agent 对每个正常 request 使用同一 estimator 和 D57 clamp 计算 request-local output limit。
+- Compaction boundary：成功 replacement 会清空 candidate retained assistant 的 usage，并在 private projection metadata 保存 `UsageValidFrom` absolute History index。Conversation 从完整 History 重建 Working Context 时，只有该 boundary 之后的新 assistant usage 可以恢复为锚点；第一次 post-compaction response 之前走完整 fallback 估算。这样无需给公开 message protocol 增加 timestamp 或 compaction role，也不会用压缩前的大 usage 立即重新触发 compaction。
+- 所有权：fixed request limits 由 coding product profile 提供；`ai.RequestLimits` 只实现 model-neutral clamp，`ai.Request.MaxOutputTokens` 只承载一次调用的值；threshold、soft ceiling、retained target、summary prompts、cut、projection 与 failure semantics 仍由 coding-owned Conversation 负责。Provider 只映射 `max_tokens`，不拥有估算或 compaction policy。
+- 精度边界：字符近似是冻结 Pi 基线，不是 tokenizer 等价物。真实 traces 必须比较 estimate 与 Provider-reported input；大型项目、Skills、模型/reasoning/tool schema 或 prompt 变化仍按 D55/D57 强制复评。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -410,3 +461,14 @@
 - 2026-07-19：Lesson 07 按 D46–D51 完成实现：Core Agent 改为 Working Context 加 run-local `NewMessages`，coding-owned 私有 Conversation Owner 提交完整 History，idle-only replacement 提供 Lesson 08 接入点。完整 tests、vet 和 race 通过，课程进入待理解确认且尚未提交。
 - 2026-07-19：学习者确认理解 Lesson 07 的 Core Agent delta、Conversation History commit 与 idle-only replacement 主线，并明确要求提交；课程状态更新为已提交，不夹带 Lesson 08 工作。
 - 2026-07-19：学习者确认长期产品方向为 Orchestrator 驱动的多 Session coding-agent service：通过 Gateway 和 IM 创建、推进任务，并要求 Session 持久化、恢复、并发隔离；当前只记录策略与责任方向，不提前设计实现。
+- 2026-07-20：学习者明确开始 Lesson 08。开课源码校准确认 threshold compaction 仍是一个可进入的 Large 闭环：Pi 以有效 Provider usage 为主要预算事实、近似估算 usage 后的尾部，在 coding-owned `AgentSession` 边界生成 summary、保留 protocol-valid suffix 并替换 working messages；当前 pi-go 已有 usage、独立 History owner 与 idle-only Working Context replacement，因此本课不需要先引入 tokenizer、Session persistence、branch 或事件系统。具体 budget owner、cut granularity、summary 表达和失败语义留待本课讨论后形成新决定。
+- 2026-07-20：学习者确认 Lesson 08 采用 protocol-safe message-level cut：可以在一个长 Run 内从 user 或 assistant message 开始保留，绝不从 tool result 或 message 内部切分；若切进 Run，中间被移除的 prefix 进入 summary，完整 History 保持原样。该语义记录为 D53。
+- 2026-07-20：学习者确认 Lesson 08 在下一次 Run 接受新 input 前执行 lazy threshold compaction；summary 或 replacement 失败时旧 History、Working Context 和 projection metadata 全部不变，新 input 未接受，commit 后的取消不回滚合法 projection。该 lifecycle 与失败语义记录为 D54。
+- 2026-07-20：针对 1M window 是否会降低 coding 质量继续核对产品和研究证据。DeepSeek V4 官方 MRCR 曲线在 128K 后出现可见退化，coding 长上下文研究也显示未过滤长输入可能降低真实仓库修复表现；因此冻结 Pi 在 1M model 上约 983616 tokens 才触发的 capacity-oriented 默认值不能直接成为 pi-go 的 quality policy。当前提出 projected input `128K` between-Runs quality-oriented threshold、`32K–64K` 正常高信号区间作为待验证假设，并明确它不是 active Run 内每次 Provider call 的 hard ceiling；尚未形成新 durable decision。
+- 2026-07-20：学习者要求明确保留 ceiling 复评义务，并指出“在同一 Run 内选择 cut point”容易被误读为“active Run 内触发 compaction”。课程记录已澄清：D53 只允许事后切入一个 settled Run 的消息序列，D54 的执行时机严格位于两个 Runs 之间；`128K` 与 `32K–64K` 仅为首版可测参数，必须依据后续 DeepSeek coding 分桶评测以及模型、reasoning mode、tools 或 summary policy 的变化重新校准。
+- 2026-07-20：重新对照当前代码后保持 D54 的 between-Runs 范围。Conversation Owner 只能在 `core.Run()` 返回后取得完整 delta，而 Core Agent 明确拒绝 active-time Working Context replacement；因此 run 内 compaction 不是同级参数选择，而会要求新的增量状态所有权和 safe point。当前 read/bash 结果已有单次 50 KiB 模型可见上限，且尚无单个 Run 经常超过候选阈值的 trace 证据；该风险保留为显式缺口，出现真实越界或 coding 质量分桶证据后再拆分能力。
+- 2026-07-20：参考 Codex 通用客户端约 `244.8K` 默认 auto-compaction 点与高强度长任务评测每 `100K` compaction 的两端，并结合 DeepSeek 在 128K 后开始退化及 pi-go 仅有普通文本 summary 的差异，学习者委托确定首版折中值：projected Provider input `192K` 触发、普通情况以 `64K` 为 post-compaction soft ceiling。该 policy 记录为 D55，并保留按真实 coding 长度分桶强制复评的义务。
+- 2026-07-20：学习者说明尚未逐字 review summary prompt，并要求没有特殊理由时继续沿用 Pi。重新核对冻结源码后没有发现 DeepSeek 或当前内存边界要求改写 prompt；因此首次/update/split-turn 三套 prompt、对话序列化、tool-result summary truncation、file-operation tags 与 synthetic user-message projection 按 Pi 建立首版基线，排除 branch/extensions/persistence，并记录为 D56。
+- 2026-07-20：学习者确认首版 budget allocation 参考 Pi，并要求把 `64K` 澄清为不要求填满的 soft ceiling。课程采用 `20K` retained raw、`13,107` initial/update summary、`8,192` split-turn prefix 和 `4,096` Provider safety；同时明确记录这组值可能不足以支撑真实大型项目，尤其未来 Skills 会改变 context 组成。当前不解决或自动调参，待 Skills 引入及真实长项目验证时强制复评。该决定记录为 D57。
+- 2026-07-20：学习者要求开始实现，并在实现后展开说明无精确 tokenizer 时如何判断下一次请求达到 `192K`。实现采用最后有效 Provider usage 加尾部 `ceil(characters / 4)`、无 usage 时完整 request fallback，并在 compaction 后使旧 usage 显式失效；所有权和精度边界记录为 D58。
+- 2026-07-20：Lesson 08 首版实现和最终审查完成。request-local output clamp、between-Runs lazy compaction、Pi prompts、message-level cut、重复 summary、完整 History/Working Context 分离以及失败、取消、并发和 protocol 校验均有确定性测试；审查把连续 cut point 前移的重复线性扫描收敛为二分查找，并补齐 projected input 恰好等于 threshold 的测试。`make check` 与 `go test -race ./...` 全部通过，课程进入待理解确认且尚未提交。
