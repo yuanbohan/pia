@@ -16,6 +16,7 @@ deepened: 2026-07-19
 - **Objective:** 交付第一版可真实使用的 one-shot coding agent，让临时命令 `pia` 在当前工作目录中接收一个任务、调用 DeepSeek 和四个 coding tools，并只输出最终回答。
 - **Product authority:** 本计划的 Product Contract 是本次工作的产品契约；它在冲突处取代 `docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 的 Lesson 06 旧设定。冻结 Pi 源码只提供语义和设计证据，不自动成为 pi-go 的需求。
 - **Later ownership refinement:** Lesson 07 的 D46–D51 后续修正了内部消息所有权：`internal/coding` 的私有 Conversation Owner 保存完整 History，`internal/agent` 保存 Working Context 并返回 run-local delta。本计划的 one-shot prompt、输出、trace 和验收契约不变；下文旧的“Agent owns transcript”只描述 Lesson 06 当时的实现，不再定义当前内部 API。
+- **Prompt correction evidence:** 2026-07-20 的冻结 Pi prompt 对齐使更早的 streak 失效；逐段 review 并消除 identity、append placement 与 instruction newline 的可避免差异后，最终 prompt 在 fresh `attempts/005`、`006` 中连续完成相同 Fibonacci 修复、测试判别和程序验证，新基线计数为 `2/2`。
 - **Execution profile:** 在现有 `internal/ai`、`internal/agent`、`internal/coding` 分层上完成代码、离线测试、文档与本地真实模型验收。
 - **Stop condition:** 只有两个互相独立、从原始错误项目复制出的全新 workspace 连续通过专家验收，才算达到本计划的真实模型里程碑。
 - **Open blockers:** 无阻塞规划的问题；临时 trace 契约和具体文件布局可在技术规划中收敛。
@@ -41,7 +42,7 @@ pi-go 已有模型协议、DeepSeek Provider、Agent loop 和 `read`、`write`�
 - **`pia` 只是临时命令名。** (session-settled: user-directed — chosen over 在本阶段确定最终品牌名: 命名不应阻塞真实闭环。) 本阶段不围绕它建立稳定 SDK、配置命名或品牌承诺。
 - **one-shot 默认只输出最终回答。** (session-settled: user-directed — chosen over 实时显示 thinking、tool call 和 bash output: 真正的实时体验留给后续 TUI。) 正常运行不显示进度，也不显示数据披露警告。
 - **模型配置固定。** (session-settled: user-directed — chosen over 第一版提供模型、thinking 和 effort 配置矩阵: 单一配置更利于收敛首个真实验收。) 使用 `deepseek-v4-pro`，明确开启 thinking，并使用 high reasoning effort。
-- **Coding Application 组装一个稳定 system prompt。** (session-settled: user-approved — chosen over 完整复制 Pi resource loader 或让 Provider 拼接 coding 指令: 这保持 Pi 的责任边界，同时只承诺当前能力。) Prompt 是对 Pi 语义的最小移植，不复制其完整产品身份和扩展机制。
+- **Coding Application 组装一个稳定 system prompt。** (session-settled: user-directed — chosen over 自由改写 Pi prompt 或完整复制 Pi resource loader: 后续横向评测需要尽量控制 prompt 与 workflow 变量。) Prompt 的 identity 只把 `pi` 替换为 `pia`，保留冻结 Pi 的 tool snippets、tool guidelines 和默认 body 顺序，再在对应 `appendSystemPrompt` seam 加入现有 headless one-shot、安全修改与验证指导；project-context framing 与 cwd 顺序保持一致，Pi docs、custom tools、Skills、extensions 和多层 resource loading 等未实现能力仍明确省略。
 - **任务成功由外部验收判断。** (session-settled: user-directed — chosen over 从 assistant 文本或 Agent loop 退出推断任务成功: 模型声明与项目事实可能不一致。) 正常完成 model/tool loop 即可返回成功进程状态。
 - **真实验收项目只保存在被忽略的 `tmp/`。** (session-settled: user-directed — chosen over 提交 fixture、生成器、隐藏测试或 harness: 当前目标是由专家迭代首个真实能力，而不是维护 benchmark 子系统。)
 - **要求两次连续全新运行成功。** (session-settled: user-approved — chosen over 一次成功即完成: 真实模型存在随机性，一次通过不足以证明闭环已收敛。)
@@ -82,9 +83,9 @@ flowchart TB
 **Application composition and context**
 
 - R5. `internal/coding` 必须拥有 one-shot coding composition；`cmd/pia` 只处理参数、环境、OS signal、输出和退出状态。
-- R6. Coding Application 必须向 Agent 提供一个稳定 system prompt，其中包含临时 identity、四个真实工具的简洁使用指引、当前 workspace 路径和根目录项目指令。
+- R6. Coding Application 必须向 Agent 提供一个稳定 system prompt，其中 identity 只把 `pi` 替换为 `pia`，冻结 Pi 的四工具 snippets/guidelines 与全局 guidelines 保持默认 body 顺序，pia-only guidance 在对应 append seam 加入，project-context framing 与 cwd 顺序保持一致。
 - R7. 项目指令必须只读取 workspace 根目录中第一个存在的 `AGENTS.md`、`AGENTS.MD`、`CLAUDE.md` 或 `CLAUDE.MD`，优先级按此顺序；本阶段不得向祖先目录或全局资源目录扩展发现范围。
-- R8. System prompt 必须是针对 pi-go 实际能力的语义移植，不得声称支持 Skills、trust、extensions、custom prompts、Session 或其他未实现的 Pi 功能。
+- R8. System prompt 必须以冻结 Pi 默认 prompt 为可比较基线，同时不得声称支持 Pi docs、custom tools、Skills、trust、extensions、custom prompts、Session 或其他未实现的 Pi 功能。
 - R9. 通用 `internal/agent` 和 `internal/ai` 契约不得加入 workspace、CLI 或 coding-prompt 专用字段。
 
 **Provider and execution safety**
@@ -197,7 +198,7 @@ Product Contract changed in R3, R11, R12 and R15 without changing the settled pr
 - KTD2. **Keep `pia` temporary.** The name appears in the local command, help/error context and docs, but does not create public packages, stable config or compatibility promises. (session-settled: user-directed — chosen over blocking this milestone on final branding: naming should not delay the real loop.)
 - KTD3. **Project only the final answer.** The one-shot path consumes the complete Conversation History snapshot after Run settlement and never adds an Agent event sink or Tool progress callback. (session-settled: user-directed — chosen over live thinking, tool-call and bash display: real-time presentation belongs to a future TUI consumer.)
 - KTD4. **Freeze the first product model.** The coding composition uses `deepseek-v4-pro` with DeepSeek thinking enabled and `reasoning_effort=high`; the lower Provider stays configurable for its existing tests and other internal consumers. (session-settled: user-directed — chosen over a Phase 1 model and reasoning configuration matrix: one fixed profile makes the first real acceptance comparable.)
-- KTD5. **Assemble one coding-owned system prompt.** The prompt describes only the current identity, four tools, coding guidance, root project instructions and canonical cwd; Agent and Provider contracts still receive one string. (session-settled: user-approved — chosen over copying Pi's complete resource loader or moving coding prose into the Provider: this preserves Pi's ownership boundary without claiming unsupported features.)
+- KTD5. **Preserve an adapted frozen-Pi system prompt.** The coding-owned prompt changes only `pi` to `pia` in the identity, keeps the frozen Pi four-tool/default-guideline body contiguous, appends explicit pia/headless/safety guidance at Pi's application-specific seam, and preserves project-context framing and canonical cwd order. Agent and Provider contracts still receive one string, and unsupported Pi product sections remain absent. (session-settled: user-directed — chosen over free-form pi-go wording or copying Pi's complete resource loader: later horizontal evaluation needs prompt differences to stay narrow and attributable.)
 - KTD6. **Keep process success separate from task success.** A nil Agent Run error maps to a zero CLI exit even when later expert checks reject the code; no assistant phrase, tool sequence or Goal Runtime field can self-certify the task. (session-settled: user-directed — chosen over inferring success from the assistant response or loop termination: repository facts are authoritative.)
 - KTD7. **Keep real acceptance local and ignored.** Only `.gitignore` changes in the repository; baseline, run copies, prompts and traces live under ignored `tmp/` and no fixture or harness package is added. (session-settled: user-directed — chosen over a tracked benchmark fixture and hidden harness: the current milestone needs expert iteration, not permanent eval infrastructure.)
 - KTD8. **Require two fresh consecutive successes.** Each success starts a new `pia` process and copies the same untouched baseline; any product code, system prompt or acceptance-task change resets the count. (session-settled: user-approved — chosen over accepting one successful model sample: one pass is too sensitive to model variance.)
@@ -280,7 +281,7 @@ flowchart TB
 ### Implementation Constraints
 
 - Reuse `internal/coding/tools/fileutil.OpenRegularFile` for pinned, nonblocking regular-file validation; do not duplicate FIFO/symlink opening policy or relocate the package without new evidence.
-- Reuse the actual `Tool.Definition` schemas in Agent requests and trace context; do not create a second descriptive tool registry.
+- Reuse the actual `Tool.Definition` schemas in Agent requests and trace context. Keep the separate model-visible snippets and guidelines limited to the four frozen-Pi prompt entries, with an exact adapted-baseline test so later wording drift is deliberate and reviewable.
 - Keep API key values out of result and trace metadata. The no-redactor boundary intentionally allows model-requested commands to copy inherited environment data into ordinary tool results.
 - Keep code comments in English and explain only evidence-backed, non-obvious choices such as stable prompt snapshots, no-fallback context precedence, post-settlement trace timing and the temporary command/model configuration.
 - Do not add Fibonacci wording, result values or acceptance-specific behavior to production prompt or code.
@@ -350,7 +351,7 @@ flowchart TB
 
 **Files:** `internal/coding/prompt.go`, `internal/coding/prompt_test.go`.
 
-**Approach:** Assemble fresh pi-go wording for the temporary identity, the four fixed tool roles, concise coding guidance, one optional root instruction file and canonical cwd. Discover the first candidate by `Lstat`, open it through the existing workspace root regular-file helper, enforce the 50 KiB UTF-8 contract, and keep the resulting string unchanged for the Run.
+**Approach:** Start from the frozen Pi default prompt structure and reusable identity/tool/guideline wording. Replace only `pi` with `pia` in the identity, omit unsupported Pi product sections, append the existing pia headless/safety guidance after the contiguous default body, and preserve Pi-style project-context framing/cwd placement around one optional root instruction file. Discover the first candidate by `Lstat`, open it through the existing workspace root regular-file helper, enforce the 50 KiB UTF-8 contract, and keep the resulting string unchanged for the Run.
 
 **Execution note:** Start with prompt and context-precedence tests so size, invalid-file and no-fallback behavior are settled before Runtime composition.
 
@@ -358,8 +359,8 @@ flowchart TB
 
 **Test scenarios:**
 
-1. With no instruction candidate, the prompt contains the temporary identity, exactly the four real tool names, concise guidance and canonical cwd, with no empty project-context section.
-2. Covers AE3. With both `AGENTS.md` and `CLAUDE.md`, only the former is embedded; with only `CLAUDE.MD`, that candidate is embedded.
+1. With no instruction candidate, the complete string matches the reviewed frozen-Pi baseline plus explicit pia adaptations, contains exactly the four real tool names and canonical cwd, and has no empty project-context section.
+2. Covers AE3. With both `AGENTS.md` and `CLAUDE.md`, only the former is embedded; with only `CLAUDE.MD`, that candidate is embedded; newline-terminated content retains Pi's additional template framing newline.
 3. Ancestor and child-directory instruction files are ignored, and a symlink cwd produces the canonical workspace path.
 4. An internal symlink to a regular instruction file succeeds; an escaping or dangling higher-priority symlink fails without exposing target content or falling back.
 5. A directory, FIFO, unreadable file, invalid UTF-8 or content over 50 KiB fails before any Provider request and does not fall through to a valid lower-priority candidate.
@@ -461,6 +462,8 @@ flowchart TB
 **Verification:** Lesson and repository docs agree with the final code; both retained clean-run workspaces pass expert validation and prove test discrimination; no acceptance artifact appears in `git ls-files`.
 
 **Execution result (2026-07-19):** After the final product, prompt and task freeze, `attempts/001` and `attempts/002` each started a new `pia` process from a fresh copy of the untouched baseline. Both produced a general non-negative Fibonacci base-case fix, added meaningful table tests, passed `go test ./...`, and printed `55` from `go run .`; moving each generated test file back onto its original buggy copy failed on incorrect Fibonacci values. The retained evidence is under ignored `tmp/pia-acceptance/attempts/{001,002}` and `tmp/pia-acceptance/evidence/{001,002}.json`, and no acceptance artifact is tracked.
+
+**Prompt-alignment execution result (2026-07-20):** After a line-by-line frozen-Pi review, the final prompt narrowed identity to `pi -> pia`, moved all pia-only guidance to the application append seam, and restored instruction-content newline framing. `attempts/005` and `attempts/006` then used the same rebuilt binary and unchanged task in separate fresh baseline copies. Both produced a general non-negative Fibonacci base-case fix, added meaningful tests, passed `go test ./...`, printed `55`, and supplied tests that failed on the original buggy implementation. The retained evidence is under ignored `tmp/pia-acceptance/attempts/{005,006}` and `tmp/pia-acceptance/evidence/{005,006}.json`.
 
 ---
 

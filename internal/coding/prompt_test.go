@@ -1,6 +1,7 @@
 package coding
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,28 +24,37 @@ func TestBuildSystemPromptUsesCanonicalWorkspaceAndRealTools(t *testing.T) {
 		t.Fatalf("build system prompt: %v", err)
 	}
 
-	for _, fragment := range []string{
-		"You are pia, a coding agent",
-		"Current working directory: " + workspace.Path(),
-		"Run relevant checks",
-		"Keep the final response concise",
-	} {
-		if !strings.Contains(prompt, fragment) {
-			t.Errorf("prompt does not contain %q\n%s", fragment, prompt)
-		}
-	}
-	for _, tool := range tools {
-		schema := tool.Definition().Schema
-		fragment := "- " + schema.Name + ": " + schema.Description
-		if !strings.Contains(prompt, fragment) {
-			t.Errorf("prompt does not describe actual tool %q\n%s", schema.Name, prompt)
-		}
-	}
-	if strings.Contains(prompt, link) {
-		t.Fatalf("prompt contains non-canonical workspace path %q\n%s", link, prompt)
-	}
-	if strings.Contains(prompt, "Project instructions from") {
-		t.Fatalf("prompt contains an empty project-instructions section\n%s", prompt)
+	want := fmt.Sprintf(`You are an expert coding assistant operating inside pia, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+
+Available tools:
+- read: Read file contents
+- bash: Execute bash commands (ls, grep, find, etc.)
+- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call
+- write: Create or overwrite files
+
+Guidelines:
+- Use bash for file operations like ls, rg, find
+- Use read to examine files instead of cat or sed.
+- Use edit for precise changes (edits[].oldText must match exactly)
+- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls
+- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.
+- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.
+- Use write only for new files or complete rewrites.
+- Be concise in your responses
+- Show file paths clearly when working with files
+
+Complete the user's coding task autonomously in the selected workspace. Inspect the project, make focused changes, and verify the result before responding.
+
+Additional pia guidelines:
+- Read relevant files before changing them, and preserve unrelated user work.
+- Prefer focused, reviewable changes over speculative redesign.
+- Treat tool errors as information: inspect the result and recover when possible.
+- Run relevant checks after changes, and do not claim success without verification.
+- Summarize the result and verification in the final response.
+
+Current working directory: %s`, workspace.Path())
+	if prompt != want {
+		t.Fatalf("system prompt does not match the adapted frozen-Pi baseline\ngot:\n%s\n\nwant:\n%s", prompt, want)
 	}
 }
 
@@ -65,6 +75,14 @@ func TestBuildSystemPromptInstructionPrecedence(t *testing.T) {
 			wantName:    "AGENTS.md",
 			wantContent: "agents guidance",
 			notContent:  "claude guidance",
+		},
+		{
+			name: "newline-terminated AGENTS md preserves Pi framing",
+			files: map[string]string{
+				"AGENTS.md": "newline-terminated guidance\n",
+			},
+			wantName:    "AGENTS.md",
+			wantContent: "newline-terminated guidance\n",
 		},
 		{
 			name: "uppercase CLAUDE fallback",
@@ -98,11 +116,20 @@ func TestBuildSystemPromptInstructionPrecedence(t *testing.T) {
 			if err != nil {
 				t.Fatalf("build system prompt: %v", err)
 			}
-			if !strings.Contains(prompt, "Project instructions from "+test.wantName+":") {
-				t.Fatalf("prompt does not identify selected instructions\n%s", prompt)
-			}
-			if !strings.Contains(prompt, test.wantContent) {
-				t.Fatalf("prompt does not contain selected instructions\n%s", prompt)
+			instructionPath := filepath.Join(workspace.Path(), test.wantName)
+			wantSuffix := fmt.Sprintf(`<project_context>
+
+Project-specific instructions and guidelines:
+
+<project_instructions path="%s">
+%s
+</project_instructions>
+
+</project_context>
+
+Current working directory: %s`, instructionPath, test.wantContent, workspace.Path())
+			if !strings.HasSuffix(prompt, wantSuffix) {
+				t.Fatalf("prompt does not preserve the frozen-Pi project context and cwd order\ngot:\n%s\n\nwant suffix:\n%s", prompt, wantSuffix)
 			}
 			if test.notContent != "" && strings.Contains(prompt, test.notContent) {
 				t.Fatalf("prompt contains lower-priority instructions\n%s", prompt)
@@ -140,7 +167,7 @@ func TestBuildSystemPromptIgnoresAncestorAndChildInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build system prompt: %v", err)
 	}
-	if strings.Contains(prompt, "guidance") || strings.Contains(prompt, "Project instructions from") {
+	if strings.Contains(prompt, "guidance") || strings.Contains(prompt, "<project_context>") {
 		t.Fatalf("prompt discovered instructions outside the workspace root\n%s", prompt)
 	}
 }
