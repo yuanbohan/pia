@@ -4,6 +4,8 @@
 
 已提交；`read`、`write`、`edit` 与 `bash` 子阶段都已完成冻结 Pi 源码核对、corner-case 讨论、测试先行实现、全仓验证和学习者确认。
 
+后续修正（2026-07-20）：本课记录的是 Lesson 05 提交时的 workspace-only 文件边界。Lesson 09 的 D60 已有意扩展 `read`：relative path 仍受 `os.Root` containment，absolute host path 可以读取 workspace 外 regular file；`write` 与 `edit` 保持本课边界。下文未逐段改写的“所有文件工具都限制在 workspace”均按这一修正理解。
+
 开课记录：第 04 课已经完成、提交并 push 到 `main`。学习者确认第 05 课主要进入具体 Tool 实现，并要求按 `read`、`write`、`edit`、`bash` 一个个讲解和推进；本课先对齐共同 Tool 契约与 workspace 所有权，再逐个完成解释、讨论、实现和测试。
 
 ## 本课目标

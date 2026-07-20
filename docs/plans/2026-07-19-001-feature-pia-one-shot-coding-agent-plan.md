@@ -11,6 +11,8 @@ deepened: 2026-07-19
 
 # Pia One-Shot Coding Agent - Plan
 
+> **Post-plan correction (2026-07-20):** D59 establishes Pia as the product name while the current CLI contract remains unstable. D60 expands only `read` to absolute host paths outside the workspace; `write` and `edit` remain contained. References below to a temporary name or all file tools being workspace-only describe the Lesson 06 baseline and are superseded for current behavior.
+
 ## Goal Capsule
 
 - **Objective:** 交付第一版可真实使用的 one-shot coding agent，让临时命令 `pia` 在当前工作目录中接收一个任务、调用 DeepSeek 和四个 coding tools，并只输出最终回答。

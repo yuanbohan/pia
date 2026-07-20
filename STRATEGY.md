@@ -1,9 +1,9 @@
 ---
-name: pi-go
-last_updated: 2026-07-19
+name: Pia
+last_updated: 2026-07-20
 ---
 
-# pi-go Strategy
+# Pia Strategy
 
 ## Target problem
 
@@ -11,11 +11,11 @@ last_updated: 2026-07-19
 
 ## Our approach
 
-以冻结的 Pi coding agent 作为语义基线、能力下限和公平对照，用 Go 原生方式建立结构一致、可解释、可测试的核心系统。持续研究其他优秀开源 coding agent 以及 Codex、Grok 等可获得的工程证据；只有当候选机制能融入既有责任边界，并通过受控、重复评测证明收益时才吸收。
+以冻结的 Pi coding agent 作为语义基线、能力下限和公平对照，用 Go 原生方式建立结构一致、可解释、可测试的核心系统。Skills 是 Pia 的内建 coding 能力：先用 project-local Pia Skill v1 建立最小可靠闭环，再分阶段扩展到 Agent Skills 可移植契约及 Claude Code/Codex 社区兼容，而不是一次性复制完整厂商 runtime。持续研究其他优秀开源 coding agent 以及 Codex、Grok 等可获得的工程证据；只有当候选机制能融入既有责任边界，并通过受控、重复评测证明收益时才吸收。
 
 ## Who it's for
 
-**Primary:** 正在研究和构建 coding agent 的软件工程师——他们使用 pi-go，把不同 agent 中分散的设计证据转化成结构一致、可理解、可测试、可持续演进的 Go coding agent，并客观判断每次演进是否真正提升了 coding 能力。
+**Primary:** 正在研究和构建 coding agent 的软件工程师——他们使用 Pia，把不同 agent 中分散的设计证据转化成结构一致、可理解、可测试、可持续演进的 Go coding agent，并客观判断每次演进是否真正提升了 coding 能力。
 
 ## Key metrics
 
@@ -29,7 +29,7 @@ last_updated: 2026-07-19
 
 ### Coding Capability Core
 
-建设 Go-native 的模型循环、工具、上下文管理和 coding 能力，使 Pi parity 成为能力下限，并为吸收更有效的 agent 机制提供一致核心。
+建设 Go-native 的模型循环、工具、上下文管理、Agent Skills 和 coding 能力，使 Pi parity 成为能力下限，并为吸收更有效的 agent 机制提供一致核心。
 
 _Why it serves the approach:_ 没有可靠且边界清楚的核心，外部机制无法安全组合，也无法公平比较。
 
@@ -55,4 +55,4 @@ _Why it serves the approach:_ 评测把“看起来更强”转化为可验证�
 
 - 不机械复制 Pi 或其他 agent 的文件结构、API 形状和完整功能清单。
 - 不因为某个机制流行或单次演示成功，就在缺少责任边界和对照证据时加入产品。
-- 不从单个 fixture、单次模型运行或主观体验中宣称 pi-go 已经超过 Pi。
+- 不从单个 fixture、单次模型运行或主观体验中宣称 Pia 已经超过 Pi。

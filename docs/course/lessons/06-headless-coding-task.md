@@ -4,6 +4,8 @@
 
 Lesson 06 的原始实现、真实验收和学习者理解确认均已完成并提交。2026-07-20 为后续 Pi 横向评测重新对齐 coding prompt；随后只做业务职责命名重构，prompt、workflow 与任务文字均未改变。两次调整都按 D23 重置旧 streak，当前二进制已由两个连续的 fresh DeepSeek 进程从 untouched baseline 独立完成同一 bug 修复，验收状态为 `2/2`。
 
+后续修正（2026-07-20）：D59 已把 Pia 确定为产品名，只有当前 CLI contract 仍不稳定；D60 已允许 `read` 使用 workspace 外 absolute host path。下文“临时命令名”和“所有文件工具 workspace-only”保留为 Lesson 06 当时的历史契约，不再描述当前 Pia。
+
 ## 学习目标
 
 本课把前五课已经独立验证的 AI 协议、Agent loop、DeepSeek Provider 和四个 coding tools 组合成第一个真实可运行的 coding agent。重点不是增加新的 Agent 能力，而是确定应用层与进程边界：谁拥有 system prompt、workspace、Provider profile、OS signal、输出和调试 trace。

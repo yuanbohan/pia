@@ -4,6 +4,8 @@
 
 第一期通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。后续课程继续迁移 coding-relevant 能力，以 Pi parity 为下限，并通过受控评测追求稳定超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为；长期产品方向、指标和投入领域以根目录 [`STRATEGY.md`](../../STRATEGY.md) 为准。
 
+产品名统一为 **Pia**；`pi-go` 只保留为当前仓库、目录和 Go module 标识，旧课程记录中的历史称呼不做机械改写。
+
 固定参考基线：
 
 - Pi commit：`dcfe36c79702ec240b146c45f167ab75ecddd205`
@@ -106,7 +108,7 @@ flowchart LR
 | 03 | 多轮 Tool Loop 与屏障式调度 | schema、参数校验、tool results、错误继续、只读并行和串行屏障 | 已提交 |
 | 04 | DeepSeek Provider | OpenAI-compatible 消息转换、SSE、reasoning、tool calls、usage 和错误映射 | 已提交 |
 | 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 已提交 |
-| 06 | Headless coding task | 临时 `pia` 入口、coding prompt、final-only 输出和本地 Go bug-fix 验收 | 已提交 |
+| 06 | Headless coding task | 当前 `pia` 本地入口、coding prompt、final-only 输出和本地 Go bug-fix 验收 | 已提交 |
 
 ## 后续课程的滚动式大纲
 
@@ -130,8 +132,9 @@ flowchart LR
 | 阶段内课次 | 全局课次 | 解锁的闭环 | Pi 的大致做法 | pi-go 本课边界 | 结束信号 | 依赖 | 规模 | 状态 |
 |---|---:|---|---|---|---|---|---|---|
 | 二期 01 | 07 | [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md) | `SessionManager` 保存完整 session entries 并构造上下文，core `Agent` 持有 working messages，每次模型调用再生成 request-local view | 只建立三种角色的内存所有权边界；不做 compaction、持久化或 Skills | history 与 working context 的所有权独立，Provider 不能反向修改任何 owner | 06 | Large | 已提交 |
-| 二期 02 | 08 | [Context budget 与 compaction 核心](lessons/08-context-budget-and-compaction.md) | `AgentSession` 在 `agent_end` 后和新 prompt 前检查阈值；compaction core 摘要旧内容并保留 protocol-valid 近期后缀，`SessionManager` 重建 model context | 只完成 settled Run 后、下一次 Provider call 前的 threshold compaction 闭环；不含 context-overflow retry、branch summary 或持久化 | 人为缩小 budget 后，两次顺序 Run 之间可触发压缩；下一次 request 使用 summary 加保留后缀，完整 History 仍保留原始消息 | 07 | Large | 进行中：实现与质量门完成，待理解确认与提交 |
-| 二期 03 | 09 | Skills 与渐进披露 | `skills.ts` 发现有界 metadata，system prompt 只暴露索引，模型匹配后再读取正文 | 只建设最小 Skills 发现与按需读取；不扩成完整 ResourceLoader、extensions 或 MCP | 适用 Skill 可被发现和读取，而未使用 Skill 的正文不占据初始上下文 | 07 | Medium | 待开始 |
+| 二期 02 | 08 | [Context budget 与 compaction 核心](lessons/08-context-budget-and-compaction.md) | `AgentSession` 在 `agent_end` 后和新 prompt 前检查阈值；compaction core 摘要旧内容并保留 protocol-valid 近期后缀，`SessionManager` 重建 model context | 只完成 settled Run 后、下一次 Provider call 前的 threshold compaction 闭环；不含 context-overflow retry、branch summary 或持久化 | 人为缩小 budget 后，两次顺序 Run 之间可触发压缩；下一次 request 使用 summary 加保留后缀，完整 History 仍保留原始消息 | 07 | Large | 已提交 |
+| 二期 03 | 09 | [Pia Project Skills v1 的发现与基础披露](lessons/09-skill-discovery-and-bounded-catalog.md) | `skills.ts` 先暴露 bounded metadata，并让模型用普通 `read` 按需读取正文 | 只发现 selected workspace 的 `.pia/skills/<direct-child>/SKILL.md`，解析最小 name/description catalog，并复用普通 `read` 建立基础使用闭环；不做 community/global sources 或 managed activation | initial request 只有 bounded metadata；匹配后普通 `read` 才得到 instructions，其他 roots 和正文均不自动进入 context | 07、08 | Medium | 已提交 |
+| 二期 04 | 10 | [受管理的 Skill 激活与 Context Continuity](lessons/10-skill-activation-and-context-continuity.md) | Pi 使用普通 `read`；Agent Skills guide 另推荐 dedicated activation、dedupe 与 compaction protection | 把 Lesson 09 的普通 read 使用升级为稳定 identity、结构化 instructions、去重和 compaction continuity；不同时加入 community/global discovery 或完整 resources runtime | Skill 只在选择后结构化注入一次，compaction 后指令仍有明确 model-visible 表达 | 08、09 | Large | 未开始 |
 
 这些行有意不回答具体 Go 类型、package 布局、token estimator、摘要 prompt、Skills 搜索优先级或全部 corner cases。真正进入某课时，先把那一行扩展为本课文档；如果扩展后估算变成 XLarge，就在实现前重新拆课和编号。
 
@@ -139,7 +142,9 @@ flowchart LR
 
 | 阶段方向 | Pi 的大致做法 | 当前判断 | 何时细化 |
 |---|---|---|---|
-| Runtime 韧性 | `AgentSession` 对可恢复 Provider 错误做有界退避，并把 context overflow 交给 compaction 路径 | Provider retry、执行预算与循环保险丝可能不是同一课，不能现在打包 | Lesson 09 完成后，依据真实长任务失败重新拆分 |
+| Agent Skills 与社区兼容扩展 | Pi、Claude Code 与 Codex 支持更多 source scopes、metadata、symlink、resources 和 invocation/runtime 行为 | 在 Pia Skill v1 和 managed activation 稳定后，再分别评估 `.agents`/`.claude` project roots、global scopes、完整 Agent Skills、supporting resources 与 vendor semantics；整体是 XLarge，必须拆课 | Lesson 10 完成且真实 Pia Skills 使用暴露兼容需求后逐项编号 |
+| 项目指令兼容增强 | 冻结 Pi 从 global agent dir 和 ancestor directories 读取每层第一个 `AGENTS.md`/`CLAUDE.md`；Codex 与 Claude 的层级、候选和 lazy-loading 语义不同 | Lesson 06 已完成 workspace-root `AGENTS.md` 优先、`CLAUDE.md` fallback 的最小支持；完整 project-only instruction chain 是独立于 Skills 的 prompt/context 能力，不并入 Lesson 09/10，也不扫描 user/global instructions | Lesson 10 后，或 monorepo/nested-workspace 需求出现时，先校准 project root、启动目录和按需子目录语义再编号 |
+| Runtime 韧性 | `AgentSession` 对可恢复 Provider 错误做有界退避，并把 context overflow 交给 compaction 路径 | Provider retry、执行预算与循环保险丝可能不是同一课，不能现在打包 | Lesson 10 完成后，依据真实长任务失败重新拆分 |
 | 事件与文本交互 | core Agent 和 `AgentSession` 发出语义事件，并用 steering/follow-up queues 接收运行中的输入 | 整体是 XLarge 方向；事件契约和文本交互至少需要分别形成闭环 | 出现第一个真实 headless consumer 时细化 |
 | Session 持久化与恢复 | `SessionManager` 保存版本化记录，并从记录重建 active context | 存储格式与恢复生命周期是两个候选责任，不预先合课 | 内存上下文和 compaction 契约稳定后细化 |
 | Orchestration、Gateway 与 IM | Pi 的 coding core 提供 Session 生命周期与事件，但不替 pi-go 定义外部服务拓扑 | Orchestrator 需要协调多个隔离 Session，Gateway 与 IM adapters 只做外层接入；整体是 XLarge 方向，必须按已证明的 Session、事件和任务生命周期责任拆分 | Session 持久化/恢复和非 UI 事件消费者稳定后细化 |
@@ -150,7 +155,7 @@ Goal Runtime、Orchestrator/Agent Manager、Gateway、公共 SDK、gRPC、IM、�
 
 ### 长期 coding 能力与评测目标
 
-最终目标不是“代码结构像 Pi”，而是在完成 coding-relevant 能力迁移后，让 Pi parity 成为能力下限，并用稳定、可重复的评测追求 pi-go 的 coding 能力持续超过冻结的 Pi coding-agent 基线。Pi 仍是语义基线和主要对照组；其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据用来提供候选机制与工程经验。
+最终目标不是“代码结构像 Pi”，而是在完成 coding-relevant 能力迁移后，让 Pi parity 成为能力下限，并用稳定、可重复的评测追求 Pia 的 coding 能力持续超过冻结的 Pi coding-agent 基线。Pi 仍是语义基线和主要对照组；其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据用来提供候选机制与工程经验。
 
 正式评测至少遵守以下约束：
 
@@ -182,7 +187,7 @@ Lesson 06 被忽略的本地 fixture 和人工复核只证明第一期闭环，�
 
 ```text
 pi-go/
-├── cmd/pia/                   # 临时 one-shot 本地入口
+├── cmd/pia/                   # 当前 one-shot 本地入口
 ├── internal/
 │   ├── ai/                    # 消息、ai.Provider、stream 和通用模型协议
 │   │   └── provider/          # 具体 Provider 实现的归类目录，不是 registry
@@ -197,8 +202,8 @@ pi-go/
 └── go.mod
 ```
 
-`internal/` 是当前的有意选择：接口会随学习不断校正。临时 `cmd/pia` 把启动时的当前目录作为 workspace，只接收一条 task prompt，用于本地运行与验收，不承诺名称、参数或稳定外部协议。等核心语义稳定并出现真实调用方后，再决定公共 Go SDK、gRPC 或 Agent Manager。
+`internal/` 是当前的有意选择：接口会随学习不断校正。`cmd/pia` 把启动时的当前目录作为 workspace，只接收一条 task prompt，用于本地运行与验收；Pia 产品名已经确定，但当前 CLI 参数与外部协议仍不稳定。等核心语义稳定并出现真实调用方后，再决定公共 Go SDK、gRPC 或 Agent Manager。
 
 冻结 Pi commit 和 package version 只保存在课程文档，不进入 Runtime package。Lesson 06 的真实验收项目、运行副本和 trace 只保存在被忽略的 `tmp/` 中，不提交 fixture 或 harness。正式 Pi 对照评测属于尚未编号的后续方向；其可重复设施和产物边界在对应课程开始时另行决定。
 
-第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)，第 07 课记录见 [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md)。Lesson 08 的实现与质量门已经完成，当前边界、源码证据、实现结果和待确认项记录在 [Context budget 与 compaction 核心](lessons/08-context-budget-and-compaction.md)。
+第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)，第 07 课记录见 [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md)。Lesson 08 的边界、源码证据和实现结果记录在 [Context budget 与 compaction 核心](lessons/08-context-budget-and-compaction.md)。Lesson 09 已完成并记录在 [Pia Project Skills v1 的发现与基础披露](lessons/09-skill-discovery-and-bounded-catalog.md)；拆出的 Lesson 10 [Skill 激活与 Context Continuity](lessons/10-skill-activation-and-context-continuity.md) 尚未开始。

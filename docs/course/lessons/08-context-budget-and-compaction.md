@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-本课的语义讨论、首版实现、代码审查与质量门已经完成：pi-go 现在会在下一次 Run 接受输入前估算 projected Provider input，以 `192K` 触发 lazy compaction，按 protocol-safe message boundary 总结旧 prefix、保留近期 raw suffix，并原子替换 Core Agent Working Context；完整 Conversation History 不被改写。冻结 Pi 的 initial/update/split-turn prompts、`20K` retained target、summary budgets 和 request-local output clamp 已落入代码，重复 compaction、tool protocol、失败、取消、并发与 soft-ceiling 降级均有确定性测试。当前尚未提交，课程等待学习者理解确认与是否提交的决定。
+本课已完成并提交到 `main`（`c967027`）：pi-go 现在会在下一次 Run 接受输入前估算 projected Provider input，以 `192K` 触发 lazy compaction，按 protocol-safe message boundary 总结旧 prefix、保留近期 raw suffix，并原子替换 Core Agent Working Context；完整 Conversation History 不被改写。冻结 Pi 的 initial/update/split-turn prompts、`20K` retained target、summary budgets 和 request-local output clamp 已落入代码，重复 compaction、tool protocol、失败、取消、并发与 soft-ceiling 降级均有确定性测试。`make check` 与 `go test -race ./...` 均已通过。
 
 ## 开课源码校准
 
