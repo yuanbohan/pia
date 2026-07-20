@@ -351,7 +351,26 @@ func TestRunProcessPrintsSkillDiagnosticsOnSuccessfulRun(t *testing.T) {
 	if got, want := stdout.String(), "done\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
-	if got, want := stderr.String(), "pia: warning: .pia/skills/broken/SKILL.md: required name is missing\n"; got != want {
+	if got, want := stderr.String(), "pia: warning: \".pia/skills/broken/SKILL.md\": required name is missing\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestRunProcessEscapesControlCharactersInSkillDiagnosticPath(t *testing.T) {
+	deps := successfulDependencies()
+	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
+		return coding.RunResult{SkillDiagnostics: []coding.SkillDiagnostic{{
+			Path:    ".pia/skills/bad\npia: forged\r\x1b[31m/SKILL.md",
+			Message: "invalid Skill",
+		}}}, nil
+	}
+
+	var stderr bytes.Buffer
+	if got := runProcess(context.Background(), []string{"task"}, io.Discard, &stderr, deps); got != 0 {
+		t.Fatalf("runProcess() code = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	want := "pia: warning: \".pia/skills/bad\\npia: forged\\r\\x1b[31m/SKILL.md\": invalid Skill\n"
+	if got := stderr.String(); got != want {
 		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }

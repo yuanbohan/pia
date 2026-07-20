@@ -99,7 +99,7 @@ func execute(
 			}
 			continue
 		}
-		if _, err := fmt.Fprintf(stderr, "pia: warning: %s: %s\n", diagnostic.Path, diagnostic.Message); err != nil {
+		if _, err := fmt.Fprintf(stderr, "pia: warning: %q: %s\n", diagnostic.Path, diagnostic.Message); err != nil {
 			return fmt.Errorf("write Skill diagnostic: %w", err)
 		}
 	}
