@@ -11,3 +11,7 @@ func openCandidate(root *os.Root, path string) (*os.File, error) {
 	// guarantee here, although regular-file validation still runs after open.
 	return root.Open(path)
 }
+
+func openHostCandidate(path string) (*os.File, error) {
+	return os.Open(path)
+}

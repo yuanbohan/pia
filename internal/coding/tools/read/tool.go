@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/yuanbohan/pi-go/internal/agent"
 	"github.com/yuanbohan/pi-go/internal/ai"
@@ -17,6 +19,7 @@ import (
 
 const (
 	maxReadArgumentsSize = 8 << 10
+	maxReadPathBytes     = 4 << 10
 
 	readParametersSchema = `{
   "type": "object",
@@ -24,7 +27,7 @@ const (
     "path": {
       "type": "string",
       "minLength": 1,
-      "description": "Workspace-relative path of the UTF-8 regular file to read, at most 4096 UTF-8 bytes."
+      "description": "Workspace-relative or absolute path of the UTF-8 regular file to read, at most 4096 UTF-8 bytes. Absolute paths may be outside the workspace."
     },
     "offset": {
       "type": "integer",
@@ -42,7 +45,8 @@ const (
 }`
 )
 
-// Tool returns a bounded page from one UTF-8 regular file beneath its root.
+// Tool returns a bounded page from one UTF-8 regular file. Relative paths stay
+// beneath its root; absolute paths use the invoking process's host authority.
 // The shared os.Root is safe for concurrent use, and Tool has no mutable call
 // state, so one instance may execute concurrently.
 type Tool struct {
@@ -63,7 +67,8 @@ func (r *Tool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Schema: ai.ToolSchema{
 			Name: "read",
-			Description: "Read a bounded page of complete lines from a workspace-relative UTF-8 regular file. " +
+			Description: "Read a bounded page of complete lines from a workspace-relative or absolute UTF-8 regular file. " +
+				"Absolute paths may be outside the workspace. " +
 				"Use the returned continuation offset to read more.",
 			Parameters: json.RawMessage(readParametersSchema),
 		},
@@ -82,12 +87,17 @@ func (r *Tool) Execute(ctx context.Context, rawArguments json.RawMessage) (strin
 	if err != nil {
 		return "", err
 	}
-	rootPath, displayPath, err := fileutil.NormalizeWorkspacePath(input.Path)
+	openPath, displayPath, absolute, err := normalizeReadPath(input.Path)
 	if err != nil {
 		return "", fmt.Errorf("read: %w", err)
 	}
 
-	file, err := fileutil.OpenRegularFile(r.root, rootPath)
+	var file *os.File
+	if absolute {
+		file, err = fileutil.OpenRegularHostFile(openPath)
+	} else {
+		file, err = fileutil.OpenRegularFile(r.root, openPath)
+	}
 	if err != nil {
 		return "", fmt.Errorf("read %q: open: %w", displayPath, err)
 	}
@@ -119,6 +129,24 @@ func (r *Tool) Execute(ctx context.Context, rawArguments json.RawMessage) (strin
 	closed = true
 
 	return formatResult(displayPath, page), nil
+}
+
+func normalizeReadPath(path string) (openPath, displayPath string, absolute bool, err error) {
+	if len(path) > maxReadPathBytes {
+		return "", "", false, fmt.Errorf("path exceeds the %d-byte limit", maxReadPathBytes)
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", "", false, fmt.Errorf("path is required")
+	}
+	if filepath.IsAbs(path) {
+		cleaned := filepath.Clean(path)
+		return cleaned, filepath.ToSlash(cleaned), true, nil
+	}
+	rootPath, displayPath, err := fileutil.NormalizeWorkspacePath(path)
+	if err != nil {
+		return "", "", false, err
+	}
+	return rootPath, displayPath, false, nil
 }
 
 type arguments struct {
