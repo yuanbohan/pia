@@ -61,7 +61,7 @@ func discoverPiaSkills(workspace *Workspace) (piaSkillDiscovery, error) {
 		return piaSkillDiscovery{}, fmt.Errorf("coding: discover Pia skills: workspace is required")
 	}
 
-	skillsDirectory, err := workspace.Root().Open(piaSkillsDirectory)
+	skillsDirectory, err := fileutil.OpenDirectory(workspace.Root(), piaSkillsDirectory)
 	if errors.Is(err, fs.ErrNotExist) {
 		return piaSkillDiscovery{}, nil
 	}

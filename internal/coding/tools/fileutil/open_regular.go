@@ -20,6 +20,29 @@ func OpenRegularFile(root *os.Root, path string) (*os.File, error) {
 	return validateRegularFile(file)
 }
 
+// OpenDirectory opens path beneath root and validates the object through the
+// returned handle. On supported platforms it shares the nonblocking open policy
+// used for regular files so a FIFO cannot stall validation before discovery.
+func OpenDirectory(root *os.Root, path string) (*os.File, error) {
+	if root == nil {
+		return nil, fmt.Errorf("open directory: root is required")
+	}
+	file, err := openCandidate(root, path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("inspect opened directory: %w", err)
+	}
+	if !info.IsDir() {
+		_ = file.Close()
+		return nil, fmt.Errorf("target is not a directory")
+	}
+	return file, nil
+}
+
 // OpenRegularHostFile opens an absolute host path and validates the object
 // through the returned handle. Callers own the policy that permits host access.
 func OpenRegularHostFile(path string) (*os.File, error) {
