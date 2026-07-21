@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding"
+	"github.com/yuanbohan/pia/internal/coding"
 )
 
 func TestWriteTraceFileRejectsExistingFIFOWithoutBlocking(t *testing.T) {

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/bash"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/edit"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/read"
+	"github.com/yuanbohan/pia/internal/coding"
+	"github.com/yuanbohan/pia/internal/coding/tools/bash"
+	"github.com/yuanbohan/pia/internal/coding/tools/edit"
+	"github.com/yuanbohan/pia/internal/coding/tools/read"
 )
 
 func TestBashCreatedFileIsVisibleToRead(t *testing.T) {

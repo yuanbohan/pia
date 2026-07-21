@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding/tools/fileutil"
+	"github.com/yuanbohan/pia/internal/coding/tools/fileutil"
 )
 
 func TestOpenRegularHostFileRequiresAbsoluteRegularFile(t *testing.T) {

@@ -16,7 +16,7 @@ deepened: 2026-07-19
 ## Goal Capsule
 
 - **Objective:** 交付第一版可真实使用的 one-shot coding agent，让临时命令 `pia` 在当前工作目录中接收一个任务、调用 DeepSeek 和四个 coding tools，并只输出最终回答。
-- **Product authority:** 本计划的 Product Contract 是本次工作的产品契约；它在冲突处取代 `docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 的 Lesson 06 旧设定。冻结 Pi 源码只提供语义和设计证据，不自动成为 pi-go 的需求。
+- **Product authority:** 本计划的 Product Contract 是本次工作的产品契约；它在冲突处取代 `docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 的 Lesson 06 旧设定。冻结 Pi 源码只提供语义和设计证据，不自动成为 Pia 的需求。
 - **Later ownership refinement:** Lesson 07 的 D46–D51 后续修正了内部消息所有权：`internal/coding` 的私有 Conversation Owner 保存完整 History，`internal/agent` 保存 Working Context 并返回 run-local delta。本计划的 one-shot prompt、输出、trace 和验收契约不变；下文旧的“Agent owns transcript”只描述 Lesson 06 当时的实现，不再定义当前内部 API。
 - **Current regression evidence:** 2026-07-20 的冻结 Pi prompt 对齐先由 fresh `attempts/005`、`006` 建立 `2/2`；随后仅做业务职责命名重构，prompt、workflow 与任务文字均未改变，但仍按 KTD8 重置计数。当前二进制又在 fresh `attempts/007`、`008` 中连续完成相同 Fibonacci 修复、测试判别和程序验证，新基线计数为 `2/2`。
 - **Execution profile:** 在现有 `internal/ai`、`internal/agent`、`internal/coding` 分层上完成代码、离线测试、文档与本地真实模型验收。
@@ -30,11 +30,11 @@ deepened: 2026-07-19
 
 ### Summary
 
-`pia` 是 pi-go 第一阶段的临时 one-shot CLI：它把当前目录组装成 coding context，运行已有 Agent model/tool loop，并在终端只返回模型的最终回答。该版本验证 AI、Agent Core 和 Coding Application 三层能组成一个真实 coding agent，但不提前引入 TUI、Session、Goal Runtime 或公共 SDK。
+`pia` 是 Pia 第一阶段的临时 one-shot CLI：它把当前目录组装成 coding context，运行已有 Agent model/tool loop，并在终端只返回模型的最终回答。该版本验证 AI、Agent Core 和 Coding Application 三层能组成一个真实 coding agent，但不提前引入 TUI、Session、Goal Runtime 或公共 SDK。
 
 ### Problem Frame
 
-pi-go 已有模型协议、DeepSeek Provider、Agent loop 和 `read`、`write`、`edit`、`bash`，但还没有一个应用层把这些能力组合成操作者可运行的 coding agent。旧计划同时要求实时事件、披露警告和仓库内 acceptance harness；后续讨论确认这些要求会把第一版 one-shot CLI 推向尚无消费者的事件系统和长期评测基础设施。
+Pia 已有模型协议、DeepSeek Provider、Agent loop 和 `read`、`write`、`edit`、`bash`，但还没有一个应用层把这些能力组合成操作者可运行的 coding agent。旧计划同时要求实时事件、披露警告和仓库内 acceptance harness；后续讨论确认这些要求会把第一版 one-shot CLI 推向尚无消费者的事件系统和长期评测基础设施。
 
 第一版需要证明的是完整编码闭环，而不是 UI 或 benchmark 平台。真实成功也不能由模型最后一句话或进程退出码自证，必须由 CLI 之外的专家检查代码、测试和程序行为。
 
@@ -200,7 +200,7 @@ Product Contract changed in R3, R11, R12 and R15 without changing the settled pr
 - KTD2. **Keep `pia` temporary.** The name appears in the local command, help/error context and docs, but does not create public packages, stable config or compatibility promises. (session-settled: user-directed — chosen over blocking this milestone on final branding: naming should not delay the real loop.)
 - KTD3. **Project only the final answer.** The one-shot path consumes the complete Conversation History snapshot after Run settlement and never adds an Agent event sink or Tool progress callback. (session-settled: user-directed — chosen over live thinking, tool-call and bash display: real-time presentation belongs to a future TUI consumer.)
 - KTD4. **Freeze the first product model.** The coding composition uses `deepseek-v4-pro` with DeepSeek thinking enabled and `reasoning_effort=high`; the lower Provider stays configurable for its existing tests and other internal consumers. (session-settled: user-directed — chosen over a Phase 1 model and reasoning configuration matrix: one fixed profile makes the first real acceptance comparable.)
-- KTD5. **Preserve an adapted frozen-Pi system prompt.** The coding-owned prompt changes only `pi` to `pia` in the identity, keeps the frozen Pi four-tool/default-guideline body contiguous, appends explicit pia/headless/safety guidance at Pi's application-specific seam, and preserves project-context framing and canonical cwd order. Agent and Provider contracts still receive one string, and unsupported Pi product sections remain absent. (session-settled: user-directed — chosen over free-form pi-go wording or copying Pi's complete resource loader: later horizontal evaluation needs prompt differences to stay narrow and attributable.)
+- KTD5. **Preserve an adapted frozen-Pi system prompt.** The coding-owned prompt changes only `pi` to `pia` in the identity, keeps the frozen Pi four-tool/default-guideline body contiguous, appends explicit pia/headless/safety guidance at Pi's application-specific seam, and preserves project-context framing and canonical cwd order. Agent and Provider contracts still receive one string, and unsupported Pi product sections remain absent. (session-settled: user-directed — chosen over free-form Pia wording or copying Pi's complete resource loader: later horizontal evaluation needs prompt differences to stay narrow and attributable.)
 - KTD6. **Keep process success separate from task success.** A nil Agent Run error maps to a zero CLI exit even when later expert checks reject the code; no assistant phrase, tool sequence or Goal Runtime field can self-certify the task. (session-settled: user-directed — chosen over inferring success from the assistant response or loop termination: repository facts are authoritative.)
 - KTD7. **Keep real acceptance local and ignored.** Only `.gitignore` changes in the repository; baseline, run copies, prompts and traces live under ignored `tmp/` and no fixture or harness package is added. (session-settled: user-directed — chosen over a tracked benchmark fixture and hidden harness: the current milestone needs expert iteration, not permanent eval infrastructure.)
 - KTD8. **Require two fresh consecutive successes.** Each success starts a new `pia` process and copies the same untouched baseline; any product code, system prompt or acceptance-task change resets the count. (session-settled: user-approved — chosen over accepting one successful model sample: one pass is too sensitive to model variance.)
@@ -327,7 +327,7 @@ flowchart TB
 
 ### U1. Align the authoritative Lesson 06 contract
 
-**Goal:** Remove active repository instructions that still require `cmd/pi-go`, live events, a startup warning or a tracked acceptance harness before implementation follows them accidentally.
+**Goal:** Remove active repository instructions that still require the superseded command path, live events, a startup warning or a tracked acceptance harness before implementation follows them accidentally.
 
 **Requirements:** R4, R13, R16, R21; KTD2, KTD3, KTD7, KTD12.
 
@@ -341,7 +341,7 @@ flowchart TB
 
 **Test scenarios:** Test expectation: none -- this unit changes authority and ignored-local-artifact policy, not runtime behavior.
 
-**Verification:** A repository search finds no active Phase 1 requirement for `cmd/pi-go`, live bash display, startup data warning, checked-in acceptance fixture or event sink; `git check-ignore` confirms paths under `tmp/` are ignored.
+**Verification:** A repository search finds no active Phase 1 requirement for the superseded command path, live bash display, startup data warning, checked-in acceptance fixture or event sink; `git check-ignore` confirms paths under `tmp/` are ignored.
 
 ### U2. Build the coding system prompt and root context loader
 
@@ -450,7 +450,7 @@ flowchart TB
 
 **Execution note:** Real DeepSeek calls begin only after all offline gates pass. After any generalized code, prompt or task correction, discard the prior streak and restart both acceptance runs from the untouched baseline.
 
-**Patterns to follow:** Course records separate frozen Pi evidence, candidate Go mechanisms and settled pi-go decisions. The local fixture follows the existing repo's module conventions but is not copied into tracked `testdata`.
+**Patterns to follow:** Course records separate frozen Pi evidence, candidate Go mechanisms and settled Pia decisions. The local fixture follows the existing repo's module conventions but is not copied into tracked `testdata`.
 
 **Test scenarios:**
 
@@ -480,7 +480,7 @@ flowchart TB
 | `go test -race ./...` | U3-U4 and final tree | Runtime cancellation, signal plumbing and existing process/tool concurrency remain race-free |
 | Focused prompt/runtime/CLI tests | U2-U4 | Context precedence, four-tool composition, final-only projection, trace and error/cancel paths match each unit's scenarios |
 | `go build ./cmd/pia` | U4 | The temporary command builds without public packages or runtime flags |
-| Documentation consistency scan | U1, U5 | Active docs no longer require `cmd/pi-go`, live events, startup warning or tracked fixture; Lesson 05 commit and Lesson 06 status are accurate |
+| Documentation consistency scan | U1, U5 | Active docs no longer require the superseded command path, live events, startup warning or tracked fixture; Lesson 05 commit and Lesson 06 status are accurate |
 | Ignore/tracked-tree check | U1, U5 | `tmp/` is ignored and no baseline, run, harness or trace is tracked |
 | Real DeepSeek run 1 | U5 | Fresh process/workspace passes diff, project tests, program output `55` and buggy-implementation test discrimination |
 | Real DeepSeek run 2 | U5 | A second baseline copy and new process independently pass the same checks with no intervening product/prompt/task change |

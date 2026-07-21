@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 func TestDiscoverPiaSkillsBuildsDeterministicMetadataOnlyCatalog(t *testing.T) {

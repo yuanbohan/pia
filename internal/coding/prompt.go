@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/yuanbohan/pi-go/internal/agent"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/fileutil"
+	"github.com/yuanbohan/pia/internal/agent"
+	"github.com/yuanbohan/pia/internal/coding/tools/fileutil"
 )
 
 const maxProjectInstructionsBytes = 50 << 10

@@ -1,4 +1,4 @@
-module github.com/yuanbohan/pi-go
+module github.com/yuanbohan/pia
 
 go 1.26.0
 

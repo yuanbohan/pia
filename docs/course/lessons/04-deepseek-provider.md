@@ -57,7 +57,7 @@ openAICompletionsApi()
 统一 AssistantMessageEventStream
 ```
 
-Pi 的完整 `Provider` 还拥有模型目录、认证解析、动态刷新和按 API dispatch。这些能力服务于多 Provider 产品，不是 DeepSeek 线协议本身。pi-go 增加 `internal/ai/provider/` 作为具体实现的归类目录，但不把它做成一个新的 Go `provider` 抽象包。consumer-owned `ai.Provider` 继续和 `Request`、`Stream` 放在 `internal/ai`，第一阶段只增加两个对当前目标有直接责任的实现层：
+Pi 的完整 `Provider` 还拥有模型目录、认证解析、动态刷新和按 API dispatch。这些能力服务于多 Provider 产品，不是 DeepSeek 线协议本身。Pia 增加 `internal/ai/provider/` 作为具体实现的归类目录，但不把它做成一个新的 Go `provider` 抽象包。consumer-owned `ai.Provider` 继续和 `Request`、`Stream` 放在 `internal/ai`，第一阶段只增加两个对当前目标有直接责任的实现层：
 
 ```text
 internal/ai/provider/deepseek
@@ -76,8 +76,8 @@ internal/ai
 
 这与 Pi 有两层明确差别：
 
-1. Pi 的 `Provider` 是拥有 id/name、base URL、auth、模型列表、刷新和 stream dispatch 的大运行单元；pi-go 的 `ai.Provider` 目前只有 `Stream(ctx, Request) Stream`，是 Agent 所需的最小端口。
-2. Pi 通过 `createProvider()` 和 `Models` 运行时管理多个 Provider；pi-go 第一阶段由 composition root 直接构造 DeepSeek 并注入 Agent，`internal/ai/provider/` 不承担注册、发现或生命周期管理。
+1. Pi 的 `Provider` 是拥有 id/name、base URL、auth、模型列表、刷新和 stream dispatch 的大运行单元；Pia 的 `ai.Provider` 目前只有 `Stream(ctx, Request) Stream`，是 Agent 所需的最小端口。
+2. Pi 通过 `createProvider()` 和 `Models` 运行时管理多个 Provider；Pia 第一阶段由 composition root 直接构造 DeepSeek 并注入 Agent，`internal/ai/provider/` 不承担注册、发现或生命周期管理。
 
 ## 当前 DeepSeek 线协议快照
 
@@ -94,7 +94,7 @@ internal/ai
 
 第一阶段的确定性映射是：
 
-| pi-go | Chat Completions wire message |
+| Pia | Chat Completions wire message |
 |---|---|
 | `Request.SystemPrompt` | 首条 `{"role":"system","content":"..."}` |
 | `ai.UserMessage` | `{"role":"user","content":"..."}` |
@@ -104,7 +104,7 @@ internal/ai
 | `ai.ToolResultMessage` | `{"role":"tool","tool_call_id":"...","content":"..."}` |
 | `Request.Tools` | `tools[].function{name,description,parameters}` |
 
-`StopReason`、`ErrorMessage` 和 `ToolResultMessage.IsError` 是 pi-go 内部协议事实，DeepSeek wire schema 没有同名字段。它们不能被随意塞入非标准 JSON；本课必须逐项确定是由消息结构隐含、编码进模型可见 content，还是只留在本地控制面。
+`StopReason`、`ErrorMessage` 和 `ToolResultMessage.IsError` 是 Pia 内部协议事实，DeepSeek wire schema 没有同名字段。它们不能被随意塞入非标准 JSON；本课必须逐项确定是由消息结构隐含、编码进模型可见 content，还是只留在本地控制面。
 
 ## 本课第一个困难点：reasoning 必须可回放
 
@@ -154,7 +154,7 @@ HTTP 2xx + text/event-stream
 
 若 `context.Cause(ctx)` 存在，terminal 必须是 `aborted` 并保留该 cause；否则是 `error`。已完成的 content blocks 可保留到 terminal assistant，未完成 tool call 不得伪装成可执行调用。Agent 随后沿用第 02/03 课的 exactly-once assistant 与 tool-result settlement 规则。
 
-## 已确定的 pi-go 决策
+## 已确定的 Pia 决策
 
 - 继续使用现有模型无关 `ai.Provider`；Agent 不新增 DeepSeek 分支。
 - `internal/ai/provider/` 只归类具体实现；consumer-owned `ai.Provider` 仍留在 `internal/ai`。
@@ -199,7 +199,7 @@ HTTP 2xx + text/event-stream
 默认测试全部离线。真实兼容测试同时要求 build tag 和运行时开关，因此普通 `go test ./...` 不会读取 `DEEPSEEK_API_KEY`：
 
 ```bash
-PI_GO_RUN_DEEPSEEK_SMOKE=1 \
+PIA_RUN_DEEPSEEK_SMOKE=1 \
 DEEPSEEK_API_KEY=... \
 DEEPSEEK_MODEL=... \
 go test -tags=integration ./internal/ai/provider/deepseek -run TestDeepSeekSmoke -v

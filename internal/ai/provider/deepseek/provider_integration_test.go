@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
-const smokeOptInEnvironment = "PI_GO_RUN_DEEPSEEK_SMOKE"
+const smokeOptInEnvironment = "PIA_RUN_DEEPSEEK_SMOKE"
 
 func TestDeepSeekSmoke(t *testing.T) {
 	if os.Getenv(smokeOptInEnvironment) != "1" {
@@ -48,7 +48,7 @@ func TestDeepSeekSmoke(t *testing.T) {
 		message := smokeTurn(t, provider, ai.Request{
 			SystemPrompt: "Follow the user's response-format instruction exactly.",
 			Messages: []ai.Message{
-				ai.UserMessage{Content: "Reply with exactly: pi-go-smoke-ok"},
+				ai.UserMessage{Content: "Reply with exactly: pia-smoke-ok"},
 			},
 		})
 		var text strings.Builder
@@ -57,7 +57,7 @@ func TestDeepSeekSmoke(t *testing.T) {
 				text.WriteString(block.Text)
 			}
 		}
-		if !strings.Contains(text.String(), "pi-go-smoke-ok") {
+		if !strings.Contains(text.String(), "pia-smoke-ok") {
 			t.Fatalf("response text = %q, want smoke marker", text.String())
 		}
 	})
@@ -66,7 +66,7 @@ func TestDeepSeekSmoke(t *testing.T) {
 		message := smokeTurn(t, provider, ai.Request{
 			SystemPrompt: "Use the provided tool when the user explicitly requests it.",
 			Messages: []ai.Message{
-				ai.UserMessage{Content: `Call echo exactly once with {"value":"pi-go-tool-smoke"}.`},
+				ai.UserMessage{Content: `Call echo exactly once with {"value":"pia-tool-smoke"}.`},
 			},
 			Tools: []ai.ToolSchema{
 				{

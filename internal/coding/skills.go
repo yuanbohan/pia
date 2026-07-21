@@ -14,8 +14,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/fileutil"
+	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/coding/tools/fileutil"
 	"go.yaml.in/yaml/v3"
 )
 

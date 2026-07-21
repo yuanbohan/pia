@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/agent"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/read"
+	"github.com/yuanbohan/pia/internal/agent"
+	"github.com/yuanbohan/pia/internal/coding/tools/read"
 )
 
 func TestReadDefinition(t *testing.T) {

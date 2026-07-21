@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/yuanbohan/pi-go/internal/agent"
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/agent"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 type conversationConfig struct {

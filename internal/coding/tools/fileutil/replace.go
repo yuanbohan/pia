@@ -105,7 +105,7 @@ func createReplacementFile(parent *os.Root, existingPermissions *os.FileMode) (*
 		permissions = *existingPermissions
 	}
 	for range 10 {
-		name := ".pi-go-replace-" + rand.Text() + ".tmp"
+		name := ".pia-replace-" + rand.Text() + ".tmp"
 		file, err := parent.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, permissions)
 		if err == nil {
 			return file, name, nil

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding"
+	"github.com/yuanbohan/pia/internal/coding"
 )
 
 func TestWriteTraceFileCreatesPrivateJSONWithoutClobbering(t *testing.T) {

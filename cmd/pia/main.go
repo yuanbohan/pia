@@ -12,7 +12,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/yuanbohan/pi-go/internal/coding"
+	"github.com/yuanbohan/pia/internal/coding"
 )
 
 const (

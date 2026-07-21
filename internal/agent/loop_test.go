@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yuanbohan/pi-go/internal/agent"
-	"github.com/yuanbohan/pi-go/internal/ai"
-	"github.com/yuanbohan/pi-go/internal/ai/provider/faux"
+	"github.com/yuanbohan/pia/internal/agent"
+	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai/provider/faux"
 )
 
 func TestNewRequiresProvider(t *testing.T) {

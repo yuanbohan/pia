@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding/tools/read"
+	"github.com/yuanbohan/pia/internal/coding/tools/read"
 )
 
 func newTool(t *testing.T, rootPath string) *read.Tool {

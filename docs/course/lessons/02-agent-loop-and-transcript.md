@@ -70,7 +70,7 @@ Provider 不拥有 transcript，也不能替 Agent 追加历史。它只读取�
 
 - Pi 高层 `Agent._state.messages` 跨 `prompt()` 保存完整历史；`createContextSnapshot()` 把全部 messages 交给低层 loop。
 - Pi 低层 `runAgentLoop()` 用 `messages: [...context.messages, ...prompts]` 追加新 user input，随后继续追加 assistant 和 tool results。
-- pi-go 保留相同的核心所有权：Agent 保存完整内存 transcript，`Agent.Run()` 追加新的 user input；不做的是 Session 持久化、恢复、分支和管理层。
+- Pia 保留相同的核心所有权：Agent 保存完整内存 transcript，`Agent.Run()` 追加新的 user input；不做的是 Session 持久化、恢复、分支和管理层。
 - 新对话需要显式新建 Agent 或未来明确的 reset boundary，不能把“收到下一条 user message”当成隐式清空信号。
 
 ## 已验证的 Pi 行为与当前课程切片
@@ -79,9 +79,9 @@ Provider 不拥有 transcript，也不能替 Agent 追加历史。它只读取�
 - 每次模型调用从当前 context 构造 `Context { systemPrompt, messages, tools }`，没有独立 task 或 workspace context 字段。
 - Pi 在低层 assistant stream 开始时把 partial assistant message 放入私有 working context，随后用新的 partial snapshot 替换最后一条，terminal 时再替换成 final message。
 - Pi 高层 `Agent.state.messages` 不保存 partial：`message_start/message_update` 只更新独立的 `streamingMessage`，`message_end` 才把 terminal message 追加到正式 transcript。coding-agent TUI 通过事件中的 partial snapshot 刷新显示，Session 也只在 `message_end` 持久化消息。
-- pi-go 第一阶段没有需要查询完整 partial snapshot 的消费者，因此正式 transcript 对每个 Provider turn 只追加一条 terminal final/aborted assistant message，不维护可查询的 Run-owned partial view。第 03 课补充的 tool-result settlement 不是第二条 assistant：若 error/aborted assistant 中保留了已完成但未执行的 tool calls，Agent 会在其后追加同 ID `not executed` results，使权威 transcript 保持配对。第 02 课不设计 event sink；本地终端或未来 TUI 如何流式观察和展示，后续按真实消费者需求讨论。
-- Pi 在 provider error 或 aborted assistant message 后结束当前 Turn 和整个 Run，不执行工具；完整接收且不含 tool calls 的 assistant response 正常结束，即使文本为空。pi-go 同样不执行失败 Turn 中的调用，但第 03 课有意不复制 Pi 的 request-time orphan repair，而是在 Agent transcript 中显式追加非执行型 settlement results。
-- pi-go 使用 `run_start/run_end` 表达一次 Run 的边界；引用 Pi 源码时仍保留原名 `agent_start/agent_end`。
+- Pia 第一阶段没有需要查询完整 partial snapshot 的消费者，因此正式 transcript 对每个 Provider turn 只追加一条 terminal final/aborted assistant message，不维护可查询的 Run-owned partial view。第 03 课补充的 tool-result settlement 不是第二条 assistant：若 error/aborted assistant 中保留了已完成但未执行的 tool calls，Agent 会在其后追加同 ID `not executed` results，使权威 transcript 保持配对。第 02 课不设计 event sink；本地终端或未来 TUI 如何流式观察和展示，后续按真实消费者需求讨论。
+- Pi 在 provider error 或 aborted assistant message 后结束当前 Turn 和整个 Run，不执行工具；完整接收且不含 tool calls 的 assistant response 正常结束，即使文本为空。Pia 同样不执行失败 Turn 中的调用，但第 03 课有意不复制 Pi 的 request-time orphan repair，而是在 Agent transcript 中显式追加非执行型 settlement results。
+- Pia 使用 `run_start/run_end` 表达一次 Run 的边界；引用 Pi 源码时仍保留原名 `agent_start/agent_end`。
 
 ## Partial assistant 的讨论结论
 
@@ -153,7 +153,7 @@ Agent transcript          --deep clone--> RunResult.Transcript
 
 Pi 高层 `Agent.prompt()` 不接收外部 signal；它只在 prompt 通过 active-Run 检查后创建内部 `AbortController`，无 active Run 时调用 `abort()` 是 no-op。因此 Pi 公共 Agent API 没有与 Go“传入一个已经取消的 context”完全相同的调用形态。Pi 低层 `runAgentLoop()` 则先把 prompts 加入 current context 并发送 user message lifecycle，之后才把 signal 交给 Provider；Pi AI 的预取消测试也从已经包含 user message 的 context 得到空内容 aborted assistant。
 
-pi-go 明确增加 Go API 边界：
+Pia 明确增加 Go API 边界：
 
 ```text
 已有 active Run -> ErrRunActive，不观察半完成 transcript

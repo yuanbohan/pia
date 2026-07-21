@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/agent"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/read"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/write"
+	"github.com/yuanbohan/pia/internal/agent"
+	"github.com/yuanbohan/pia/internal/coding/tools/read"
+	"github.com/yuanbohan/pia/internal/coding/tools/write"
 )
 
 func TestWriteDefinition(t *testing.T) {

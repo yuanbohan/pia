@@ -28,7 +28,7 @@ The ownership arrows describe semantic authority, not a required Go struct layou
 
 ### Pia
 
-The product name for this Go coding agent. `pi-go` remains the current repository and Go module identifier; it is not the product name used in new architecture or course discussion.
+The product and repository name for this Go coding agent. Its Go module and import path is `github.com/yuanbohan/pia`.
 
 Pia product-assembles the Coding Agent and treats Skills as a built-in coding capability. A plugin or extension may distribute Skills later, but does not own or enable the core Skills lifecycle.
 
@@ -122,7 +122,7 @@ Before compaction it may equal the complete Conversation History. After compacti
 
 ### Provider Request Snapshot
 
-An ownership-independent, request-local copy of the complete model-visible inputs for one Provider call: the system prompt, current Working Context, and tool schemas. Provider configuration, model identity, workspace objects, and the original task as a separate field are outside this snapshot in current pi-go.
+An ownership-independent, request-local copy of the complete model-visible inputs for one Provider call: the system prompt, current Working Context, and tool schemas. Provider configuration, model identity, workspace objects, and the original task as a separate field are outside this snapshot in current Pia.
 
 It is disposable after that call and never becomes an authoritative history source. Provider-side mutation or protocol conversion must not modify the Working Context or Conversation History.
 

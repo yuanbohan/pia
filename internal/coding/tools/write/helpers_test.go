@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding/tools/write"
+	"github.com/yuanbohan/pia/internal/coding/tools/write"
 )
 
 func newTool(t *testing.T, rootPath string) *write.Tool {

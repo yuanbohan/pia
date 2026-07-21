@@ -18,7 +18,7 @@
 2. Tool schema、原始 tool-call arguments、Go 解码校验、工具执行和 `ToolResultMessage` 各自属于哪一层。
 3. 为什么未知工具、非法参数、执行失败和单工具 timeout 是模型可观察的 call-local tool error，而不是立即终止 Run 的基础设施错误。
 4. 为什么 tool results 必须按模型源顺序进入 transcript，即使 parallel-safe 工具按不同顺序完成。
-5. pi-go 的屏障式分段调度如何保留连续只读调用的并行能力，并避免 read/write/edit/bash 之间发生不明确的竞态。
+5. Pia 的屏障式分段调度如何保留连续只读调用的并行能力，并避免 read/write/edit/bash 之间发生不明确的竞态。
 
 ## Pi 源码阅读路径
 
@@ -142,9 +142,9 @@ func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
 - Pi 的 sequential 工具批次在 signal aborted 后会结束循环，parallel 路径也会停止继续准备调用，因此取消可能让 Agent state 中的 assistant tool call 没有对应 tool result。Pi 不在 Agent Loop 补齐这些未执行调用。
 - Pi 在 `packages/ai/src/api/transform-messages.ts` 的 Provider request 转换阶段扫描 orphaned tool calls，并临时插入 `isError: true`、内容为 `No result provided` 的 synthetic tool results；这些结果用于满足不同 Provider 的消息协议，不写回 Agent state。`packages/ai/test/tool-call-without-result.test.ts` 跨 Provider 验证了取消后直接追加新 user message仍可请求模型。
 
-## 已确定的 pi-go 决策
+## 已确定的 Pia 决策
 
-下面是实施计划和决策记录中已经确认的 pi-go 契约，不等同于 Pi 的原始调度机制：
+下面是实施计划和决策记录中已经确认的 Pia 契约，不等同于 Pi 的原始调度机制：
 
 - `internal/agent` 拥有通用 Tool contract；后续 `internal/coding/tools` 只实现该 contract，Agent 不依赖 workspace 细节。
 - Tool 对模型提供 JSON Schema，同时由具体 Tool 自己完成 Go 参数解码和语义校验；第一阶段不实现通用 JSON Schema evaluator。
@@ -155,7 +155,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
 - Provider turn 以 `error` 或 `aborted` 失败时，assistant 仍是该 Turn 唯一的 terminal assistant，其中已完成 tool calls 不执行但分别得到同 ID `not executed` results；随后直接返回 Turn error。取消后的下一次 Run 因而能直接发送完整配对历史。
 - Agent Runtime 对每个 tool call 只执行一次；失败作为 tool result 交给模型恢复。第一阶段本地文件工具不重试，未来具体远程后端只有在能明确分类瞬时错误时，才可在一次 `Execute` 内部做有界、可取消的重试。
 
-Pi 的“混合批次整体降级为串行”容易理解，但会让 `read, read, write, read, read` 五个调用全部串行。pi-go 的有意差异是把它切成三个阶段：
+Pi 的“混合批次整体降级为串行”容易理解，但会让 `read, read, write, read, read` 五个调用全部串行。Pia 的有意差异是把它切成三个阶段：
 
 ```text
 stage 1: read 1 || read 2
@@ -182,7 +182,7 @@ Run cancel
 
 未启动 result 只记录 settlement 事实，不暗示工具执行过。该分歧必须由离线 Faux 测试锁定，并在第 04/06 课的真实 DeepSeek 验证中额外检查：取消后的同一 Agent 追加新 user message 时，Provider 能直接接受完整配对历史，且 Provider conversion 不静默插入或删除消息。
 
-取消还可能发生在 Provider stream 尚未完成时。Faux 会把取消前已经完成组装的 tool calls 保留在 aborted assistant 中，因此 pi-go 同样显式闭合它们：
+取消还可能发生在 Provider stream 尚未完成时。Faux 会把取消前已经完成组装的 tool calls 保留在 aborted assistant 中，因此 Pia 同样显式闭合它们：
 
 ```text
 Provider turn aborted/error

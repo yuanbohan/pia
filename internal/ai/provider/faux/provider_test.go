@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
-	"github.com/yuanbohan/pi-go/internal/ai/provider/faux"
+	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai/provider/faux"
 )
 
 func TestUsageTotalTokens(t *testing.T) {
