@@ -12,12 +12,13 @@ import (
 // after one coding Run settles. It contains no dedicated credential field, but
 // ordinary transcript content may still contain secrets emitted by a tool.
 type Trace struct {
-	Workspace    string         `json:"workspace"`
-	SystemPrompt string         `json:"system_prompt"`
-	Model        TraceModel     `json:"model"`
-	Tools        []TraceTool    `json:"tools"`
-	Transcript   []TraceMessage `json:"transcript"`
-	RunError     string         `json:"run_error,omitempty"`
+	Workspace        string            `json:"workspace"`
+	SystemPrompt     string            `json:"system_prompt"`
+	Model            TraceModel        `json:"model"`
+	Tools            []TraceTool       `json:"tools"`
+	SkillDiagnostics []SkillDiagnostic `json:"skill_diagnostics,omitempty"`
+	Transcript       []TraceMessage    `json:"transcript"`
+	RunError         string            `json:"run_error,omitempty"`
 }
 
 type TraceModel struct {
@@ -81,6 +82,10 @@ func BuildTrace(result RunResult, runErr error) (Trace, error) {
 			ReasoningEffort: result.Model.ReasoningEffort,
 		},
 		Tools: make([]TraceTool, len(result.Tools)),
+		SkillDiagnostics: append(
+			[]SkillDiagnostic(nil),
+			result.SkillDiagnostics...,
+		),
 	}
 	if runErr != nil {
 		trace.RunError = runErr.Error()

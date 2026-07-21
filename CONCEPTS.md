@@ -5,6 +5,8 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 ## Relationships
 
 ```text
+Pia                 ── product-assembles ──> Coding Agent
+Pia                 ── owns as a core capability ──> Skills
 Coding Agent
 ├── configures and hosts the Core Agent
 ├── provides coding-specific workspace, prompt, tools, and model choices
@@ -24,9 +26,15 @@ The ownership arrows describe semantic authority, not a required Go struct layou
 
 ## Agent System
 
+### Pia
+
+The product name for this Go coding agent. `pi-go` remains the current repository and Go module identifier; it is not the product name used in new architecture or course discussion.
+
+Pia product-assembles the Coding Agent and treats Skills as a built-in coding capability. A plugin or extension may distribute Skills later, but does not own or enable the core Skills lifecycle.
+
 ### Agent
 
-An umbrella term for a model-directed system that can choose and execute multiple steps; it is not, by itself, a precise component boundary in pi-go.
+An umbrella term for a model-directed system that can choose and execute multiple steps; it is not, by itself, a precise component boundary in Pia.
 
 Use a qualified term such as Core Agent or Coding Agent whenever ownership or behavior matters. “Agent” alone must not imply ownership of complete history, persistence, workspace policy, or user interface state.
 
@@ -38,7 +46,7 @@ The Agent Loop defines ordering, settlement, cancellation, and tool-execution be
 
 ### Run
 
-One accepted Core Agent execution ending only after the Agent Loop stops producing messages and all work started by that execution has settled. In current pi-go, a Run is initiated by one new user input; an input-free explicit continuation is deferred and is not part of the current Core Agent API.
+One accepted Core Agent execution ending only after the Agent Loop stops producing messages and all work started by that execution has settled. In current Pia, a Run is initiated by one new user input; an input-free explicit continuation is deferred and is not part of the current Core Agent API.
 
 A Run may contain multiple Turns. A non-nil Run error describes its outcome but does not erase Messages already accepted during the Run.
 
@@ -65,6 +73,16 @@ The Core Agent receives a Provider, system prompt, and tool definitions as depen
 The complete application specialized for software-engineering tasks by composing a Core Agent with a coding workspace, coding system prompt, coding tools, model configuration, and conversation orchestration.
 
 A Coding Agent is not another model and does not inherit from the Core Agent. It is the product-level assembly that gives the generic model/tool runtime its coding behavior; a CLI or future TUI hosts this application, while future Session support extends its conversation lifecycle.
+
+### Skill
+
+A reusable unit of task-specific coding instructions that Pia can disclose progressively instead of placing every instruction in every model request. Agent Skills is the long-term portability target for this concept, not a claim that the current Pia runtime implements its complete specification or resource model.
+
+Pia progressively discloses a Skill: bounded name and description metadata may be present in the initial model context, while full instructions enter context only after the model selects and reads the Skill. Skills are a core Pia capability, not synonymous with plugins, extensions, MCP servers, project instructions, arbitrary tool implementations, or ordinary project files that tools happen to access.
+
+### Pia Skill v1
+
+The current minimal project-local Skill subset: one direct child directory under `<workspace>/.pia/skills/`, with a `SKILL.md` containing required `name` and `description` discovery metadata plus Markdown instructions. Only `SKILL.md` has Skill semantics in v1; sibling scripts, references, assets, and other files are not discovered, indexed, injected, resolved, or executed by the Skill engine. Pia Skill v1 does not imply `.agents`/`.claude` discovery, global scopes, recursive discovery, symlink sources, vendor runtime fields, managed supporting-resource semantics, or complete Agent Skills compatibility; those remain staged future capabilities.
 
 ## Conversation and Context
 
@@ -118,7 +136,7 @@ Compaction is not arbitrary truncation: the resulting Working Context must remai
 
 A lifecycle and persistence envelope around a Conversation that may add durable identity, stored entries, model settings, compaction records, branches, timestamps, and resume behavior.
 
-A Session is broader than Conversation History and is not synonymous with Working Context. pi-go can establish the Conversation ownership boundary without implementing a persistent Session.
+A Session is broader than Conversation History and is not synonymous with Working Context. Pia can establish the Conversation ownership boundary without implementing a persistent Session.
 
 ## Flagged Ambiguities
 

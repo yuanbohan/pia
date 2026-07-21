@@ -15,3 +15,7 @@ func openCandidate(root *os.Root, path string) (*os.File, error) {
 	// reject the actual non-regular object and has no effect on regular files.
 	return root.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 }
+
+func openHostCandidate(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+}

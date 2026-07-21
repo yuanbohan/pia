@@ -53,11 +53,12 @@ type ModelInfo struct {
 // optional diagnostics. Transcript is the complete Conversation History; the
 // separate Go error remains the Run outcome.
 type RunResult struct {
-	WorkspacePath string
-	SystemPrompt  string
-	Model         ModelInfo
-	Tools         []ai.ToolSchema
-	Transcript    []ai.Message
+	WorkspacePath    string
+	SystemPrompt     string
+	Model            ModelInfo
+	Tools            []ai.ToolSchema
+	SkillDiagnostics []SkillDiagnostic
+	Transcript       []ai.Message
 }
 
 // Run executes the fixed Phase 1 DeepSeek coding profile.
@@ -117,7 +118,12 @@ func runWithWorkspaceOperations(
 		return result, err
 	}
 	result.Tools = toolSchemas(tools)
-	prompt, err := buildSystemPrompt(workspace, tools)
+	skillDiscovery, err := discoverPiaSkills(workspace)
+	if err != nil {
+		return result, err
+	}
+	result.SkillDiagnostics = append([]SkillDiagnostic(nil), skillDiscovery.Diagnostics...)
+	prompt, err := buildSystemPrompt(workspace, tools, skillDiscovery.Catalog)
 	if err != nil {
 		return result, err
 	}

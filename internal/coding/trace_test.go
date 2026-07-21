@@ -3,6 +3,7 @@ package coding
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -25,6 +26,10 @@ func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 			Name:        "read",
 			Description: "Read a file",
 			Parameters:  parameters,
+		}},
+		SkillDiagnostics: []SkillDiagnostic{{
+			Path:    ".pia/skills/broken/SKILL.md",
+			Message: "required name is missing",
 		}},
 		Transcript: []ai.Message{
 			ai.UserMessage{Content: "inspect"},
@@ -55,6 +60,9 @@ func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 	if trace.RunError != runErr.Error() {
 		t.Fatalf("trace RunError = %q, want %q", trace.RunError, runErr)
 	}
+	if got, want := trace.SkillDiagnostics, result.SkillDiagnostics; !reflect.DeepEqual(got, want) {
+		t.Fatalf("trace SkillDiagnostics = %#v, want %#v", got, want)
+	}
 	if got, want := len(trace.Transcript), 3; got != want {
 		t.Fatalf("trace transcript length = %d, want %d", got, want)
 	}
@@ -74,11 +82,15 @@ func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 
 	parameters[0] = '['
 	arguments[0] = '['
+	result.SkillDiagnostics[0].Message = "changed through source"
 	if got, want := string(trace.Tools[0].Parameters), `{"type":"object"}`; got != want {
 		t.Fatalf("trace parameters changed through source alias: %q", got)
 	}
 	if got, want := trace.Transcript[1].Content[2].ToolCall.Arguments, `{"path":`; got != want {
 		t.Fatalf("trace arguments changed through source alias: %q", got)
+	}
+	if got, want := trace.SkillDiagnostics[0].Message, "required name is missing"; got != want {
+		t.Fatalf("trace diagnostic changed through source alias: %q", got)
 	}
 
 	encoded, err := json.MarshalIndent(trace, "", "  ")
@@ -94,6 +106,9 @@ func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 		`"type": "tool_result"`,
 		`"arguments": "{\"path\":"`,
 		`"run_error": "run failed"`,
+		`"skill_diagnostics"`,
+		`"path": ".pia/skills/broken/SKILL.md"`,
+		`"message": "required name is missing"`,
 		"synthetic-secret-deliberately-returned-by-tool",
 	} {
 		if !strings.Contains(text, fragment) {

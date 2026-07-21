@@ -27,6 +27,97 @@ func TestReadRejectsMissingAndNonRegularTargets(t *testing.T) {
 	}
 }
 
+func TestReadAcceptsAbsolutePathsInsideAndOutsideWorkspace(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	rootPath := filepath.Join(parent, "workspace")
+	outsidePath := filepath.Join(parent, "shared-skills")
+	if err := os.Mkdir(rootPath, 0o755); err != nil {
+		t.Fatalf("Mkdir(root) error = %v", err)
+	}
+	if err := os.Mkdir(outsidePath, 0o755); err != nil {
+		t.Fatalf("Mkdir(outside) error = %v", err)
+	}
+	insideFile := filepath.Join(rootPath, "inside.txt")
+	outsideFile := filepath.Join(outsidePath, "SKILL.md")
+	writeTestFile(t, rootPath, "inside.txt", []byte("inside\n"))
+	writeTestFile(t, outsidePath, "SKILL.md", []byte("outside skill\n"))
+	outsideLink := filepath.Join(parent, "shared-skill-link")
+	if err := os.Symlink(outsideFile, outsideLink); err != nil {
+		t.Fatalf("Symlink(outside absolute) error = %v", err)
+	}
+	read := newTool(t, rootPath)
+
+	for _, test := range []struct {
+		name    string
+		path    string
+		content string
+	}{
+		{name: "inside workspace", path: insideFile, content: "inside\n"},
+		{name: "outside workspace", path: outsideFile, content: "outside skill\n"},
+		{name: "outside symlink", path: outsideLink, content: "outside skill\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			arguments := json.RawMessage(fmt.Sprintf(`{"path":%q}`, test.path))
+			got, err := read.Execute(context.Background(), arguments)
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			want := readResult(filepath.ToSlash(filepath.Clean(test.path)), "1-1", test.content, "[End of file.]")
+			if got != want {
+				t.Fatalf("Execute() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestReadPreservesAbsoluteResolutionAcrossSymlinkParents(t *testing.T) {
+	t.Parallel()
+
+	rootPath := t.TempDir()
+	hostPath := t.TempDir()
+	lexicalParent := filepath.Join(hostPath, "lexical")
+	resolvedParent := filepath.Join(hostPath, "resolved")
+	resolvedDirectory := filepath.Join(resolvedParent, "directory")
+	if err := os.MkdirAll(lexicalParent, 0o755); err != nil {
+		t.Fatalf("MkdirAll(lexical parent) error = %v", err)
+	}
+	if err := os.MkdirAll(resolvedDirectory, 0o755); err != nil {
+		t.Fatalf("MkdirAll(resolved directory) error = %v", err)
+	}
+	writeTestFile(t, lexicalParent, "target.txt", []byte("lexically cleaned target\n"))
+	writeTestFile(t, resolvedParent, "target.txt", []byte("host-resolved target\n"))
+	if err := os.Symlink(resolvedDirectory, filepath.Join(lexicalParent, "link")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	requestedPath := filepath.Join(lexicalParent, "link") + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "target.txt"
+	read := newTool(t, rootPath)
+	arguments := json.RawMessage(fmt.Sprintf(`{"path":%q}`, requestedPath))
+	got, err := read.Execute(context.Background(), arguments)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	want := readResult(filepath.ToSlash(requestedPath), "1-1", "host-resolved target\n", "[End of file.]")
+	if got != want {
+		t.Fatalf("Execute() = %q, want host path semantics %q", got, want)
+	}
+}
+
+func TestReadRejectsAbsoluteNonRegularTarget(t *testing.T) {
+	t.Parallel()
+
+	rootPath := t.TempDir()
+	outsideDirectory := t.TempDir()
+	read := newTool(t, rootPath)
+	arguments := json.RawMessage(fmt.Sprintf(`{"path":%q}`, outsideDirectory))
+
+	if _, err := read.Execute(context.Background(), arguments); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("Execute() error = %v, want regular-file error", err)
+	}
+}
+
 func TestReadAllowsInternalSymlinkAndRejectsEscapingSymlinks(t *testing.T) {
 	t.Parallel()
 

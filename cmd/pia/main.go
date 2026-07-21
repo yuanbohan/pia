@@ -39,14 +39,20 @@ func processMain(args []string, stdout, stderr io.Writer, deps dependencies) int
 }
 
 func runProcess(ctx context.Context, args []string, stdout, stderr io.Writer, deps dependencies) int {
-	if err := execute(ctx, args, stdout, deps); err != nil {
+	if err := execute(ctx, args, stdout, stderr, deps); err != nil {
 		_, _ = fmt.Fprintf(stderr, "pia: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-func execute(ctx context.Context, args []string, stdout io.Writer, deps dependencies) error {
+func execute(
+	ctx context.Context,
+	args []string,
+	stdout io.Writer,
+	stderr io.Writer,
+	deps dependencies,
+) error {
 	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
 		return fmt.Errorf("expected exactly one non-blank task argument")
 	}
@@ -85,6 +91,17 @@ func execute(ctx context.Context, args []string, stdout io.Writer, deps dependen
 	}
 	if combined := errors.Join(runErr, traceErr); combined != nil {
 		return combined
+	}
+	for _, diagnostic := range result.SkillDiagnostics {
+		if diagnostic.Path == "" {
+			if _, err := fmt.Fprintf(stderr, "pia: warning: %q\n", diagnostic.Message); err != nil {
+				return fmt.Errorf("write Skill diagnostic: %w", err)
+			}
+			continue
+		}
+		if _, err := fmt.Fprintf(stderr, "pia: warning: %q: %q\n", diagnostic.Path, diagnostic.Message); err != nil {
+			return fmt.Errorf("write Skill diagnostic: %w", err)
+		}
 	}
 
 	final := result.FinalText()

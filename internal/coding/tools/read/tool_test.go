@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,8 +21,8 @@ func TestReadDefinition(t *testing.T) {
 	if got, want := definition.Schema.Name, "read"; got != want {
 		t.Fatalf("Name = %q, want %q", got, want)
 	}
-	if !strings.Contains(definition.Schema.Description, "workspace-relative") {
-		t.Fatalf("Description = %q, want workspace-relative boundary", definition.Schema.Description)
+	if !strings.Contains(definition.Schema.Description, "workspace-relative or absolute") {
+		t.Fatalf("Description = %q, want relative-or-absolute boundary", definition.Schema.Description)
 	}
 	if !definition.CanRunParallel {
 		t.Fatal("CanRunParallel = false, want true")
@@ -261,9 +260,9 @@ func TestReadValidatesArguments(t *testing.T) {
 		{name: "unknown field", arguments: `{"path":"file.txt","extra":true}`, want: "unknown field"},
 		{name: "missing path", arguments: `{}`, want: "path is required"},
 		{name: "blank path", arguments: `{"path":"  "}`, want: "path is required"},
-		{name: "absolute path", arguments: fmt.Sprintf(`{"path":%q}`, filepath.Join(rootPath, "file.txt")), want: "workspace-relative"},
 		{name: "parent traversal", arguments: `{"path":"../outside.txt"}`, want: "workspace-relative"},
 		{name: "nested parent component", arguments: `{"path":"dir/../file.txt"}`, want: "must not contain .."},
+		{name: "absolute path too long", arguments: fmt.Sprintf(`{"path":%q}`, "/"+strings.Repeat("x", 4<<10)), want: "exceeds the 4096-byte limit"},
 		{name: "zero offset", arguments: `{"path":"file.txt","offset":0}`, want: "offset must be at least 1"},
 		{name: "zero limit", arguments: `{"path":"file.txt","limit":0}`, want: "limit must be at least 1"},
 		{name: "fractional limit", arguments: `{"path":"file.txt","limit":1.5}`, want: "decode arguments"},

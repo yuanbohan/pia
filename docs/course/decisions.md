@@ -409,6 +409,58 @@
 - 所有权：fixed request limits 由 coding product profile 提供；`ai.RequestLimits` 只实现 model-neutral clamp，`ai.Request.MaxOutputTokens` 只承载一次调用的值；threshold、soft ceiling、retained target、summary prompts、cut、projection 与 failure semantics 仍由 coding-owned Conversation 负责。Provider 只映射 `max_tokens`，不拥有估算或 compaction policy。
 - 精度边界：字符近似是冻结 Pi 基线，不是 tokenizer 等价物。真实 traces 必须比较 estimate 与 Provider-reported input；大型项目、Skills、模型/reasoning/tool schema 或 prompt 变化仍按 D55/D57 强制复评。
 
+### D59. 产品统一命名为 Pia
+
+- 日期：2026-07-20
+- 决定：产品、架构和后续课程讨论统一使用 **Pia**。`pi-go` 只保留为当前 repository、workspace directory、Go module/import path 与历史记录中的技术标识；是否重命名 repository/module 是另一项有迁移影响的工作，未经明确批准不在本课机械修改。
+- CLI 边界：`pia` 不再被描述为临时产品名；`cmd/pia` 是当前本地入口，但其参数、输出协议、部署形态与公共 SDK 承诺仍不稳定。
+- 原因：产品身份与现存技术路径是两个维度。现在统一术语可以避免把 Pi 基线、pi-go repository 和最终产品混成同一个概念，同时不为命名讨论引入无关 module migration。
+
+### D60. read 支持 workspace-relative 与 absolute host path
+
+- 日期：2026-07-20
+- 决定：Pia 的 model-facing `read` 同时接受 workspace-relative path 和 absolute host path。relative path 继续经 workspace `os.Root` 打开，拒绝 `..` 与逃逸 symlink；absolute path 由 host filesystem 直接解析，可以读取 workspace 外的 regular file。成功结果对 relative input 保留规范化 relative path；absolute input 在 host open 和结果显示中保留原始路径语义（显示时只转换分隔符），不能在 symlink-aware host resolution 前用 lexical `filepath.Clean` 改写 `..`。
+- 保留契约：目标仍必须是 opened-handle 验证过的 regular file 和合法 UTF-8；arguments、单页行数/bytes、errors、cancellation 与 concurrency 仍保持有界。`write` 与 `edit` 继续受 workspace `os.Root` 限制，bash 的既有 host authority 不变。
+- 安全与数据外发：absolute `read` 明确授予模型调用用户的 host read authority，不是 sandbox 或 trusted-root allowlist。模型选择的外部文件内容和 tool result 可能发送给 Provider；operator documentation 必须直说这项边界。此扩权支持显式 absolute reads 与外部 references，但不再被解释为 Skill discovery 扫描或 external-symlink 支持的理由，也不是宣称读取外部文件天然安全。
+
+### D61. Skills 是 Pia 核心能力，首版从 Pia Skill v1 开始
+
+- 日期：2026-07-20
+- 决定：Pia 直接拥有 Skills 的 discovery、bounded disclosure、activation 和 context-lifecycle 责任。首版只实现 project-local Pia Skill v1：selected workspace 根目录下 `.pia/skills/<direct-child>/SKILL.md` 的 required name、description 和 Markdown instructions。plugin、extension 或 package 可以在以后分发 Skills，但不是启用核心 Pia lifecycle 的前置层。
+- 当前范围：workspace 是 project scope boundary；不向上寻找 repository root，不递归发现 nested Skills，不扫描 `.agents/skills`、`.claude/skills`、user、admin、system 或其他 global locations，也不通过 external symlink 引入 Skill。catalog location 使用 workspace-relative path。Pia Skill v1 只加载 `SKILL.md`；`scripts/`、`references/`、`assets/` 和其他 supporting files 不被发现、解析、列出、注入或赋予执行语义，是否支持全部留给后续决定。Coding Agent 的通用 tools 仍可处理普通项目文件，但这不构成 Skill resource support。
+- Validation：缺少 name、缺少 description 或 YAML 完全无法解析的 Skill 跳过。Agent Skills strict name constraints 仍产生 diagnostics，但 name 与父目录不一致、超过 64 字符或字符形式不合规不单独导致拒绝；Pia 继续加载 bounded non-empty frontmatter name。同名 entries 按 stable lexical path 选择一个并 warning。规范合规性与 runtime acceptance 是两个不同事实。
+- 长期方向：Pia Skill v1 有意沿用 Agent Skills 的基础目录、frontmatter 和渐进披露形状，避免形成不可迁移的私有格式。完整 Agent Skills compatibility、Claude Code/Codex community roots、global scopes、optional metadata、supporting resources 与 vendor runtime semantics 必须在后续按真实需求逐项校准、拆课和声明，当前不得提前宣称支持。
+- 上下文义务：Pia Skill v1 先实现 metadata catalog 与普通 `read` 按需正文，不预载 supporting files。Lesson 08 已有 compaction，因此未来 managed activation 仍需要稳定身份、去重和 compaction protection；catalog 必须有独立预算并触发 D55/D57 的 Skills-enabled 真实项目复评。Lesson 09 决定 validation、diagnostics 与 catalog budget；Lesson 10 在重新开课校准后决定 structured activation 与 compaction projection。
+
+### D62. Skills 核心生命周期拆为 discovery/catalog 与 activation/continuity 两课
+
+- 日期：2026-07-20
+- 决定：原 Lesson 09 在加入多来源 compatibility、bounded catalog、dedicated activation、resource lifecycle、dedupe 和 compaction protection 后成为 XLarge，不再作为一个可进入课程。本决定以开课后的新证据修正 D43 的三课假设：Lesson 09 收敛为 Medium 的 Pia Skill v1 discovery、bounded catalog 与普通 `read` 基础使用闭环；新增 Lesson 10 作为 Large 的 managed activation 与 Context Continuity，且保持未开始直到学习者明确进入。
+- Lesson 09：只解析 `.pia/skills` 直接子目录的 bounded name/description，构建有独立预算的 catalog，证明正文不进入 initial request，并复用普通 `read` 在匹配后加载 instructions。D60 absolute-read 是已完成的独立能力，Pia Skill v1 location 只需 workspace-relative path。
+- Lesson 10：只在 Lesson 09 完成后消费稳定 catalog，把普通 read result 升级为有 stable identity、dedupe 和 compaction 后 durable model-visible projection 的 structured activation。community/global discovery、完整 supporting-resource engine、installer/plugin、vendor-specific runtime 和完整交互式 invocation 仍不自动并入。
+- 原因：discovery/catalog 与 activation/continuity 有不同 owner、失败语义和完成信号；前者属于 filesystem-to-prompt projection，后者跨 tool execution 与 Conversation compaction lifecycle。分别完成可以逐课解释和验证，也避免用“最小实现”牺牲 Skills 作为 Pia 核心能力所需的 continuity。
+
+### D63. 项目指令兼容与 Skills 分属不同课程边界
+
+- 日期：2026-07-20
+- 当前事实：Lesson 06 已实现 selected workspace 根目录的最小 project instructions 支持，候选顺序是 `AGENTS.md`、`AGENTS.MD`、`CLAUDE.md`、`CLAUDE.MD`，只加载第一个有效候选。冻结 Pi 同样把 context files 与 Skills 分开，但会加入 global agent-dir 文件并遍历 ancestors；Codex 按 project root 到 CWD 每层选择一个 `AGENTS.override.md`/`AGENTS.md`/fallback，Claude 则累加 `CLAUDE.md`/`CLAUDE.local.md` 并对 descendants 做按需加载。三者不是一套可机械合并的规则。
+- 课程边界：Lesson 09/10 只负责 project Skills catalog 与 activation，不发现或解释 `AGENTS.md`、`CLAUDE.md`。Lesson 06 的 workspace-root first-match 行为继续有效；完整 project-only instruction chain 作为尚未编号的独立 prompt/context 方向，等 project root、launch CWD、nested scope 与 conflict semantics 有足够证据后再拆课。即使以后增强，也不自动引入 user/global Codex 或 Claude instructions。
+- 原因：project instructions 是每次任务都应可见的 standing context；Skills 是 metadata-first、按任务选择后才加载正文的渐进披露资源。把两者放进同一 loader 或同一课程会混淆触发时机、预算、冲突和 compaction continuity。
+
+### D64. Agent Skills 与 Claude/Codex compatibility 分阶段补充
+
+- 日期：2026-07-20
+- 决定：Lesson 09 不实现或声明完整 Agent Skills、Claude Code Skills 或 Codex Skills compatibility，只实现 D61 的 Pia Skill v1。`.agents/skills`、`.claude/skills`、ancestor/nested roots、user/global scopes、symlinked Skills、optional resources、explicit invocation 和 vendor runtime fields 都进入 Lesson 10 之后的未编号兼容方向。
+- 原因：一个现实 Skill 可以同时携带长 instructions、scripts、references、assets、tool grants、dynamic preprocessing、subagents、hooks 和 client-specific metadata。一次性“兼容”会把 discovery、execution、permissions、context lifecycle 与 distribution 混成无法准确验收的 Skill engine。先建立 Pia 自己的最小可靠闭环，既保留未来迁移形状，也让每项兼容能力以后有独立证据、失败语义和完成信号。
+
+### D65. Pia Skill v1 采用一次性有界 snapshot 和非阻塞 diagnostics
+
+- 日期：2026-07-20
+- Discovery 与解析：每个 Conversation 只在创建 Core Agent 前读取一次 selected workspace 的 `.pia/skills`。source 必须是直接 directory entry，不能是 symlink：先经 `os.Root.Lstat` 检查，再以 supported-platform nonblocking policy 打开 directory handle，最后以第二次 non-following lookup 和 `os.SameFile` 验证 handle/entry identity，避免 check/open 竞态把 symlink target 激活。该 verified source handle 保持到 metadata snapshot 完成；每个 direct Skill directory 与其 `SKILL.md` 都通过 Darwin/Linux `openat` 相对父 handle 打开，并以 `O_NOFOLLOW`、`O_NONBLOCK` 与 opened-handle type validation 固定整条读取链，source path 后续被 rename、replacement 或 symlink 替换都不会混入另一 source 的 metadata。source enumeration 在输入侧最多读取 257 个 direct entries，超过 256 时整个可选 Skill source 以一条 warning 忽略。未超限时先按目录名 lexical sort，再最多检查 64 个直接、非 symlink Skill directories。没有 watcher 或 Run 中途 reload。discovery 只从最多 16 KiB 的 prefix 提取 YAML frontmatter，使用 `go.yaml.in/yaml/v3`，只消费 string `name` 与 `description`；其他字段 warning 后忽略，正文及 supporting files 不被解析、验证或注入。
+- Validation：缺少/空 name、缺少/空 description、无法解析的 YAML、重复 mapping key、非 string 必需字段、不安全目标、非 UTF-8 direct Skill entry name 或超限 frontmatter 跳过。Agent Skills 的 1–64 个小写字母/数字/连字符、无首尾/连续连字符并与目录名一致仍是规范诊断；Pia 对 65–256 characters、字符形式或目录 mismatch 只 warning 并加载 frontmatter name，超过 256 characters 才按 hard safety 跳过。同名 Skill 选择 workspace-relative location lexical 较小者。description 超过 1024 characters 时只在 catalog 中截断并 warning。
+- Catalog budget：稳定 system prompt 只加入 XML-escaped name、description 和 workspace-relative `SKILL.md` location，并指导模型匹配时用现有 `read` 获取完整文件；没有有效 Skill 时整个 section 省略。catalog 使用 D58 的 `ceil(characters / 4)` 估算，最多 4096 estimated tokens；超限时先统一缩短 descriptions，仍放不下才省略 lexical tail entries，所有实际裁剪都有 warning。该值只是首版 ceiling，必须随真实大型项目和 Skills-enabled context 分桶继续复评。
+- Diagnostics 与 trust：单个 Skill 或整个可选 source 的发现失败不阻塞普通 coding task。最多保留 64 条有界 `SkillDiagnostic`，进入内部 `RunResult` 和可选 trace；`cmd/pia` 只在 Run 和 trace 都成功后把它们作为简短 warning 写入 stderr，并在唯一输出边界同时 quote untrusted path 与 message，避免任何 producer 遗漏的控制字符伪造日志或操纵终端。首版没有 trust UI 或逐 Skill approval；选择 workspace 是操作者的 trust decision，metadata 可能自动发送给 Provider，完整 `SKILL.md` 在模型选择普通 `read` 后可能发送，Skill instructions 可以进一步引导现有高权限 tools。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -477,3 +529,20 @@
 - 2026-07-20：学习者确认首版 budget allocation 参考 Pi，并要求把 `64K` 澄清为不要求填满的 soft ceiling。课程采用 `20K` retained raw、`13,107` initial/update summary、`8,192` split-turn prefix 和 `4,096` Provider safety；同时明确记录这组值可能不足以支撑真实大型项目，尤其未来 Skills 会改变 context 组成。当前不解决或自动调参，待 Skills 引入及真实长项目验证时强制复评。该决定记录为 D57。
 - 2026-07-20：学习者要求开始实现，并在实现后展开说明无精确 tokenizer 时如何判断下一次请求达到 `192K`。实现采用最后有效 Provider usage 加尾部 `ceil(characters / 4)`、无 usage 时完整 request fallback，并在 compaction 后使旧 usage 显式失效；所有权和精度边界记录为 D58。
 - 2026-07-20：Lesson 08 首版实现和最终审查完成。request-local output clamp、between-Runs lazy compaction、Pi prompts、message-level cut、重复 summary、完整 History/Working Context 分离以及失败、取消、并发和 protocol 校验均有确定性测试；审查把连续 cut point 前移的重复线性扫描收敛为二分查找，并补齐 projected input 恰好等于 threshold 的测试。`make check` 与 `go test -race ./...` 全部通过，课程进入待理解确认且尚未提交。
+- 2026-07-20：学习者要求把 Lesson 08 直接提交并推送到 `main`；提交 `c967027` 已推送，未创建 feature branch 或 PR。学习者随后明确要求开始 Lesson 09。
+- 2026-07-20：Lesson 09 开课源码校准确认渐进披露主线：冻结 Pi 启动时只把 Skill name、description 与 location 放入 system prompt，模型匹配后通过普通 `read` 获取 `SKILL.md` 正文。旧提纲同时被收紧：完整来源发现属于 ResourceLoader/package/settings/trust 组合，而 Pi 的 `read` 可读绝对路径、pi-go 的 `read` 严格限制在 workspace；因此全局 Skill 不能在不改变读取安全边界的情况下机械移植。课程先讨论 project-only Skills 与外部 trusted roots 的边界，再形成实现决定。
+- 2026-07-20：学习者明确推翻 Lesson 09 的 project-only 候选并统一产品名为 Pia：`read` 必须接受 workspace-relative 与 workspace 外 absolute paths，Skills 是 Pia 核心需求而不是 Pi 式 extension 附属能力。对应产品、读取和 Skills 决定记录为 D59–D61。
+- 2026-07-20：继续核对 Agent Skills specification/client guide、Claude Code 与 Codex 官方文档后，Lesson 09 从 Medium 修正为 Large 的核心生命周期闭环：直接兼容 `.agents/skills` 与 `.claude/skills` 的 portable 内容，同时保留 `.pia/skills` native root；厂商私有 runtime extensions 明确不伪装成 portable semantics。普通 read 与 dedicated activation、同名 precedence 和 catalog budget 留待实现前讨论。
+- 2026-07-20：D59/D60 前置改造完成：system prompt identity 统一为 Pia；`read` 对 relative path 保留 `os.Root` containment，对 absolute path 使用 host nonblocking open 并校验实际 regular-file handle。项目内/外 absolute file、absolute symlink、relative escaping symlink、absolute directory/FIFO、分页、UTF-8、取消和 concurrency 契约均有测试；`make check` 与 `go test -race ./...` 通过。
+- 2026-07-20：学习者指出沟通后的 Skills 课程可能已经过大，并同意需要时逐课拆分。课程按 D62 将当前 Lesson 09 收敛为 discovery/bounded catalog（Medium），把 activation、dedupe 与 compaction continuity 移到未开始的 Lesson 10（Large）；absolute-read 只作为已完成前置，不另占课次。
+- 2026-07-20：学习者正式重新开始拆分后的 Lesson 09，并澄清 Claude/Codex compatibility 只面向当前项目，不发现全局 Codex/Claude Skills。重新核对官方语义和当前 Pia 后，D61/D62 与课程大纲改为 selected-workspace-only；`AGENTS.md`/`CLAUDE.md` 被确认是 Lesson 06 已有最小支持、未来独立增强的 project-instructions 能力，而不是 Skill discovery 的一部分，记录为 D63。
+- 2026-07-20：学习者进一步收紧 Lesson 09：当前只做 Pia 自己的 project-local Skills，不做 `.agents`/`.claude` community compatibility，也不因 Skill 可能包含大量 resources 与厂商 runtime 而一次性扩建完整引擎。课程改为 Pia Skill v1 discovery/catalog 加普通 `read` 基础使用闭环；managed activation 留在 Lesson 10，完整 Agent Skills、community/global scopes 与 resources 进入后续未编号方向，记录为 D64。
+- 2026-07-20：Lesson 09 按 D65 完成实现与最终审查：project-local snapshot、YAML metadata、宽松 name diagnostics、重复名 lexical winner、catalog/diagnostic ceilings、普通 `read` 基础使用、trace 和 success-time stderr warnings 均有确定性测试。审查额外拒绝重复 YAML mapping key 并收紧 unknown-field warning；`make check` 与 `go test -race ./...` 全部通过，课程进入待理解确认且尚未提交。
+- 2026-07-21：学习者确认理解 Lesson 09，并明确要求通过 feature branch 提交 PR；Lesson 09 至此结束，Lesson 10 仍未开始。
+- 2026-07-21：PR review 发现两个边界实现仍会在限制生效前改变或放大输入：absolute `read` 在 host open 前 lexical-clean path 会改变 symlink parent 后的 `..` 解析目标，`fs.ReadDir` 则会在 64-candidate ceiling 前物化整个 Skill directory。实现改为保留 absolute input 的 host path 语义，并为 Skill source 增加 256-entry input ceiling；两项均补充回归测试。
+- 2026-07-21：复审发现输入侧枚举改造直接 `Open` Skill source 时，source 自身若为无 writer FIFO 仍可能在类型诊断前阻塞。Skill source 改为复用 supported-platform nonblocking open 并通过 opened handle 验证 directory 类型，新增 source-FIFO 回归测试。
+- 2026-07-21：后续复审发现 CLI 以 `%s` 输出来自 untrusted directory name 的 diagnostic path，控制字符可伪造额外日志行或操纵终端。stderr warning 改为 quoted path，并加入 newline、carriage-return 与 ANSI escape 回归测试。
+- 2026-07-21：再一轮复审指出同类控制字符也可能经 filesystem error 进入 diagnostic message。修复提升为输出边界的类修复：CLI 同时 quote path 与 message，回归测试覆盖两个字段，因此不再依赖每个上游 producer 单独完成 sanitizer。
+- 2026-07-21：最新复审发现 Unix Skill directory name 可以包含非法 UTF-8 bytes，而 Provider JSON encoding 会用 replacement character 改写 catalog location，令模型随后无法用该 location 读取真实 `SKILL.md`。discovery 现在在候选进入 catalog 前跳过此类目录，并返回自身仍为合法 UTF-8 的有界诊断。
+- 2026-07-21：再后续复审发现 `os.Root` 会安全跟随 workspace 内的 `.pia/skills` relative symlink，但 Pia Skill v1 已明确排除 symlink source。source opening 增加前置 non-following check 与打开后的 handle/entry identity 复核，既拒绝 symlink，也不引入 check-then-open 竞态。
+- 2026-07-21：同一复审链继续暴露两个残余类问题：source handle 验证后，candidate metadata 仍从 workspace path 重开，source replacement 可混入另一目录；非 UTF-8 过滤也只覆盖 directory 而漏掉 symlink diagnostic path。discovery 改为在 verified source handle 上完成 direct-directory 与 `SKILL.md` 的逐级 no-follow `openat`，并在 filesystem type 分支前统一过滤所有 Skill-like invalid-UTF-8 entry names；回归测试覆盖 source replacement、directory/file symlink 与 Linux 非 UTF-8 directory/symlink。
