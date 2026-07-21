@@ -1,10 +1,10 @@
-# Pi Core Go Port 课程
+# Pia Coding Agent 课程
 
 ## 课程目标
 
-第一期通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。后续课程继续迁移 coding-relevant 能力，以 Pi parity 为下限，并通过受控评测追求稳定超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为；长期产品方向、指标和投入领域以根目录 [`STRATEGY.md`](../../STRATEGY.md) 为准。
+第一阶段通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。第二阶段继续迁移 Conversation/Working Context、compaction 与 Skills 等 coding-relevant 能力；更长期的课程以 Pi parity 为能力下限，并通过受控评测追求稳定超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为；长期产品方向、指标和投入领域以根目录 [`STRATEGY.md`](../../STRATEGY.md) 为准。
 
-产品名统一为 **Pia**；`pi-go` 只保留为当前仓库、目录和 Go module 标识，旧课程记录中的历史称呼不做机械改写。
+仓库与产品名统一为 **Pia**；Go module path 暂时仍为 `github.com/yuanbohan/pi-go`，直到后续单独决定是否迁移。旧课程记录中的历史称呼不做机械改写。
 
 固定参考基线：
 
@@ -25,7 +25,21 @@
 
 出现冲突时先修正文档，不让实现静默选择一套语义。
 
-## 第一期边界
+## 课程阶段与文档索引
+
+| 阶段 | 课程范围 | 阶段目标 | 实施与课程文档 | 当前状态 |
+|---|---|---|---|---|
+| 第一阶段 | Lessons 00–06 | 建立最小 headless coding loop，并用本地 `pia` 命令完成真实 one-shot coding task | [基础实施计划](../plans/2026-07-15-001-pi-core-go-learning-port-plan.md)、[Lesson 06 one-shot 实施计划](../plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md)、[第一阶段课程表](#phase-1-courses) | 全部已提交 |
+| 第二阶段 | Lessons 07–10 | 扩展 Conversation/Working Context、compaction 与 project-local Skills，保持完整 History 和模型工作视图可独立演进 | [第二阶段滚动课程实施计划](#第二阶段滚动课程实施计划)、[第二阶段课程表](#phase-2-courses) | Lessons 07–09 已提交；Lesson 10 未开始 |
+| 未编号后续 | Lesson 10 之后 | 根据已完成课程和真实使用证据，再拆分 Runtime 韧性、Session、Orchestration、评测等方向 | [尚未编号的后续方向](#尚未编号的后续方向) | 尚未进入实施 |
+
+根 README 只保留本页入口；阶段实施文档、逐课链接和状态以这里为准。第一阶段有稳定的基础计划与 Lesson 06 专项计划；第二阶段采用滚动计划，由本页课程表和对应 lesson 文档共同承载，不再创建一份重复的阶段计划文件。新增课程时，只需在所属阶段的课程表增加一行并链接 lesson 文档；边界尚未明确的能力先放入“尚未编号的后续方向”。
+
+## 第一阶段边界
+
+第一阶段包含 Lessons 00–06。它的实施契约由[基础实施计划](../plans/2026-07-15-001-pi-core-go-learning-port-plan.md)与 [Lesson 06 one-shot 实施计划](../plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md)共同承载。
+
+下面使用 Lesson 07 已校准的 Conversation History、Working Context 和 Conversation Owner 术语描述第一阶段闭环，以保持当前文档一致；这只是后续课程对所有权的修正，不把 Lesson 07 归入第一阶段。
 
 第一阶段只证明最短 coding 闭环：
 
@@ -51,7 +65,7 @@ task + system prompt + working context + tool schemas + workspace context
 - `Headless`：没有 TUI 或网页界面。第一阶段还进一步限定为单目录、单 active Run 和单进程内存上下文，但这些不是“headless”一词本身的定义。
 - `Agent Manager`：后续可能负责用户、仓库、Session、并发、worktree 和 IM 路由的服务；不属于第一阶段 Runtime。
 
-第一阶段不实现 Goal Runtime、Session 创建/持久化/恢复、自动 compaction、steering/follow-up、完整 subscription 生命周期、权限审批、公共 SDK、gRPC、IM、多用户、多仓库、worktree、GitHub 管理或自动 Pi 对比。这里推迟的是 Session 基础设施；Coding Agent 在当前进程内保留完整 Conversation History、Core Agent 保留 Working Context，属于已经实现的核心语义。
+第一阶段交付时不实现 Goal Runtime、Session 创建/持久化/恢复、自动 compaction、steering/follow-up、完整 subscription 生命周期、权限审批、公共 SDK、gRPC、IM、多用户、多仓库、worktree、GitHub 管理或自动 Pi 对比。Lesson 07 后续把完整 Conversation History 与 Working Context 的所有权分开，Lesson 08 再加入自动 compaction；它们都属于第二阶段，不改变 Lessons 00–06 的阶段归属。
 
 ## 每课工作方式
 
@@ -82,7 +96,7 @@ flowchart LR
 6. 一个 commit 只收录已确认课程或学习者明确要求的计划调整，不夹带下一课或无关修改。
 7. 讨论或确认课程设计不等于开始课程；只有学习者明确说“开始第 NN 课”后，该课才进入“学习中”。
 8. 导师必须持续质疑学习者提出的设计，也要复查自己先前给出的判断；以冻结 Pi 的源码、文档、测试和可复现实验为证据，不以双方同意代替验证。
-9. 讨论中明确区分“学习者假设”“已验证的 Pi 契约”“候选 Go 机制”和“已确定的 pi-go 决策”。证据推翻旧结论时，先明确纠正并更新记录，再进入实现。
+9. 讨论中明确区分“学习者假设”“已验证的 Pi 契约”“候选 Go 机制”和“已确定的 Pia 决策”。证据推翻旧结论时，先明确纠正并更新记录，再进入实现。
 10. 每个新概念必须先讲解术语、Pi 源码路径和至少一个具体例子，再进行理解检查。
 11. 课程默认采用循序渐进、讲解优先的方式；练习只用于检查关键理解，不用连续出题代替讲解。
 12. 开始实现后，讲解必须跟随实际 Go 代码和测试展开；遇到不确定或困难的设计点，先共同检查证据和取舍，确认理解后再继续。
@@ -98,23 +112,27 @@ flowchart LR
 - `待提交`：学习者已确认理解，尚未明确要求 commit。
 - `已提交`：学习者明确要求后完成了该课提交。
 
-## 第一期课程地图
+<a id="phase-1-courses"></a>
 
-| 课次 | 主题 | 核心产物 | 状态 |
+## 第一阶段课程（Lessons 00–06）
+
+| 课次 | 课程文档 | 核心产物 | 状态 |
 |---|---|---|---|
-| 00 | 学习契约与冻结基线 | `go.mod`、仓库约束和上游源码基线 | 已提交 |
-| 01 | AI 协议与 Faux Provider | 消息、内容块、stream、Provider 接口和脚本 Provider | 已提交 |
-| 02 | 单次 Provider Turn 与 transcript | 一次模型流、assistant message、request context 和 Run 终态 | 已提交 |
-| 03 | 多轮 Tool Loop 与屏障式调度 | schema、参数校验、tool results、错误继续、只读并行和串行屏障 | 已提交 |
-| 04 | DeepSeek Provider | OpenAI-compatible 消息转换、SSE、reasoning、tool calls、usage 和错误映射 | 已提交 |
-| 05 | Coding Tools | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 已提交 |
-| 06 | Headless coding task | 当前 `pia` 本地入口、coding prompt、final-only 输出和本地 Go bug-fix 验收 | 已提交 |
+| 00 | [学习契约与冻结基线](lessons/00-learning-contract-and-baseline.md) | `go.mod`、仓库约束和上游源码基线 | 已提交 |
+| 01 | [AI 协议与 Faux Provider](lessons/01-ai-protocol-and-faux-provider.md) | 消息、内容块、stream、Provider 接口和脚本 Provider | 已提交 |
+| 02 | [单次 Provider Turn 与 transcript](lessons/02-agent-loop-and-transcript.md) | 一次模型流、assistant message、request context 和 Run 终态 | 已提交 |
+| 03 | [多轮 Tool Loop 与屏障式调度](lessons/03-tool-loop-and-staged-scheduling.md) | schema、参数校验、tool results、错误继续、只读并行和串行屏障 | 已提交 |
+| 04 | [DeepSeek Provider](lessons/04-deepseek-provider.md) | OpenAI-compatible 消息转换、SSE、reasoning、tool calls、usage 和错误映射 | 已提交 |
+| 05 | [Coding Tools](lessons/05-coding-tools.md) | `read`、`write`、`edit`、`bash`、workspace 边界和进程取消 | 已提交 |
+| 06 | [Headless coding task](lessons/06-headless-coding-task.md) | 当前 `pia` 本地入口、coding prompt、final-only 输出和本地 Go bug-fix 验收 | 已提交 |
 
-## 后续课程的滚动式大纲
+## 第二阶段滚动课程实施计划
 
-后续课程不一次性写成详细实施计划。大纲只给最近、边界已经基本明确的课程分配稳定课次；越远的内容只保留阶段方向，等前面课程产生真实代码和问题后再决定如何拆课。表格增加信息是为了说明判断依据，不是提前锁定接口、package、算法或完整测试矩阵。
+第二阶段从 Lesson 07 开始，在第一阶段 one-shot coding loop 上继续建设 Conversation/Working Context、compaction 与 Skills。当前稳定范围是 Lessons 07–10；Goal Runtime、Session 持久化、Orchestration、Gateway、IM、TUI 和正式对照评测仍属于未编号后续方向，不因长期策略已确认就提前进入本阶段。
 
-更新大纲不等于开始课程。每一课仍需学习者明确要求开始；开课时再重新核对冻结 Pi、当前 pi-go 结构以及 Codex/Grok Build 中与该能力直接相关的证据，并允许据此修正原大纲。
+本节是第二阶段的滚动课程实施计划。它只给边界已经基本明确的课程分配稳定课次，并记录能力、来源证据、Pia 边界、完成信号、依赖、规模和状态；具体 API、package、算法和测试矩阵在每课开课时通过源码校准后写入对应 lesson 文档。越远的内容只保留阶段方向，等前面课程产生真实代码和问题后再决定如何拆课。
+
+更新计划不等于开始课程。每一课仍需学习者明确要求开始；开课时再重新核对冻结 Pi、当前 Pia 结构以及 Codex/Grok Build 中与该能力直接相关的证据，并允许据此修正滚动计划。
 
 ### 规模约定
 
@@ -127,9 +145,11 @@ flowchart LR
 | Large | 一个仍然不可再少的核心契约，但会跨层改变状态、所有权或生命周期 |
 | XLarge | 混合了多个可独立讲解和验收的能力；不是可开课规模，必须先讨论并拆分 |
 
-### 已编号的近期课程
+<a id="phase-2-courses"></a>
 
-| 阶段内课次 | 全局课次 | 解锁的闭环 | Pi 的大致做法 | pi-go 本课边界 | 结束信号 | 依赖 | 规模 | 状态 |
+### 第二阶段课程（Lessons 07–10）
+
+| 阶段内课次 | 全局课次 | 课程文档与解锁的闭环 | Pi 的大致做法 | Pia 本课边界 | 结束信号 | 依赖 | 规模 | 状态 |
 |---|---:|---|---|---|---|---|---|---|
 | 二期 01 | 07 | [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md) | `SessionManager` 保存完整 session entries 并构造上下文，core `Agent` 持有 working messages，每次模型调用再生成 request-local view | 只建立三种角色的内存所有权边界；不做 compaction、持久化或 Skills | history 与 working context 的所有权独立，Provider 不能反向修改任何 owner | 06 | Large | 已提交 |
 | 二期 02 | 08 | [Context budget 与 compaction 核心](lessons/08-context-budget-and-compaction.md) | `AgentSession` 在 `agent_end` 后和新 prompt 前检查阈值；compaction core 摘要旧内容并保留 protocol-valid 近期后缀，`SessionManager` 重建 model context | 只完成 settled Run 后、下一次 Provider call 前的 threshold compaction 闭环；不含 context-overflow retry、branch summary 或持久化 | 人为缩小 budget 后，两次顺序 Run 之间可触发压缩；下一次 request 使用 summary 加保留后缀，完整 History 仍保留原始消息 | 07 | Large | 已提交 |
@@ -147,9 +167,9 @@ flowchart LR
 | Runtime 韧性 | `AgentSession` 对可恢复 Provider 错误做有界退避，并把 context overflow 交给 compaction 路径 | Provider retry、执行预算与循环保险丝可能不是同一课，不能现在打包 | Lesson 10 完成后，依据真实长任务失败重新拆分 |
 | 事件与文本交互 | core Agent 和 `AgentSession` 发出语义事件，并用 steering/follow-up queues 接收运行中的输入 | 整体是 XLarge 方向；事件契约和文本交互至少需要分别形成闭环 | 出现第一个真实 headless consumer 时细化 |
 | Session 持久化与恢复 | `SessionManager` 保存版本化记录，并从记录重建 active context | 存储格式与恢复生命周期是两个候选责任，不预先合课 | 内存上下文和 compaction 契约稳定后细化 |
-| Orchestration、Gateway 与 IM | Pi 的 coding core 提供 Session 生命周期与事件，但不替 pi-go 定义外部服务拓扑 | Orchestrator 需要协调多个隔离 Session，Gateway 与 IM adapters 只做外层接入；整体是 XLarge 方向，必须按已证明的 Session、事件和任务生命周期责任拆分 | Session 持久化/恢复和非 UI 事件消费者稳定后细化 |
+| Orchestration、Gateway 与 IM | Pi 的 coding core 提供 Session 生命周期与事件，但不替 Pia 定义外部服务拓扑 | Orchestrator 需要协调多个隔离 Session，Gateway 与 IM adapters 只做外层接入；整体是 XLarge 方向，必须按已证明的 Session、事件和任务生命周期责任拆分 | Session 持久化/恢复和非 UI 事件消费者稳定后细化 |
 | TUI | Pi 的 interactive mode 订阅 Session 事件并处理 terminal、渲染和输入 | 整体是 XLarge 方向，进入独立后续阶段且必须拆课；TUI 只做外层投影 | 事件、交互和恢复均有非 TUI 消费者验证后细化 |
-| 稳定对照评测 | Pi 没有替 pi-go 定义对照协议；需要在两个 agent 外建立公平实验 | 评测契约、runner/corpus 和对照迭代是多个能力，不提前塞进一课 | coding-relevant Pi 能力完成覆盖审计后细化 |
+| 稳定对照评测 | Pi 没有替 Pia 定义对照协议；需要在两个 agent 外建立公平实验 | 评测契约、runner/corpus 和对照迭代是多个能力，不提前塞进一课 | coding-relevant Pi 能力完成覆盖审计后细化 |
 
 Goal Runtime、Orchestrator/Agent Manager、Gateway、公共 SDK、gRPC、IM、多用户、多仓库、worktree/GitHub 管理、extensions 和 MCP 仍未进入已编号课程。它们是否属于长期策略与它们何时进入实施是两个问题；第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于已经确定后续公开 API。
 
@@ -165,7 +185,7 @@ Goal Runtime、Orchestrator/Agent Manager、Gateway、公共 SDK、gRPC、IM、�
 - 协议完整性、安全边界和可恢复性是门槛，不能用更高的任务通过率掩盖明显回归；
 - 具体任务集、重复次数、统计门槛、trace 规范和评测产物位置留到正式评测课程决定，不在当前大纲中提前设计。
 
-Lesson 06 被忽略的本地 fixture 和人工复核只证明第一期闭环，不承担上述对照结论。后续每课仍做本课的确定性验收；正式 benchmark 设施等评测方向被拆成可实施课程后再建设。
+Lesson 06 被忽略的本地 fixture 和人工复核只证明第一阶段闭环，不承担上述对照结论。后续每课仍做本课的确定性验收；正式 benchmark 设施等评测方向被拆成可实施课程后再建设。
 
 ## 课程记录约定
 
@@ -176,17 +196,17 @@ Lesson 06 被忽略的本地 fixture 和人工复核只证明第一期闭环，�
 - 要掌握的行为契约；
 - 讨论题和学习者结论；
 - Go 实现范围与明确非目标；
-- Pi 源码证据和 pi-go 测试场景；
+- Pi 源码证据和 Pia 测试场景；
 - 本课产生或修改的文件；
 - 未解决问题和对后续课程的影响；
 - 当前状态与提交信息。
 
 长期有效的架构选择写入 `docs/course/decisions.md`。只影响一课的推导、问题和练习答案保留在对应课文档中。
 
-## 第一期代码边界
+## 当前代码边界
 
 ```text
-pi-go/
+pia/
 ├── cmd/pia/                   # 当前 one-shot 本地入口
 ├── internal/
 │   ├── ai/                    # 消息、ai.Provider、stream 和通用模型协议
@@ -198,12 +218,10 @@ pi-go/
 │   └── coding/                # Conversation History、prompt、workspace、装配和 coding tools
 ├── docs/
 │   ├── course/                # 课程、讨论与决策
-│   └── plans/                 # 当前实施计划
+│   └── plans/                 # 第一阶段与专项实施计划
 └── go.mod
 ```
 
 `internal/` 是当前的有意选择：接口会随学习不断校正。`cmd/pia` 把启动时的当前目录作为 workspace，只接收一条 task prompt，用于本地运行与验收；Pia 产品名已经确定，但当前 CLI 参数与外部协议仍不稳定。等核心语义稳定并出现真实调用方后，再决定公共 Go SDK、gRPC 或 Agent Manager。
 
 冻结 Pi commit 和 package version 只保存在课程文档，不进入 Runtime package。Lesson 06 的真实验收项目、运行副本和 trace 只保存在被忽略的 `tmp/` 中，不提交 fixture 或 harness。正式 Pi 对照评测属于尚未编号的后续方向；其可重复设施和产物边界在对应课程开始时另行决定。
-
-第 06 课的详细记录见 [Headless one-shot Coding Task](lessons/06-headless-coding-task.md)，第 07 课记录见 [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md)。Lesson 08 的边界、源码证据和实现结果记录在 [Context budget 与 compaction 核心](lessons/08-context-budget-and-compaction.md)。Lesson 09 已完成并记录在 [Pia Project Skills v1 的发现与基础披露](lessons/09-skill-discovery-and-bounded-catalog.md)；拆出的 Lesson 10 [Skill 激活与 Context Continuity](lessons/10-skill-activation-and-context-continuity.md) 尚未开始。

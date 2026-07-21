@@ -1,32 +1,21 @@
 # Pia
 
-Pia 是面向学习、验证和长期演进的 Go coding agent。当前仓库名与 Go module path 仍保留 `pi-go`，以冻结的 [Pi](https://github.com/earendil-works/pi) coding agent 为语义基线，但产品和后续课程讨论统一使用 **Pia**。
+Pia 是面向学习、验证和长期演进的 Go coding agent。仓库与产品名均为 **Pia**；Go module path 暂时仍为 `github.com/yuanbohan/pi-go`，直到后续单独决定是否迁移。项目以冻结的 [Pi](https://github.com/earendil-works/pi) coding agent 为语义基线。
 
 项目以课程驱动：先阅读冻结的 Pi 源码并提炼可观察契约，再完成对应 Go 实现、测试、讨论记录和一次由学习者批准的提交。
 
-第一阶段只构建最小 coding loop；Lesson 07 进一步明确其内存所有权：Coding Agent 的 Conversation Owner 保存同一对话的完整有序 Conversation History，Core Agent 保存可替换的 Working Context，每次 DeepSeek 请求使用后者的独立 snapshot。Lesson 08 已加入两个 Runs 之间的 Working Context compaction；Agent 可以多轮调用 `read`、`write`、`edit`、`bash` 并追加 tool results，直到模型停止调用工具。Lesson 06 用本地 `pia` 命令把这些能力组装为当前目录中的 one-shot coding agent，并通过本地、被忽略的 Go bug-fix 项目验证真实闭环。
+课程按阶段推进。第一阶段包含 Lessons 00–06，交付最小 headless coding loop 和本地 `pia` one-shot coding agent；第二阶段从 Lesson 07 开始扩展 Conversation/Working Context、compaction 与 Skills 等 coding-relevant 能力。目前 Lessons 00–09 已完成，Lesson 10 尚未开始。每个阶段的目标、实施文档、课程表和当前状态统一记录在[课程阶段与实施计划](docs/course/README.md)。
 
-第一阶段不实现 Goal Runtime、Session 持久化、TUI、公共 SDK、RPC/IM、多用户、多仓库、worktree/GitHub 管理、权限策略矩阵或 Pi 对比工具。bash 不是 sandbox；具体安全边界和验收约束记录在完整实施计划中。
+当前实现仍是单 workspace、单 active Run、进程内状态的本地入口，尚未进入 Goal Runtime、Session 持久化、TUI、公共 SDK、RPC/IM、多用户、多仓库或 worktree/GitHub 管理。bash 不是 sandbox；具体安全边界和验收约束记录在课程与实施文档中。
 
 长期目标是在迁移 coding-relevant Pi 能力后，让 Pi parity 成为能力下限，并通过同模型、同任务、多次独立运行的稳定评测追求可证明的持续超越。Skills 是 Pia 的核心能力；当前先实现 project-local Pia Skill v1 的最小可靠闭环，完整 Agent Skills、Claude Code/Codex community roots 与 vendor runtime compatibility 分阶段补充，而不是一次性扩建 Skill engine。Pi 是语义基线和主要对照组；其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据用于发现候选机制，而不是直接复制。长期产品将通过 Orchestrator、Gateway 和 IM 驱动多个可持久化、可恢复且相互隔离的 Sessions；完整方向、指标和投入领域见[产品策略](STRATEGY.md)。
 
-- [产品策略](STRATEGY.md)
-- [课程总纲](docs/course/README.md)
-- [设计决策](docs/course/decisions.md)
-- [共享术语](CONCEPTS.md)
-- [第一阶段基础实施计划](docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md)
-- [Lesson 06：`pia` one-shot 实施计划](docs/plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md)
-- [第 0 课：学习契约与基线](docs/course/lessons/00-learning-contract-and-baseline.md)
-- [第 1 课：AI 协议与 Faux Provider](docs/course/lessons/01-ai-protocol-and-faux-provider.md)
-- [第 2 课：单次 Provider Turn 与 transcript](docs/course/lessons/02-agent-loop-and-transcript.md)
-- [第 3 课：多轮 Tool Loop 与屏障式调度](docs/course/lessons/03-tool-loop-and-staged-scheduling.md)
-- [第 4 课：OpenAI-Compatible DeepSeek Provider](docs/course/lessons/04-deepseek-provider.md)
-- [第 5 课：Coding Tools 与 Workspace 边界](docs/course/lessons/05-coding-tools.md)
-- [第 6 课：Headless one-shot Coding Task](docs/course/lessons/06-headless-coding-task.md)
-- [第 7 课：Conversation History、Working Context 与 Request Snapshot](docs/course/lessons/07-conversation-history-and-active-context.md)
-- [第 8 课：Context budget 与 compaction 核心](docs/course/lessons/08-context-budget-and-compaction.md)
-- [第 9 课：Pia Project Skills v1 的发现与基础披露](docs/course/lessons/09-skill-discovery-and-bounded-catalog.md)
-- [第 10 课：受管理的 Skill 激活与 Context Continuity](docs/course/lessons/10-skill-activation-and-context-continuity.md)
+## 文档导航
+
+- [产品策略](STRATEGY.md)：长期方向、指标与投入领域。
+- [课程阶段与实施计划](docs/course/README.md)：阶段边界、实施文档、逐课目录与当前进度。
+- [设计决策](docs/course/decisions.md)：已确定的课程与架构决策。
+- [共享术语](CONCEPTS.md)：项目内稳定使用的概念边界。
 
 ## 当前 one-shot 命令
 
@@ -59,5 +48,3 @@ make check
 ```bash
 make race
 ```
-
-当前进度：第 00 至 09 课已完成并提交；Lesson 09 已实现 project-local Pia Skill v1 discovery、bounded catalog、普通 `read` 基础使用闭环、operator diagnostics 和完整验证。managed activation/compaction continuity 已拆为尚未开始的 Lesson 10。详细信息见[课程总纲](docs/course/README.md#后续课程的滚动式大纲)。
