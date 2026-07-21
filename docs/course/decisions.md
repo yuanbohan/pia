@@ -415,7 +415,7 @@
 - 修正日期：2026-07-21
 - 决定：产品、repository、workspace directory 约定和后续课程讨论统一使用 **Pia**；repository 为 `yuanbohan/pia`，Go module/import path 为 `github.com/yuanbohan/pia`。2026-07-21 的明确迁移指令取代此前暂缓 technical-path migration 的边界。
 - CLI 边界：`pia` 不再被描述为临时产品名；`cmd/pia` 是当前本地入口，但其参数、输出协议、部署形态与公共 SDK 承诺仍不稳定。
-- 迁移边界：内部 imports、operator-facing environment variables、临时文件前缀、课程、计划和引用同步使用 Pia 命名；不保留旧项目名的兼容 alias。冻结 Pi 的源码、链接和来源说明仍使用上游名称。
+- 迁移边界：内部 imports、operator-facing environment variables、临时文件前缀以及现行课程、计划和引用同步使用 Pia 命名；不保留旧项目名的兼容 alias。带日期的历史实现记录可保留迁移前 literal，但必须同时标明迁移日期与当前值，且不构成现行契约。冻结 Pi 的源码、链接和来源说明仍使用上游名称。
 - 原因：repository 与远端已使用 Pia；统一 module、imports 和文档可以消除同一项目的双重身份，同时继续明确区分上游 Pi 基线与本项目 Pia。
 
 ### D60. read 支持 workspace-relative 与 absolute host path
@@ -548,4 +548,4 @@
 - 2026-07-21：最新复审发现 Unix Skill directory name 可以包含非法 UTF-8 bytes，而 Provider JSON encoding 会用 replacement character 改写 catalog location，令模型随后无法用该 location 读取真实 `SKILL.md`。discovery 现在在候选进入 catalog 前跳过此类目录，并返回自身仍为合法 UTF-8 的有界诊断。
 - 2026-07-21：再后续复审发现 `os.Root` 会安全跟随 workspace 内的 `.pia/skills` relative symlink，但 Pia Skill v1 已明确排除 symlink source。source opening 增加前置 non-following check 与打开后的 handle/entry identity 复核，既拒绝 symlink，也不引入 check-then-open 竞态。
 - 2026-07-21：同一复审链继续暴露两个残余类问题：source handle 验证后，candidate metadata 仍从 workspace path 重开，source replacement 可混入另一目录；非 UTF-8 过滤也只覆盖 directory 而漏掉 symlink diagnostic path。discovery 改为在 verified source handle 上完成 direct-directory 与 `SKILL.md` 的逐级 no-follow `openat`，并在 filesystem type 分支前统一过滤所有 Skill-like invalid-UTF-8 entry names；回归测试覆盖 source replacement、directory/file symlink 与 Linux 非 UTF-8 directory/symlink。
-- 2026-07-21：学习者明确批准此前延后的 repository/module 命名迁移。D59 更新为当前统一契约；module/import path、环境变量、临时文件前缀以及全部 tracked 课程、计划和引用同步使用 Pia。
+- 2026-07-21：学习者明确批准此前延后的 repository/module 命名迁移。D59 更新为当前统一契约；module/import path、环境变量、临时文件前缀以及现行课程、计划和引用同步使用 Pia，带日期的历史实现记录保留原始 literal 并明确标注迁移。

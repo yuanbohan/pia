@@ -290,7 +290,7 @@ go.mod
 
 新增文件：
 
-- `go.mod`：module 为 `github.com/yuanbohan/pia`，Go language version 为 `1.26.0`。
+- `go.mod`：module 为 `github.com/yuanbohan/pi-go`，Go language version 为 `1.26.0`。
 
 曾创建 `internal/contract` 保存 Pi commit 和 package version，并用测试检查文档一致性。学习者 review 后确认这是错误边界：课程元数据不属于 Runtime 产品能力。该 package 已完整删除，冻结基线恢复为纯文档责任。
 
@@ -298,8 +298,10 @@ go.mod
 
 ```text
 go list -m
-github.com/yuanbohan/pia
+github.com/yuanbohan/pi-go
 ```
+
+迁移说明（2026-07-21）：上面两处值保留 Lesson 00 在 2026-07-15 的原始实现与实测记录；当前 module/import path 已按 D59 迁移为 `github.com/yuanbohan/pia`，当前验证以本课“验证场景”和仓库根 `go.mod` 为准。
 
 本课没有 Go package 或测试，没有引入第三方依赖，没有生成 `go.sum`，也没有创建 public SDK、Agent API、Provider 或工具实现。
 
