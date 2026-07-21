@@ -13,11 +13,11 @@ product_contract_source: ce-plan-bootstrap
 
 ## Goal Capsule
 
-在 `pi-go` 中以课程驱动完成 Pi 核心 coding loop 的 Go 语义移植，最终让一个 DeepSeek-first、无 TUI 的本地 headless agent 在指定目录中独立完成一个固定的小型 bug-fix 任务。
+在 Pia 中以课程驱动完成 Pi 核心 coding loop 的 Go 语义移植，最终让一个 DeepSeek-first、无 TUI 的本地 headless agent 在指定目录中独立完成一个固定的小型 bug-fix 任务。
 
 第一阶段只证明最短闭环：模型接收基础上下文，产生文本或工具调用，Runtime 调度 `read`、`write`、`edit`、`bash`，把结果加入 Working Context 并继续调用模型；Run settlement 后，Conversation Owner 再把本次消息增量提交到 Conversation History。课程不以复制 TypeScript 文件结构为目标，也不在第一阶段解决 Session、Goal Runtime、权限审批、IM 或多仓库管理。
 
-本计划继续作为第一阶段基础契约。自 2026-07-19 起，Lesson 06 的命令、prompt、输出、trace 和真实验收行为以 `docs/plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md` 为权威；本文件中与它冲突的早期 `cmd/pi-go`、实时事件、启动 warning、tracked fixture/harness 和 acceptance deadline 设定均已被取代。Lesson 07 又以 `docs/course/decisions.md` 的 D46–D51 修正了内部消息所有权：coding-owned Conversation Owner 保存完整 History，Core Agent 保存可替换 Working Context并返回 run-local `NewMessages`；本计划中描述“Agent 返回或拥有完整 transcript”的旧里程碑文字只保留为形成过程，不再是当前 API 契约。其余权威顺序为：本计划的 Product Contract 与 Planning Contract → `docs/course/decisions.md` 的当前决定 → 当前课程文档 → 冻结 Pi 源码与测试。`session-settled:` 只标记已经由学习者明确决定、未经重新讨论和确认不得改变的事项。出现冲突时先修正文档，不让实现静默选择一套语义。
+本计划继续作为第一阶段基础契约。自 2026-07-19 起，Lesson 06 的命令、prompt、输出、trace 和真实验收行为以 `docs/plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md` 为权威；本文件中与它冲突的早期命令路径、实时事件、启动 warning、tracked fixture/harness 和 acceptance deadline 设定均已被取代。Lesson 07 又以 `docs/course/decisions.md` 的 D46–D51 修正了内部消息所有权：coding-owned Conversation Owner 保存完整 History，Core Agent 保存可替换 Working Context并返回 run-local `NewMessages`；本计划中描述“Agent 返回或拥有完整 transcript”的旧里程碑文字只保留为形成过程，不再是当前 API 契约。其余权威顺序为：本计划的 Product Contract 与 Planning Contract → `docs/course/decisions.md` 的当前决定 → 当前课程文档 → 冻结 Pi 源码与测试。`session-settled:` 只标记已经由学习者明确决定、未经重新讨论和确认不得改变的事项。出现冲突时先修正文档，不让实现静默选择一套语义。
 
 执行采用交互式课程节奏。每课先讲解和讨论；涉及 Go 实现的课程再完成对应代码与测试。第 00 课是只建立 module、课程文档和验证证据的基线例外，不创建占位 Runtime package。学习者确认理解并明确要求后才能 commit。计划更新不等于自动开始下一课。
 
@@ -99,7 +99,7 @@ product_contract_source: ce-plan-bootstrap
 - 权限审批、trust/yolo 配置矩阵和真正 sandbox；本地命令以当前用户权限运行并完整继承父进程环境，文件工具路径边界、active call 取消和进入 Working Context 与 Conversation History 前的输出限制仍是强制不变量。已经存在于父环境中的 Provider 凭据对 bash 可见，这不是 secret isolation。
 - 通用 secret scanning 或 redaction。操作者必须只选择允许发送给 DeepSeek 的 workspace；final-only 输出减少终端重复复制，但不阻止模型看到 tool results，也不清理显式启用的敏感 trace。
 - Windows bash 进程树管理；第一阶段只验证 macOS 和 Linux 的进程组取消与回收。
-- Pi 与 pi-go 的自动 benchmark、eval package、进程比较协议或评分工具；本地验收项目也不进入 tracked tree。
+- Pi 与 Pia 的自动 benchmark、eval package、进程比较协议或评分工具；本地验收项目也不进入 tracked tree。
 
 **Deferred to Follow-Up Work**
 
@@ -213,7 +213,7 @@ flowchart LR
 
 冻结 Pi 的 agent-core 默认整批并行；全局 `sequential` 或批内任一 sequential tool 会让整批串行。coding-agent 的 `write` 和 `edit` 另用同文件 mutation queue 降低覆盖风险，但 `read` 和 `bash` 不受该队列保护。
 
-pi-go 第一阶段有意不复制这一并发策略。它采用更保守的屏障式分段，换取简单、可解释的读写顺序；这项差异必须由测试和课程文档明确记录，不能被描述成 Pi 的原始行为。
+Pia 第一阶段有意不复制这一并发策略。它采用更保守的屏障式分段，换取简单、可解释的读写顺序；这项差异必须由测试和课程文档明确记录，不能被描述成 Pi 的原始行为。
 
 ### Course Sequencing
 

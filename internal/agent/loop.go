@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 // Run appends one user input and continues Provider turns until the model no

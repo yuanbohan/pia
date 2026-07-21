@@ -19,7 +19,7 @@ Agent 代码会跨越模型协议、并发、工具执行、文件系统和持�
 | 00-A | 学习合作契约 | 先讲后问、持续 challenge、记录纠正、用户控制 commit | 已建立，持续执行 |
 | 00-B | 冻结参考基线 | Pi commit、package version、Go version | 已验证 |
 | 00-C | 行为契约与实现机制 | 用 active Run、listener 顺序、退订和 RunEnd 区分“必须保留”与“可重新设计” | 已完成 |
-| 00-D | 项目内验证边界 | Pi 源码用于提取行为；pi-go 用自身测试验证实现 | 已完成 |
+| 00-D | 项目内验证边界 | Pi 源码用于提取行为；Pia 用自身测试验证实现 | 已完成 |
 | 00-E | 最小 Go module 边界 | `go.mod`；冻结基线只保存在课程文档 | 已完成 |
 | 00-F | 本课验收与提交门禁 | 测试、理解确认、文档完整性、用户明确要求 commit | 已完成 |
 
@@ -31,7 +31,7 @@ Agent 代码会跨越模型协议、并发、工具执行、文件系统和持�
 
 1. 为什么本项目是行为语义移植，而不是 TypeScript 到 Go 的逐行翻译。
 2. Pi 上游 commit 和本地 Go 工具链为什么必须冻结。
-3. Pi 源码证据与 pi-go 自身测试分别承担什么责任。
+3. Pi 源码证据与 Pia 自身测试分别承担什么责任。
 4. 为什么当前代码放在 `internal/`，以及何时才应该设计公共 SDK。
 5. 一课从阅读到提交的完整门禁。
 
@@ -79,7 +79,7 @@ Pi 当前基线中的典型契约：
 - 用 `Set` 保存 listeners 和 pending tool call IDs。
 - 用 async callback 和 `Promise.all()` 组织事件等待与并行工具。
 
-Go 版本不复制这些机制。我们会根据契约选择 `context.Context`、显式状态、接口、mutex、goroutine 或其他 Go 结构。选择是否正确，由 pi-go 的事件、transcript、错误、取消和工具副作用测试验证。
+Go 版本不复制这些机制。我们会根据契约选择 `context.Context`、显式状态、接口、mutex、goroutine 或其他 Go 结构。选择是否正确，由 Pia 的事件、transcript、错误、取消和工具副作用测试验证。
 
 ### Headless 讨论给出的第一个例子
 
@@ -223,15 +223,15 @@ Go 候选会为 tool calls 预分配按 source index 排列的 result slots，go
 
 ## 第二阶段讲义：项目内验证边界
 
-Pi 源码和测试用于理解上游行为，回答“Pi 在冻结版本中做了什么、为什么这样做”。它们是学习材料，不进入 pi-go Runtime。
+Pi 源码和测试用于理解上游行为，回答“Pi 在冻结版本中做了什么、为什么这样做”。它们是学习材料，不进入 Pia Runtime。
 
-pi-go 只验证自身，按责任使用三类测试：
+Pia 只验证自身，按责任使用三类测试：
 
 1. 单元测试：验证 active Run 互斥、参数校验、队列规则等局部不变量。
 2. 组件与集成测试：用 Faux Provider、临时 workspace 和可控工具结果验证完整事件流、取消、handler settlement 与 transcript。
-3. 端到端验收：驱动 pi-go 的 headless 入口完成受控 coding 任务，检查进程退出、文件副作用和任务断言。
+3. 端到端验收：驱动 Pia 的 headless 入口完成受控 coding 任务，检查进程退出、文件副作用和任务断言。
 
-前两类默认离线且确定性；真实 DeepSeek 调用只能是显式启用的 smoke test。端到端失败说明 pi-go 没有满足该场景，但仍需用更小的确定性测试定位根因，不能只根据最终 patch 猜测 Agent Loop 的具体缺陷。
+前两类默认离线且确定性；真实 DeepSeek 调用只能是显式启用的 smoke test。端到端失败说明 Pia 没有满足该场景，但仍需用更小的确定性测试定位根因，不能只根据最终 patch 猜测 Agent Loop 的具体缺陷。
 
 ## 讨论与练习
 
@@ -259,7 +259,7 @@ pi-go 只验证自身，按责任使用三类测试：
 4. listeners 保存在 JavaScript `Set` 中。
 5. 并行工具写入 transcript 时保持模型给出的 tool call 顺序。
 
-### 练习 2：选择 pi-go 的测试层级
+### 练习 2：选择 Pia 的测试层级
 
 讨论下面三个现象分别最适合由哪类测试发现：
 
@@ -279,7 +279,7 @@ go.mod
 
 ## 验证场景
 
-1. `go list -m` 返回 `github.com/yuanbohan/pi-go`。
+1. `go list -m` 返回 `github.com/yuanbohan/pia`。
 2. 课程总纲、本课文档与决策记录使用同一冻结 Pi baseline。
 3. 根 module 只建立模块边界，不形成公共 SDK 承诺。
 4. 仓库状态能清楚区分本课文件与尚未开始的课程。
@@ -290,7 +290,7 @@ go.mod
 
 新增文件：
 
-- `go.mod`：module 为 `github.com/yuanbohan/pi-go`，Go language version 为 `1.26.0`。
+- `go.mod`：module 为 `github.com/yuanbohan/pia`，Go language version 为 `1.26.0`。
 
 曾创建 `internal/contract` 保存 Pi commit 和 package version，并用测试检查文档一致性。学习者 review 后确认这是错误边界：课程元数据不属于 Runtime 产品能力。该 package 已完整删除，冻结基线恢复为纯文档责任。
 
@@ -298,7 +298,7 @@ go.mod
 
 ```text
 go list -m
-github.com/yuanbohan/pi-go
+github.com/yuanbohan/pia
 ```
 
 本课没有 Go package 或测试，没有引入第三方依赖，没有生成 `go.sum`，也没有创建 public SDK、Agent API、Provider 或工具实现。
@@ -322,7 +322,7 @@ github.com/yuanbohan/pi-go
 
 ### 理解检查 1：上游变化时对齐哪个版本
 
-- 问题：Pi 最新 `main` 改变行为时，第一轮 pi-go 移植应该先对齐冻结 commit、最新 `main`，还是效果更好的版本？
+- 问题：Pi 最新 `main` 改变行为时，第一轮 Pia 移植应该先对齐冻结 commit、最新 `main`，还是效果更好的版本？
 - 学习者回答：选择冻结的 Pi commit。
 - 课程结论：回答正确。冻结 commit 是当前源码阅读坐标；升级到最新 `main` 必须作为单独、可追溯的基线迁移进行。
 
@@ -355,11 +355,11 @@ github.com/yuanbohan/pi-go
 - API 压力：公开 ID 只有在调用方需要跨所有者、跨进程、持久化或稍后按编号管理订阅时才有明显价值；当前 Agent 内事件订阅没有这些要求。公开 ID 还会引入 ID 作用域、失效、复用和错误退订等额外契约。
 - Pi 现场实验：`Set` 的当前遍历是活的。已执行的 A 删除尚未执行的 B 并新增 C 时，本次遍历结果为 A、C；B 被跳过，C 会收到当前事件。
 - 未解决契约：退订是否幂等；同一 handler 重复注册是否形成一个或多个注册；当前事件分发期间退订何时生效；分发期间新增 handler 是否接收当前事件；订阅与退订是否要求并发安全。
-- 课程要求：二期 subscription 课程先从 Pi 源码和测试确认已承诺的行为，再为 pi-go 写确定性测试，最后决定使用 live traversal、snapshot、私有注册项、内部 ID 或公开 handle。不能从数据结构反推产品契约。
+- 课程要求：二期 subscription 课程先从 Pi 源码和测试确认已承诺的行为，再为 Pia 写确定性测试，最后决定使用 live traversal、snapshot、私有注册项、内部 ID 或公开 handle。不能从数据结构反推产品契约。
 - 学习者回答：A 在处理事件 E 时退订尚未执行的 B，选择 B 不再接收当前事件；对于分发期间新增的 C 是否接收 E，当前不知道如何判断。
 - 补充证据：Pi 文档和 agent-core 测试没有声明分发期间新增或退订的语义；当前仓库用法也没有发现依赖“新 listener 立即接收正在分发的事件”。
 - 可靠性候选：事件开始时复制有序注册项，调用每项前再检查其 active 状态。这样 B 在轮到自己前被退订会跳过，事件开始后新增的 C 从下一个事件才生效。
-- 候选理由：退订表示调用方不再希望接收通知，应尽快生效；C 在事件开始时尚不是接收者，而且 live addition 允许 handler 不断新增新 handler，使一次事件分发可能无界增长。这个候选不同于 Pi 未文档化的 `Set` 遍历结果，必须在二期 subscription 课程作为明确的 pi-go 决策记录后才能实现。
+- 候选理由：退订表示调用方不再希望接收通知，应尽快生效；C 在事件开始时尚不是接收者，而且 live addition 允许 handler 不断新增新 handler，使一次事件分发可能无界增长。这个候选不同于 Pi 未文档化的 `Set` 遍历结果，必须在二期 subscription 课程作为明确的 Pia 决策记录后才能实现。
 - 术语澄清：“从下一个事件生效”指下一次 `dispatchEvent()` 调用，而不是下一 Agent turn 或下一次 Run。C 会立即进入真实注册表，但不会进入当前事件已经创建的 handler 快照；下一事件创建新快照时才会包含 C。
 
 ### 学习原则修正
@@ -379,15 +379,15 @@ github.com/yuanbohan/pi-go
 
 - 问题 1：是否应在尚未讲清行为责任时创建空的 `internal/ai` package？
 - 学习者回答：不应该；应在第 01 课讲清行为责任后创建对应代码。
-- 问题 2：pi-go 的 listener 顺序测试能否直接证明 Pi 的行为？
-- 学习者回答：不能；它只证明 pi-go 满足测试契约，Pi 的行为需要从冻结源码、文档和测试中确认。
+- 问题 2：Pia 的 listener 顺序测试能否直接证明 Pi 的行为？
+- 学习者回答：不能；它只证明 Pia 满足测试契约，Pi 的行为需要从冻结源码、文档和测试中确认。
 - 问题 3：遇到 Pi 未文档化且可能不安全的行为时，应机械复制、静默修改，还是形成显式决定？
-- 学习者回答：记录 Pi 的源码事实，检查调用方和测试依赖，再明确决定 pi-go 契约并为它写测试。
-- 课程结论：三项回答正确。学习者已经区分上游证据、Go 设计决定和 pi-go 自身验证责任。
+- 学习者回答：记录 Pi 的源码事实，检查调用方和测试依赖，再明确决定 Pia 契约并为它写测试。
+- 课程结论：三项回答正确。学习者已经区分上游证据、Go 设计决定和 Pia 自身验证责任。
 
 ### 00-E 范围修正：当前不提供外部调用
 
-- 学习者决定：当前 pi-go 不给外部项目调用；以后根据真实需求考虑 gRPC 或公共 Go SDK。
+- 学习者决定：当前 Pia 不给外部项目调用；以后根据真实需求考虑 gRPC 或公共 Go SDK。
 - 课程结论：本地命令只作为运行和验收入口，其输入输出不构成稳定兼容协议；Lesson 06 暂时使用 `cmd/pia`。`internal/` 保留核心实现可调整性。
 - 后续边界：跨进程、跨语言调用更可能使用 gRPC；同进程 Go 嵌入更可能使用公共 SDK。两者可以共存，但当前课程不做选择或预留虚构接口。
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 func TestEstimateRequestTokensUsesCompleteRequestWithoutUsage(t *testing.T) {

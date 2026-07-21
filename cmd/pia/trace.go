@@ -9,7 +9,7 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/yuanbohan/pi-go/internal/coding"
+	"github.com/yuanbohan/pia/internal/coding"
 )
 
 type traceFile interface {

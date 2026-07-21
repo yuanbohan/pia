@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/yuanbohan/pi-go/internal/ai"
+import "github.com/yuanbohan/pia/internal/ai"
 
 // ReplaceWorkingContext atomically installs the messages used by future Runs.
 func (a *Agent) ReplaceWorkingContext(messages []ai.Message) error {

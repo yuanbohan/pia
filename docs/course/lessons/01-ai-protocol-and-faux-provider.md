@@ -16,7 +16,7 @@
 2. 为什么流式增量事件和最终 `AssistantMessage` 是两种不同但相关的表示。
 3. 为什么 `stop`、`length`、`toolUse`、`error` 和 `aborted` 不能压缩成一个普通 Go `error`。
 4. Faux Provider 为什么是 Agent Loop 的确定性测试设施，而不只是一个返回固定字符串的 mock。
-5. pi-go 第一阶段需要从 Pi 保留哪些协议语义，又应删掉哪些多 Provider、图像和缓存能力。
+5. Pia 第一阶段需要从 Pi 保留哪些协议语义，又应删掉哪些多 Provider、图像和缓存能力。
 
 ## Pi 源码阅读路径
 
@@ -137,7 +137,7 @@ Faux Provider 不是为了假装联网。它把原本不稳定的模型输出变
 
 在这个例子中，Faux 不负责执行 `read`。它只扮演模型，说“请调用 read”；真正查找并执行工具的是 Agent，执行结果也由 Agent 写回 transcript。第二次调用 Faux 时，它再扮演模型给出下一步响应。因此 Faux 验证的是 Agent 面对确定模型输出时的行为，不验证模型本身是否聪明。
 
-冻结 Pi 自带 Faux Provider。它的脚本单元主要是完整 `AssistantMessage` 或 response factory，再由 Faux 实现生成 delta。pi-go 当前计划强调“脚本事件”，目的是让事件顺序、参数分片和取消点完全确定；这是一项候选的 Go 测试机制，不应误称为必须复制的 Pi API 形状。
+冻结 Pi 自带 Faux Provider。它的脚本单元主要是完整 `AssistantMessage` 或 response factory，再由 Faux 实现生成 delta。Pia 当前计划强调“脚本事件”，目的是让事件顺序、参数分片和取消点完全确定；这是一项候选的 Go 测试机制，不应误称为必须复制的 Pi API 形状。
 
 ## 第一阶段保留与删除
 
@@ -203,7 +203,7 @@ type Stream interface {
 - 课程结论：核心判断正确。没有 `toolcall_end` 就没有完整、可执行的 tool call，因此不能开始 `read`，这个未完成调用也不会进入 aborted assistant 或生成 tool result。“只保留一条 aborted assistant”约束的是 assistant 不能重复追加，不代表该 assistant 中其他已完成 tool calls 永远不能追加非执行型 settlement results。
 - 关键修正：取消是 cooperative cancellation request，不是立即清空状态或回滚。Provider、已启动工具和事件处理仍需观察取消并完成清理，Run 只有在这些工作 settlement 后才真正结束。
 - Pi 源码事实：Faux stream 在中途取消时发出 terminal `error(reason=aborted)`；其中的 final assistant message 可以保留取消前已经形成的 partial content。Agent Loop 用该 final message 替换正在形成的 partial message，将它保留在当前内存 context，然后以 aborted 结束而不进入工具执行。
-- pi-go 已定边界：取消后不启动新的 Provider 调用或工具阶段，等待所有已启动工作收敛，再产生唯一 canceled Run 终态。取消不撤销此前已经完成的文件副作用。第 03 课补充确认：若 aborted assistant 保留了取消前已经组装完成、但尚未执行的 tool calls，Agent 在这唯一一条 assistant 后为它们追加同 ID 的 `not executed` error results，再返回取消原因；这些 result 只闭合 transcript，不表示执行过工具。
+- Pia 已定边界：取消后不启动新的 Provider 调用或工具阶段，等待所有已启动工作收敛，再产生唯一 canceled Run 终态。取消不撤销此前已经完成的文件副作用。第 03 课补充确认：若 aborted assistant 保留了取消前已经组装完成、但尚未执行的 tool calls，Agent 在这唯一一条 assistant 后为它们追加同 ID 的 `not executed` error results，再返回取消原因；这些 result 只闭合 transcript，不表示执行过工具。
 
 ### 01-A 补充讲解：Faux 在 Agent 中的位置
 
@@ -285,7 +285,7 @@ Faux 可以先用无后台 goroutine 的 slice-backed stream：每次 `Receive` 
 2. usage 的 cache/reasoning 细分是否在第 01 课先定义，还是等第 04 课核对 DeepSeek 官方字段后添加；
 3. event 是否保留 Pi 每次携带完整 `partial` snapshot 的形状，还是只携带 delta、index 和 terminal final message，由 Agent 自己维护 partial。
 
-课程当前倾向最小方案：不在每个 event 重复 partial snapshot，不预定义未核验的 cache/reasoning usage 字段，model ID 是否进入 message 留到查看第 04 课 trace 需要后再定。这些是范围建议，尚未形成 pi-go 决策。
+课程当前倾向最小方案：不在每个 event 重复 partial snapshot，不预定义未核验的 cache/reasoning usage 字段，model ID 是否进入 message 留到查看第 04 课 trace 需要后再定。这些是范围建议，尚未形成 Pia 决策。
 
 ### 01-D 补充讨论：`WorkspaceContext` 的责任
 
@@ -293,13 +293,13 @@ Faux 可以先用无后台 goroutine 的 slice-backed stream：每次 `Receive` 
 - 语义作用：它是发送给模型的当前工作环境说明，例如文件路径应相对选定 workspace、bash 从 workspace 启动，以及哪些 workspace 内容可能进入模型上下文。它帮助模型正确选择路径和工具参数。
 - 非作用：它不执行路径校验，也不是 sandbox 或权限边界。文件工具的真实边界由后续 `os.Root` 实现，bash 的真实行为由 executor 的 cwd、环境和进程管理实现；提示文字不能替代这些约束。
 - Pi 源码事实：冻结 Pi 的 AI `Context` 只有 `systemPrompt`、`messages` 和 `tools`，不存在 `WorkspaceContext`；coding-agent 的 `buildSystemPrompt()` 把 `Current working directory: ...` 直接追加到 system prompt。
-- 课程纠正：此前展示的 `WorkspaceContext string` 是未经充分标注的 pi-go 候选，不是 Pi 字段，也没有必要成为独立 AI 协议字段。删除该候选；coding composition root 负责在 Run 开始时把 workspace/cwd 说明组装进稳定 system prompt，每轮 Provider 调用复用同一内容。
+- 课程纠正：此前展示的 `WorkspaceContext string` 是未经充分标注的 Pia 候选，不是 Pi 字段，也没有必要成为独立 AI 协议字段。删除该候选；coding composition root 负责在 Run 开始时把 workspace/cwd 说明组装进稳定 system prompt，每轮 Provider 调用复用同一内容。
 - 测试边界：Faux 记录完整 request，后续测试断言每轮 system prompt 不变且包含预期 workspace/cwd 说明；不再断言独立 `WorkspaceContext` 字段。
 
 ### 01-E 讲解与待确认修正：原始 `Task` 是否属于 Provider Request
 
 - Pi 源码事实：冻结 Pi 的 `runAgentLoop()` 把传入 prompts 追加到 `context.messages`；每次模型调用再从当前完整 messages 构造 AI `Context { systemPrompt, messages, tools }`。没有独立 task 字段。
-- pi-go 当前计划：此前要求每次 Provider 调用同时携带原始 task 和完整 transcript。这不是 Pi 字段，而是早期计划中的 pi-go 候选契约。
+- Pia 当前计划：此前要求每次 Provider 调用同时携带原始 task 和完整 transcript。这不是 Pi 字段，而是早期计划中的 Pia 候选契约。
 - 风险：第一阶段不做 compaction，原始 task 已经是 transcript 中的第一条 user message。再保存独立 `Task` 会建立两个事实源；二者不一致时 Provider 应相信哪一个没有可靠答案。
 - 分层建议：Run/coding 入口仍接收 `task string`，但 Agent 只在 Run 开始时把它转换成一次 `UserMessage`；AI Provider request 保持 `SystemPrompt + Messages + Tools`。以后若引入 compaction，再由那一课明确如何长期保留原始任务，不为未来需求提前复制字段。
 - Faux 测试：断言首次 request 的 messages 包含原始 user message，后续 request 的完整 transcript 仍以同一 user message 开始；不需要独立 `Request.Task`。
@@ -325,7 +325,7 @@ Faux 可以先用无后台 goroutine 的 slice-backed stream：每次 `Receive` 
 
 `Usage` 第一版建议只存 `InputTokens` 和 `OutputTokens`，用方法派生 `TotalTokens()`，避免在当前语义下保存可漂移的重复总数；cache 和 reasoning 细分等第 04 课重新核对 DeepSeek 官方协议后再决定。Faux 默认可使用零值或测试显式脚本值，不复制 Pi 的随机 token 估算。
 
-关于 stream partial snapshot 的复查：Pi 每个内容事件都携带完整 partial message；pi-go 当前 headless 范围没有需要完整 partial snapshot 的 UI 消费者。Provider 负责累计并在 terminal event 交付权威 final/aborted message，因此当前仍建议不在每个 delta 中复制 partial message。第 02 课后来确认不设计 Agent event sink；等本地入口出现真实展示消费者时，再以该消费者为证据决定观察协议。
+关于 stream partial snapshot 的复查：Pi 每个内容事件都携带完整 partial message；Pia 当前 headless 范围没有需要完整 partial snapshot 的 UI 消费者。Provider 负责累计并在 terminal event 交付权威 final/aborted message，因此当前仍建议不在每个 delta 中复制 partial message。第 02 课后来确认不设计 Agent event sink；等本地入口出现真实展示消费者时，再以该消费者为证据决定观察协议。
 
 - 学习者确认：2026-07-16 接受第一阶段 `AssistantMessage` 只保留 `Content`、`Usage`、`StopReason` 和 `ErrorMessage`，并接受本节列出的字段删减与推迟范围。
 
@@ -367,7 +367,7 @@ Faux 需要区分两类耗尽：Provider 已没有下一次 scripted response �
 - 术语澄清：partial 不是新的 content 类型，只是取消前已通过若干 delta 收到的字符串前缀。例如预期完整文本是 `I found the bug in main.go`，取消前只收到 `I found the bug`，后者就是 received-so-far partial text。
 - final 表达：aborted assistant message 仍使用普通 `TextContent`/`ThinkingContent` 保存这些字符串，并由 message 级 `StopReasonAborted` 表明整个响应未完整结束；不增加每个 block 的 partial flag。
 - 与 tool call 的区别：任意 text/thinking 前缀都是合法字符串，可以安全保存但不能当作完整回答；tool-call argument 前缀可能不是合法 JSON，不能构造成完整、可执行 `ToolCall`，所以未到 `ToolCallEnd` 的 block 从 final aborted content 中丢弃。已经到达 `ToolCallEnd` 的调用可以保留在 aborted assistant 中，但因 Provider turn 已失败而绝不执行；第 03 课的 Agent 会为它追加 `not executed` settlement result，避免后续 transcript 出现 orphaned call。
-- Pi 对照：冻结 Pi 的 Faux 在 text/thinking delta 时持续把 chunk 追加到 partial message，取消时用当前 partial 构造 aborted message。pi-go 保留该 received-so-far 语义，同时对未完成结构化 tool call 采用更严格的丢弃规则。
+- Pi 对照：冻结 Pi 的 Faux 在 text/thinking delta 时持续把 chunk 追加到 partial message，取消时用当前 partial 构造 aborted message。Pia 保留该 received-so-far 语义，同时对未完成结构化 tool call 采用更严格的丢弃规则。
 
 - 学习者确认：2026-07-16 理解 partial 是取消前 received-so-far 的字符串前缀，并接受 aborted final message 保留 partial text/thinking 与已完成 tool calls、丢弃未完成 tool call 的处理。2026-07-17 在第 03 课实现审查中补充确认：保留已完成 tool call 不等于执行它；Agent 通过后续同 ID `not executed` result 显式闭合该调用，同时仍只追加一条 aborted assistant。
 
@@ -457,7 +457,7 @@ Faux 不执行任何 tool；第 02/03 课的 Agent 读取 terminal assistant mes
 - Pi 源码事实：冻结 Pi 的普通 Agent Loop 不使用 `contentIndex` 定位或组装 content block。每个内容事件已经携带 Provider 组装好的完整 `partial` message；Agent Loop 只用 `event.partial` 替换当前 partial message，并把原事件作为 `message_update` 的附加信息继续转发。
 - 工具执行事实：Pi 等 terminal final message 形成后，从 `message.content` 中筛选 `toolCall` blocks，再按 tool call 的 ID、name 和 arguments 执行；`contentIndex` 不是 Agent 的工具选择、调度或关联字段。
 - 已验证的真实消费者：Pi Provider adapter 在构造流式 message 时维护有序 content blocks；Pi Proxy 为减少网络流量会移除每个事件携带的完整 `partial`，客户端随后使用 `contentIndex` 把 text、thinking 或 tool-call delta 写回正确的 `partial.content` 位置。这里的 `contentIndex` 是流式内容重建坐标，而不是 Agent 决策字段。
-- pi-go 当前实现：事件没有重复携带完整 partial snapshot，`ContentIndex` 目前仍暴露在通用 `ai.Event` 上；Faux 内部用它校验 block 生命周期，并在取消时组装 received-so-far 内容。尚未实现的 Agent Loop 没有已经证明的业务用途。
+- Pia 当前实现：事件没有重复携带完整 partial snapshot，`ContentIndex` 目前仍暴露在通用 `ai.Event` 上；Faux 内部用它校验 block 生命周期，并在取消时组装 received-so-far 内容。尚未实现的 Agent Loop 没有已经证明的业务用途。
 - 学习者方向：第一阶段如果始终只有 Provider/stream 实现需要 block 坐标，应优先把该坐标封装在实现内部，不向 Agent 或其他外部消费者暴露无用协议细节。
 - 暂不定案：不在第 01 课仅凭“当前 Agent 不使用”立即删除字段。第 02 课已确认基础 transcript loop 不实现 Agent event sink；第 04 课实现 DeepSeek SSE 映射时检查是否只有 adapter 内部需要路由，后续本地入口设计流式展示时再检查观察者是否需要 block 坐标。若两处都不需要外部坐标，再把 `ContentIndex` 收回 Provider 私有状态；若观察者确实需要独立重建多个 blocks，则保留或改成由真实消费者驱动的更明确标识。
 

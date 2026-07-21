@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 func validateToolCallProtocol(message ai.AssistantMessage) error {

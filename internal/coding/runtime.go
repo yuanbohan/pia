@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yuanbohan/pi-go/internal/agent"
-	"github.com/yuanbohan/pi-go/internal/ai"
-	"github.com/yuanbohan/pi-go/internal/ai/provider/deepseek"
-	bashtool "github.com/yuanbohan/pi-go/internal/coding/tools/bash"
-	edittool "github.com/yuanbohan/pi-go/internal/coding/tools/edit"
-	readtool "github.com/yuanbohan/pi-go/internal/coding/tools/read"
-	writetool "github.com/yuanbohan/pi-go/internal/coding/tools/write"
+	"github.com/yuanbohan/pia/internal/agent"
+	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai/provider/deepseek"
+	bashtool "github.com/yuanbohan/pia/internal/coding/tools/bash"
+	edittool "github.com/yuanbohan/pia/internal/coding/tools/edit"
+	readtool "github.com/yuanbohan/pia/internal/coding/tools/read"
+	writetool "github.com/yuanbohan/pia/internal/coding/tools/write"
 )
 
 const (
@@ -193,7 +193,7 @@ func newCodingTools(workspace *Workspace) ([]agent.Tool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("coding: create write tool: %w", err)
 	}
-	// Keep the frozen Pi default ordering while allowing Agent to apply pi-go's
+	// Keep the frozen Pi default ordering while allowing Agent to apply Pia's
 	// explicit parallel-safe scheduling policy.
 	return []agent.Tool{read, bash, edit, write}, nil
 }

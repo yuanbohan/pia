@@ -31,7 +31,7 @@
 - `packages/coding-agent/src/core/tools/truncate.ts`
 - `packages/coding-agent/src/core/tools/path-utils.ts`
 
-当前 Go 实现依据本仓库的 Go 1.26 toolchain 与标准库 `os.Root` 文档。Pi 源码说明上游工具的可观察能力；`docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 中的 U9、R9 和 KTD7/KTD8/KTD16/KTD20/KTD23/KTD26/KTD27/KTD35 是 pi-go 的范围与安全契约。候选设计在讨论确认前不记作既定架构。
+当前 Go 实现依据本仓库的 Go 1.26 toolchain 与标准库 `os.Root` 文档。Pi 源码说明上游工具的可观察能力；`docs/plans/2026-07-15-001-pi-core-go-learning-port-plan.md` 中的 U9、R9 和 KTD7/KTD8/KTD16/KTD20/KTD23/KTD26/KTD27/KTD35 是 Pia 的范围与安全契约。候选设计在讨论确认前不记作既定架构。
 
 ## 推进顺序
 
@@ -57,17 +57,17 @@
 
 ## 与冻结 Pi 的明确差别
 
-冻结 Pi 的 `read` 支持相对/绝对路径、图片、UI 渲染、可替换远程 operations、`offset`/`limit`，并用 2000 行与 50 KiB 双上限截断文本。它通过普通 cwd/path resolution 访问文件，本身不是 workspace containment primitive。冻结实现的默认 operations 先调用 `fsAccess(path, R_OK)`，再用 `fsReadFile(path)` 读取整个 `Buffer`；`read.ts` 没有 regular-file/FIFO 检查、`O_NONBLOCK` 或按平台选择的打开实现，相应工具测试也没有建立 FIFO 契约。因此 Pi 并不是用 pi-go 当前方式处理 FIFO：本地 FIFO 没有 writer 时可能停在底层打开/读取；它的 abort wrapper 会拒绝外层 Promise，但没有把 `AbortSignal` 传给 `fsReadFile`，不等同于将底层操作改成 nonblocking。
+冻结 Pi 的 `read` 支持相对/绝对路径、图片、UI 渲染、可替换远程 operations、`offset`/`limit`，并用 2000 行与 50 KiB 双上限截断文本。它通过普通 cwd/path resolution 访问文件，本身不是 workspace containment primitive。冻结实现的默认 operations 先调用 `fsAccess(path, R_OK)`，再用 `fsReadFile(path)` 读取整个 `Buffer`；`read.ts` 没有 regular-file/FIFO 检查、`O_NONBLOCK` 或按平台选择的打开实现，相应工具测试也没有建立 FIFO 契约。因此 Pi 并不是用 Pia 当前方式处理 FIFO：本地 FIFO 没有 writer 时可能停在底层打开/读取；它的 abort wrapper 会拒绝外层 Promise，但没有把 `AbortSignal` 传给 `fsReadFile`，不等同于将底层操作改成 nonblocking。
 
-pi-go 第一期不移植图片、TUI、远程 operations 或绝对路径访问。文件工具只接受 root-relative 路径并通过共享 `os.Root` 操作。`os.Root` 会阻止 `..` 或 symlink 指向 root 外部，但不会阻止 mount、设备文件或 root 内特殊文件，因此打开目标后仍要基于实际 handle 校验 regular-file，不能把“位于 root 内”误写成“内容一定安全”。
+Pia 第一期不移植图片、TUI、远程 operations 或绝对路径访问。文件工具只接受 root-relative 路径并通过共享 `os.Root` 操作。`os.Root` 会阻止 `..` 或 symlink 指向 root 外部，但不会阻止 mount、设备文件或 root 内特殊文件，因此打开目标后仍要基于实际 handle 校验 regular-file，不能把“位于 root 内”误写成“内容一定安全”。
 
 `read` 还有五个经过测试或冻结源码核对的有意差异：
 
-- 冻结 Pi 对默认 `fsReadFile` 目标不做 regular-file/FIFO 区分。pi-go 先取得实际 handle 再校验 regular-file，并在 macOS/Linux 用 `O_NONBLOCK` 避免无 writer 的 FIFO 在校验前阻塞；其他平台暂用普通 `Open` 保持包可构建，尚不承诺这一项非阻塞保证，也不因此扩展第一阶段只支持 macOS/Linux 的平台范围。
+- 冻结 Pi 对默认 `fsReadFile` 目标不做 regular-file/FIFO 区分。Pia 先取得实际 handle 再校验 regular-file，并在 macOS/Linux 用 `O_NONBLOCK` 避免无 writer 的 FIFO 在校验前阻塞；其他平台暂用普通 `Open` 保持包可构建，尚不承诺这一项非阻塞保证，也不因此扩展第一阶段只支持 macOS/Linux 的平台范围。
 - 不先把整文件读入内存，也不为了计算总行数扫描未返回内容；它流式读取当前页并只探测是否还有后续字节。
 - 任何 `..` path component 都直接拒绝，而不先 `filepath.Clean`。如果较早的 component 是 symlink，先 clean `alias/../file` 会改变真正应访问的对象；拒绝该形状才能让模型看到的规范化路径和交给 `os.Root` 的路径保持一致。
-- 完整行包含磁盘上的终止换行，50 KiB 按实际返回字节计算。冻结 Pi 的 `split/join` 会在用户 `limit` 恰好停在文件末尾换行前时提示一个空的尾页；pi-go 不制造这个无内容页。
-- 冻结 Pi 通过 Node 的 UTF-8 解码替换非法字节；pi-go 在本次选中页包含非法 UTF-8 时返回 call-local error。未返回的后续字节不会仅为整文件编码判定而被扫描，读取到对应页时再报错。
+- 完整行包含磁盘上的终止换行，50 KiB 按实际返回字节计算。冻结 Pi 的 `split/join` 会在用户 `limit` 恰好停在文件末尾换行前时提示一个空的尾页；Pia 不制造这个无内容页。
+- 冻结 Pi 通过 Node 的 UTF-8 解码替换非法字节；Pia 在本次选中页包含非法 UTF-8 时返回 call-local error。未返回的后续字节不会仅为整文件编码判定而被扫描，读取到对应页时再报错。
 
 ## 05-A：`read` 设计讨论
 
@@ -120,7 +120,7 @@ Content:
 
 冻结 Pi 的 `write` 接受 `path` 和 `content`，递归创建父目录后直接调用 Node `fsWriteFile`；已有测试只锁定写入内容和自动创建父目录。它允许相对/绝对路径，默认会跟随最终 symlink，覆盖时直接截断目标，并通过全局 file-mutation queue 串行化同一 resolved path。成功文本中的 `content.length` 是 JavaScript UTF-16 code-unit 数，却标记为 bytes，例如 `你好` 会报告 2 而不是 UTF-8 的 6 bytes。
 
-学习者确认 pi-go 不把目录、symlink、FIFO、socket 或 device 的创建混进 `write`。本工具只负责工作区内普通文件的完整内容创建或覆盖：
+学习者确认 Pia 不把目录、symlink、FIFO、socket 或 device 的创建混进 `write`。本工具只负责工作区内普通文件的完整内容创建或覆盖：
 
 - 目标不存在时创建普通文件，父目录不存在时递归创建；空内容合法，不增加没有计划证据的文件大小上限。
 - 已存在的普通文件通过同目录临时文件和 rename 替换，不直接截断模型当前可见的目标。
@@ -170,7 +170,7 @@ Successfully wrote 7 bytes to nested/hello.txt
 
 本子阶段新增 `internal/coding/tools/edit/tool.go` 负责 schema、参数与文件编排，`apply.go` 负责基于原文件的唯一匹配、overlap 检查和一次性内容构造；模型协议和匹配算法没有堆入同一个大文件。测试按公开协议、workspace/symlink boundary 和 macOS/Linux FIFO 行为拆分，覆盖多段成功、原文件匹配、删除、permission 保留、零/多匹配、overlap、无变化、全有或全无、严格参数、非法 UTF-8、预取消、read 可见性、特殊文件和 outside-canary 交换。
 
-`apply.go` 在 exact matcher 旁保留英文原因注释：冻结 Pi 虽有 fuzzy fallback，pi-go Phase 1 有意让不完全匹配安全失败；后续只有经过独立设计和测试才能扩展该 mutation contract。`fileutil/open_*.go` 也保留英文平台注释，说明 `O_NONBLOCK` 只在已有 FIFO 测试的 Darwin/Linux 生效，portable fallback 不扩大第一期平台承诺。
+`apply.go` 在 exact matcher 旁保留英文原因注释：冻结 Pi 虽有 fuzzy fallback，Pia Phase 1 有意让不完全匹配安全失败；后续只有经过独立设计和测试才能扩展该 mutation contract。`fileutil/open_*.go` 也保留英文平台注释，说明 `O_NONBLOCK` 只在已有 FIFO 测试的 Darwin/Linux 生效，portable fallback 不扩大第一期平台承诺。
 
 实现审查发现最初为诊断精确重复次数而扫描全部重叠 occurrence，会在高度重复的大文件上产生不必要的放大工作；唯一性只需要确认第二个位置，最终实现因此在首个 match 后最多再搜索一次，并用 `aaa`/`aa` 测试锁定重叠 occurrence 也必须判为不唯一。这个收敛保留零/多匹配诊断，却不为模型无用的精确计数持续扫描整份重复内容。
 
@@ -180,7 +180,7 @@ Successfully wrote 7 bytes to nested/hello.txt
 
 此前课程材料在尚未进入 `bash` 子阶段、也未与学习者讨论时，就写入了“最小 allowlist 环境”“Provider 凭据不能进入子进程”和“正常 shell exit 后清理全部 descendants”。进入本子阶段重新核对冻结 Pi 后确认，这些不是上游行为：`bash.ts` 的本地 operations 使用 `getShellEnv()` 复制完整 `process.env`；每次调用启动 detached shell，只有 abort 或可选 timeout 调用 `killProcessTree`；正常 shell exit 后不会主动 kill 该进程组。`waitForChildProcess` 在 shell 已 exit 但 descendant 仍持有 stdout/stderr 时等待 pipe output idle，而不是等待所有 descendants 退出。学习者也明确指出此前安全边界从未讨论，因此旧结论不能继续作为实现依据。
 
-讨论从最终产品形态出发：pi-go 是由用户在 Ghostty/zsh 等终端中启动的本地 coding-agent CLI。Lesson 06 暂时把命令命名为 `pia`；导出的环境变量属于进程环境，会按 `zsh -> pia -> bash` 继承，Bash 无需再次读取 `.zshrc`。未导出的 shell variable、alias、function 和 zsh option 不会继承。基于这个区别，学习者逐项确认下面的第一期契约：
+讨论从最终产品形态出发：Pia 是由用户在 Ghostty/zsh 等终端中启动的本地 coding-agent CLI。Lesson 06 暂时把命令命名为 `pia`；导出的环境变量属于进程环境，会按 `zsh -> pia -> bash` 继承，Bash 无需再次读取 `.zshrc`。未导出的 shell variable、alias、function 和 zsh option 不会继承。基于这个区别，学习者逐项确认下面的第一期契约：
 
 - bash tool 启用后直接执行模型命令，不增加逐次审批、trust/yolo matrix 或 sandbox。文件工具仍受 `os.Root` 限制，bash 只保证每次调用从 workspace 开始，可以访问当前用户有权访问的 workspace 外文件、网络和其他资源。
 - 每次调用使用新建的非交互、非 login shell，stdin 为空且不分配 PTY；`cd`、`export`、virtualenv activation 和 alias 不跨调用保留，文件、Git 状态、外部服务和后台进程等真实副作用会保留。shell 支持显式 path，默认按 `/bin/bash`、PATH 中的 `bash`、`sh` 回退。
@@ -213,7 +213,7 @@ Go 机制不会机械复制 TypeScript API：macOS/Linux 通过 `exec.Cmd.SysPro
 - 跨 chunk UTF-8、无效尾部 replacement、2000 行/50 KiB tail、单个超长 UTF-8 行、阈值前 chunks 回填、raw temp file 完整一致和 footer；
 - `bash-created file -> read` 与 `edit -> bash` 通过公开构造器验证同一 Workspace 的真实副作用可见性。
 
-冻结 Pi 在 TypeScript tool 内把 timeout、abort 和非零 exit 组装成 thrown `Error` 文本；pi-go 保持已经确定的通用 Go Tool 契约，由 `Execute` 分别返回有界 output 与 idiomatic error，再由 Agent 统一形成 model-visible call-local error result。因此保留信息和循环继续语义一致，但错误文案不机械复制 TypeScript。
+冻结 Pi 在 TypeScript tool 内把 timeout、abort 和非零 exit 组装成 thrown `Error` 文本；Pia 保持已经确定的通用 Go Tool 契约，由 `Execute` 分别返回有界 output 与 idiomatic error，再由 Agent 统一形成 model-visible call-local error result。因此保留信息和循环继续语义一致，但错误文案不机械复制 TypeScript。
 
 简化审查将阈值前 raw chunks 收敛为 `bytes.Buffer`，移除重复的 stream-error 状态，并避免为字符串 byte length 创建临时 `[]byte`；复用审查确认现有 `toolargs` 已用于真正共享的参数边界，而 shell resolution、进程组与 accumulator 没有其他生产消费者，不应提前上移。可靠性审查补上了已重定向 descendant 的取消路径和 threshold-crossing 多 chunk 测试；还锁定完整输出临时文件首次创建失败后不能重试生成缺失 chunks 的误导文件，footer 也不声称存在完整路径。修复后没有剩余 actionable finding。
 

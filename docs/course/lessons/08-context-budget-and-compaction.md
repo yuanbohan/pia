@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-本课已完成并提交到 `main`（`c967027`）：pi-go 现在会在下一次 Run 接受输入前估算 projected Provider input，以 `192K` 触发 lazy compaction，按 protocol-safe message boundary 总结旧 prefix、保留近期 raw suffix，并原子替换 Core Agent Working Context；完整 Conversation History 不被改写。冻结 Pi 的 initial/update/split-turn prompts、`20K` retained target、summary budgets 和 request-local output clamp 已落入代码，重复 compaction、tool protocol、失败、取消、并发与 soft-ceiling 降级均有确定性测试。`make check` 与 `go test -race ./...` 均已通过。
+本课已完成并提交到 `main`（`c967027`）：Pia 现在会在下一次 Run 接受输入前估算 projected Provider input，以 `192K` 触发 lazy compaction，按 protocol-safe message boundary 总结旧 prefix、保留近期 raw suffix，并原子替换 Core Agent Working Context；完整 Conversation History 不被改写。冻结 Pi 的 initial/update/split-turn prompts、`20K` retained target、summary budgets 和 request-local output clamp 已落入代码，重复 compaction、tool protocol、失败、取消、并发与 soft-ceiling 降级均有确定性测试。`make check` 与 `go test -race ./...` 均已通过。
 
 ## 开课源码校准
 
@@ -17,11 +17,11 @@
 
 ### 细化后的认识
 
-- Pi 的 threshold 判断不是对完整消息列表一律重新分词。它优先使用最近一次有效 assistant usage；当错误或零 usage 后还有新消息时，再以最近有效 usage 为锚点并估算尾部消息。当前 pi-go 已经在 `ai.AssistantMessage.Usage` 保存 input/output tokens，DeepSeek stream 也请求并解析 usage，因此本课不需要先补一套 usage 协议。
-- `contextWindow`、`reserveTokens` 与 `keepRecentTokens` 是三个不同概念：前者是模型容量，第二个为下一次输入和输出保留余量，第三个决定压缩后保留多少近期原文。在冻结 Pi 的 capacity-oriented policy 中，trigger threshold 是 `contextWindow - reserveTokens`，不是 `keepRecentTokens`；这不自动等于 pi-go 后续采用的 coding quality ceiling。
+- Pi 的 threshold 判断不是对完整消息列表一律重新分词。它优先使用最近一次有效 assistant usage；当错误或零 usage 后还有新消息时，再以最近有效 usage 为锚点并估算尾部消息。当前 Pia 已经在 `ai.AssistantMessage.Usage` 保存 input/output tokens，DeepSeek stream 也请求并解析 usage，因此本课不需要先补一套 usage 协议。
+- `contextWindow`、`reserveTokens` 与 `keepRecentTokens` 是三个不同概念：前者是模型容量，第二个为下一次输入和输出保留余量，第三个决定压缩后保留多少近期原文。在冻结 Pi 的 capacity-oriented policy 中，trigger threshold 是 `contextWindow - reserveTokens`，不是 `keepRecentTokens`；这不自动等于 Pia 后续采用的 coding quality ceiling。
 - cut point 必须保持 Provider 消息协议可继续使用。Pi 允许在 user 或 assistant message 处切分，但不允许从 tool result 开始；若切进同一个 turn，还会单独总结被丢弃的 turn prefix，避免保留的 assistant/tool suffix 失去语义来源。
 - Pi 的 summary 由一次独立模型调用生成；该调用不是正常 Agent Run，其 request、assistant response 和 usage 都不进入 Conversation History。只有 summary 成功后，compaction entry 与新的 Working Context 才成为可观察状态。
-- 当前 pi-go 没有 `SessionManager` entry tree，但 Lesson 07 已经建立完整内存 History owner 与 idle-only `ReplaceWorkingContext`。本课可以在这个已证明的边界上完成内存 compaction，不需要为了 summary 先引入持久化 Session、branch 或事件系统。
+- 当前 Pia 没有 `SessionManager` entry tree，但 Lesson 07 已经建立完整内存 History owner 与 idle-only `ReplaceWorkingContext`。本课可以在这个已证明的边界上完成内存 compaction，不需要为了 summary 先引入持久化 Session、branch 或事件系统。
 
 ### 被推翻的隐含假设
 
@@ -39,7 +39,7 @@
 - `packages/coding-agent/test/session-manager/build-context.test.ts`：验证完整 entries 与 compaction-aware model context 保持不同事实边界。
 - `packages/coding-agent/test/suite/regressions/pre-prompt-compaction-no-continue.test.ts`：验证 pre-prompt compaction 不错误调用 `continue()`。
 
-## 当前 pi-go 路径
+## 当前 Pia 路径
 
 - `internal/ai/message.go`：`AssistantMessage.Usage` 已保存 Provider 返回的 input/output tokens。
 - `internal/ai/estimate.go`：使用最近有效 usage 加尾部字符近似估算完整 request；无有效 usage 时估算 system prompt、tool schemas 与全部 messages。
@@ -55,7 +55,7 @@
 
 2026-07-20 核对 DeepSeek 官方 [Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 与 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)：`deepseek-v4-pro` 的 context length 为 1M，maximum output 为 384K；Chat Completions 支持 request-local `max_tokens`，并约束 input 加 generated tokens 不超过 context length。冻结 Pi model catalog 中的 `contextWindow: 1000000` 与 `maxTokens: 384000` 和官方资料一致。
 
-当前实现已由 coding 产品 profile 固定保存 hard capacity/max output，由 `ai.Request.MaxOutputTokens` 承载窄的 request-local generation limit，并由 OpenAI-compatible payload 映射 `max_tokens`；正常 coding call 与独立 summary call 都使用该字段，但采用不同的上限计算。Pi 的 `reserveTokens` 不再被同时当作 1M capacity threshold，因为 pi-go 已单独确定 `192K` quality threshold。
+当前实现已由 coding 产品 profile 固定保存 hard capacity/max output，由 `ai.Request.MaxOutputTokens` 承载窄的 request-local generation limit，并由 OpenAI-compatible payload 映射 `max_tokens`；正常 coding call 与独立 summary call 都使用该字段，但采用不同的上限计算。Pi 的 `reserveTokens` 不再被同时当作 1M capacity threshold，因为 Pia 已单独确定 `192K` quality threshold。
 
 ### 最大容量不等于 coding 质量区间
 
@@ -63,9 +63,9 @@
 
 coding 专项证据给出同一方向但不支持一个跨模型通用常数：[LongCodeBench](https://openreview.net/pdf?id=GFPoM8Ylp8) 在真实仓库理解和修复任务中观察到多种模型随输入增长而退化，例如 Claude 3.5 Sonnet 的 LongSWE-Bench resolved rate 从 32K 的 `29%` 降至 64K 的 `19%`、128K 的 `15%` 和 256K 的 `3%`；不同模型的拐点并不完全相同。[SWE-ContextBench](https://arxiv.org/abs/2602.08316) 则显示，正确选择并压缩的历史经验可提高 coding resolution 并降低 token 成本，而未过滤或错误选择的 context 收益有限甚至为负。
 
-工程实践也不把“填满窗口”当作目标。Anthropic 的 [agent context engineering 指南](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) 建议只保留最小的高信号 token 集合，通过工具按需读取外部资料，并以 compaction 保留架构决定、未解决问题和近期工作而丢弃冗余 tool output。该方向与 pi-go 已有限制 read/bash tool result、完整 History 与有损 Working Context 分离的架构一致。
+工程实践也不把“填满窗口”当作目标。Anthropic 的 [agent context engineering 指南](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) 建议只保留最小的高信号 token 集合，通过工具按需读取外部资料，并以 compaction 保留架构决定、未解决问题和近期工作而丢弃冗余 tool output。该方向与 Pia 已有限制 read/bash tool result、完整 History 与有损 Working Context 分离的架构一致。
 
-Codex 给出了两种不同目标下的实际参照。OpenAI 的 [Codex agent loop 说明](https://openai.com/index/unrolling-the-codex-agent-loop/)确认其超过 `auto_compact_limit` 后会自动压缩；该说明链接的 Codex [ModelInfo 源码](https://github.com/openai/codex/blob/99f47d6e9a3546c14c43af99c7a58fa6bd130548/codex-rs/protocol/src/openai_models.rs#L191-L207)在没有显式 override 时把 threshold 推导为 model context window 的 `90%`，其 [默认/fallback coding context](https://github.com/openai/codex/blob/99f47d6e9a3546c14c43af99c7a58fa6bd130548/codex-rs/core/src/models_manager/model_info.rs#L23-L55) 为 `272K`，即约 `244.8K`。另一方面，[GPT-5.3-Codex system card](https://deploymentsafety.openai.com/gpt-5-3-codex/gpt-5-3-codex.pdf) 记录的一项最多 1,000 turns、以最大化表现为目标的长任务评测每 `100K` tokens 就触发 compaction。前者偏向通用产品容量与成本，后者偏向极长任务质量；两者都证明“模型最大窗口”不是唯一 policy。Codex 当前还使用 OpenAI 模型[原生的 opaque compaction item](https://openai.com/index/equip-responses-api-computer-environment/)保存潜在状态，而 pi-go 首版只会得到普通文本 summary，因此不能机械照搬其更高阈值。
+Codex 给出了两种不同目标下的实际参照。OpenAI 的 [Codex agent loop 说明](https://openai.com/index/unrolling-the-codex-agent-loop/)确认其超过 `auto_compact_limit` 后会自动压缩；该说明链接的 Codex [ModelInfo 源码](https://github.com/openai/codex/blob/99f47d6e9a3546c14c43af99c7a58fa6bd130548/codex-rs/protocol/src/openai_models.rs#L191-L207)在没有显式 override 时把 threshold 推导为 model context window 的 `90%`，其 [默认/fallback coding context](https://github.com/openai/codex/blob/99f47d6e9a3546c14c43af99c7a58fa6bd130548/codex-rs/core/src/models_manager/model_info.rs#L23-L55) 为 `272K`，即约 `244.8K`。另一方面，[GPT-5.3-Codex system card](https://deploymentsafety.openai.com/gpt-5-3-codex/gpt-5-3-codex.pdf) 记录的一项最多 1,000 turns、以最大化表现为目标的长任务评测每 `100K` tokens 就触发 compaction。前者偏向通用产品容量与成本，后者偏向极长任务质量；两者都证明“模型最大窗口”不是唯一 policy。Codex 当前还使用 OpenAI 模型[原生的 opaque compaction item](https://openai.com/index/equip-responses-api-computer-environment/)保存潜在状态，而 Pia 首版只会得到普通文本 summary，因此不能机械照搬其更高阈值。
 
 因此首版产品策略明确区分三层，并记录为 D55：
 
@@ -75,7 +75,7 @@ Codex 给出了两种不同目标下的实际参照。OpenAI 的 [Codex agent lo
 
 这里的 `192K` threshold 与 `64K` post-compaction soft ceiling 是 Lesson 08 首版 policy，不是长期模型真理，也不是 active-Run hard ceiling。`64K` 包含 system prompt、tool schemas、synthetic summary、retained raw suffix 与尚未接受的新 user input；它不是 summary size，也不是必须达到的精确值。如果不可压缩内容或 protocol-safe message granularity 使 `64K` 无法达到，允许以高于 `64K` 但低于 `192K` 的 candidate 成功；连 `192K` 都无法降到时才按 D54 原子失败。后续在真实 DeepSeek coding traces、按长度分桶的任务成功率、compaction 前后质量和成本数据可用后，必须重新评估；更换模型、reasoning mode、tool schema、Skills 暴露或 summary policy 时也必须重新校准，不能沿用旧值而不验证。
 
-冻结 Pi 的默认 `reserveTokens: 16384` 会让 1M 模型直到约 `983616` context tokens 才自动 compaction。这个默认值适合解释 Pi 的 capacity/overflow policy，却已经被 DeepSeek 自身的 128K 后退化证据否定为 pi-go 的 coding quality policy；pi-go 不应仅为了源码形状一致而照搬。
+冻结 Pi 的默认 `reserveTokens: 16384` 会让 1M 模型直到约 `983616` context tokens 才自动 compaction。这个默认值适合解释 Pi 的 capacity/overflow policy，却已经被 DeepSeek 自身的 128K 后退化证据否定为 Pia 的 coding quality policy；Pia 不应仅为了源码形状一致而照搬。
 
 当前 Lesson 08 的 lazy compaction 只发生在两个 Run 之间，不能限制一个仍在执行的 Core Agent Run 内连续 Provider/tool turns 增长到 `192K` 以上。首版显式保留这一缺口；若后续真实 traces 显示单个 Run 经常越过阈值，或按长度分桶的 coding 成功率确认 run 内退化，再另行建立 run 内安全 compaction point，不能假装现有 lifecycle 已经提供保证。
 
@@ -119,7 +119,7 @@ Lesson 08 同时涉及几种不同的“长度”和阶段，不能把它们混�
 
 ## 已确认的 protocol-safe message-level cut
 
-pi-go 首版不把完整 Run 作为最小 retained unit。这里描述的是对一个已经 settled 的 Run 做事后 cut：cut finder 可以在该 Run 的消息序列中选择较后的 user 或 assistant message 作为 retained suffix 的第一条原始消息，但不能从 tool result 开始，也不能拆分一条 message 的 content blocks。若第一条 retained assistant 含有 tool calls，其后所有 matching tool results 必须继续保留。这不表示 active Run 执行到该消息时会就地触发 compaction。
+Pia 首版不把完整 Run 作为最小 retained unit。这里描述的是对一个已经 settled 的 Run 做事后 cut：cut finder 可以在该 Run 的消息序列中选择较后的 user 或 assistant message 作为 retained suffix 的第一条原始消息，但不能从 tool result 开始，也不能拆分一条 message 的 content blocks。若第一条 retained assistant 含有 tool calls，其后所有 matching tool results 必须继续保留。这不表示 active Run 执行到该消息时会就地触发 compaction。
 
 当 cut 位于一个 Run 内部时，被移除的 Run prefix 与更早 History 一起进入 summary input；summary 必须保留当前 user request、已完成的早期工作和理解 retained suffix 所需的状态。这样一次极长的 coding Run 也能被压缩，同时 Working Context 不会产生 orphaned tool result。完整 Conversation History 仍保留 cut 两侧的所有原始消息。
 
@@ -143,9 +143,9 @@ Summary Provider error、取消、空文本、意外 tool call 或 replacement f
 
 三种调用共享 Pi 的 summarization system prompt：只生成指定结构的 summary，不继续原对话，也不回答被序列化对话中的问题。待摘要消息先转成标记了 `[User]`、`[Assistant thinking]`、`[Assistant]`、`[Assistant tool calls]` 与 `[Tool result]` 的纯文本，再整体放进一个独立 user message；每个 tool result 在 summary input 中最多保留 `2000` characters。首版还沿用 Pi 的确定性 file-operation 补充：从 tool calls 提取 read/modified paths，并在模型 summary 后追加 `<read-files>` / `<modified-files>`，避免完全依赖模型记住文件清单。
 
-Summary 成功后，pi-go 的 Working Context 以一个 synthetic user message 开头，使用冻结 Pi 的提示语和 `<summary>` tags，后接 protocol-valid retained raw suffix。这个 synthetic message 不是用户实际输入，也不进入完整 Conversation History；Conversation Owner 的私有 projection metadata 需要分别保存 summary 与 cut boundary，供下一次 compaction 使用 update prompt。无需为此给 `internal/ai` 增加 `compactionSummary` role，因为 Provider 最终看到的本来就是普通 user message。
+Summary 成功后，Pia 的 Working Context 以一个 synthetic user message 开头，使用冻结 Pi 的提示语和 `<summary>` tags，后接 protocol-valid retained raw suffix。这个 synthetic message 不是用户实际输入，也不进入完整 Conversation History；Conversation Owner 的私有 projection metadata 需要分别保存 summary 与 cut boundary，供下一次 compaction 使用 update prompt。无需为此给 `internal/ai` 增加 `compactionSummary` role，因为 Provider 最终看到的本来就是普通 user message。
 
-沿用 prompt 不表示复制 Pi 的全部扩展面：本课不增加 custom summary instructions、branch-summary prompt、extension hook 或持久化 compaction entry。D54 已确定的空文本、意外 tool call、错误与取消校验也继续比冻结 Pi 更严格；这些是 pi-go 已确认的状态安全契约，不是 prompt 改写。Summary output limits 与 retained target 已由 D57 按 Pi 数值映射确定。
+沿用 prompt 不表示复制 Pi 的全部扩展面：本课不增加 custom summary instructions、branch-summary prompt、extension hook 或持久化 compaction entry。D54 已确定的空文本、意外 tool call、错误与取消校验也继续比冻结 Pi 更严格；这些是 Pia 已确认的状态安全契约，不是 prompt 改写。Summary output limits 与 retained target 已由 D57 按 Pi 数值映射确定。
 
 ## 已确认的 Pi-aligned budget mapping
 
@@ -168,7 +168,7 @@ Summary 成功后，pi-go 的 Working Context 以一个 synthetic user message �
 
 ## 已实现的 projected-input 估算
 
-pi-go 不用字符近似替代 Provider usage，而是把 usage 当作已知 prefix 的锚点，只估算 usage 之后新增的尾部：
+Pia 不用字符近似替代 Provider usage，而是把 usage 当作已知 prefix 的锚点，只估算 usage 之后新增的尾部：
 
 1. Conversation 在 Run N+1 取得 guard 后，构造“当前 Working Context + 尚未接受的新 user input + 稳定 system prompt/tool schemas”的只读 request view。
 2. `ai.EstimateRequestTokens` 从后向前采用最后一条有效 terminal assistant usage；`error`、`aborted` 和 input/output 都为零的 usage 不作为锚点。

@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yuanbohan/pi-go/internal/agent"
-	"github.com/yuanbohan/pi-go/internal/ai"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/fileutil"
-	"github.com/yuanbohan/pi-go/internal/coding/tools/toolargs"
+	"github.com/yuanbohan/pia/internal/agent"
+	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/coding/tools/fileutil"
+	"github.com/yuanbohan/pia/internal/coding/tools/toolargs"
 )
 
 const (

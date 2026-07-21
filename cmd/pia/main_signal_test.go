@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yuanbohan/pi-go/internal/coding"
+	"github.com/yuanbohan/pia/internal/coding"
 )
 
 func TestProcessMainCancelsOnSignalsAndWritesTraceAfterSettlement(t *testing.T) {

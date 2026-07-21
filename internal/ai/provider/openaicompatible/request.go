@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 // Profile describes the small set of OpenAI-compatible protocol extensions

@@ -4,7 +4,7 @@
 
 第一阶段通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。第二阶段继续迁移 Conversation/Working Context、compaction 与 Skills 等 coding-relevant 能力；更长期的课程以 Pi parity 为能力下限，并通过受控评测追求稳定超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为；长期产品方向、指标和投入领域以根目录 [`STRATEGY.md`](../../STRATEGY.md) 为准。
 
-仓库与产品名统一为 **Pia**；Go module path 暂时仍为 `github.com/yuanbohan/pi-go`，直到后续单独决定是否迁移。旧课程记录中的历史称呼不做机械改写。
+仓库与产品名统一为 **Pia**，Go module path 统一为 `github.com/yuanbohan/pia`；课程、计划和决策记录使用同一项目名称。
 
 固定参考基线：
 

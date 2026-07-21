@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 const summarizationSystemPrompt = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.

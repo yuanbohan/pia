@@ -10,7 +10,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 const maxSSEEventBytes = 1 << 20

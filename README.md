@@ -1,6 +1,6 @@
 # Pia
 
-Pia 是面向学习、验证和长期演进的 Go coding agent。仓库与产品名均为 **Pia**；Go module path 暂时仍为 `github.com/yuanbohan/pi-go`，直到后续单独决定是否迁移。项目以冻结的 [Pi](https://github.com/earendil-works/pi) coding agent 为语义基线。
+Pia 是面向学习、验证和长期演进的 Go coding agent。仓库为 [`yuanbohan/pia`](https://github.com/yuanbohan/pia)，产品名为 **Pia**，Go module path 为 `github.com/yuanbohan/pia`。项目以冻结的 [Pi](https://github.com/earendil-works/pi) coding agent 为语义基线。
 
 项目以课程驱动：先阅读冻结的 Pi 源码并提炼可观察契约，再完成对应 Go 实现、测试、讨论记录和一次由学习者批准的提交。
 

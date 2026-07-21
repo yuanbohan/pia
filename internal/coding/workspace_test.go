@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding"
+	"github.com/yuanbohan/pia/internal/coding"
 )
 
 func TestOpenWorkspaceOwnsCanonicalRoot(t *testing.T) {

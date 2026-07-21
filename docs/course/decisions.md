@@ -103,7 +103,7 @@
 ### D16. 学习过程以证据驱动，不以对话共识驱动
 
 - 日期：2026-07-15
-- 决定：导师持续质疑学习者的设计假设，同时复查自己的既有判断。讨论必须区分学习者假设、已验证的 Pi 契约、候选 Go 机制和已确定的 pi-go 决策；冻结 Pi 的源码、文档、测试和可复现实验优先于对话中的赞同。每个新概念必须先完成术语、源码路径和例子讲解，再进行理解检查。
+- 决定：导师持续质疑学习者的设计假设，同时复查自己的既有判断。讨论必须区分学习者假设、已验证的 Pi 契约、候选 Go 机制和已确定的 Pia 决策；冻结 Pi 的源码、文档、测试和可复现实验优先于对话中的赞同。每个新概念必须先完成术语、源码路径和例子讲解，再进行理解检查。
 - 原因：未经挑战的共识会把遗漏固化进 Go 实现，降低长期可靠性。
 
 ### D17. 课程语义使用 RunStart 和 RunEnd
@@ -122,7 +122,7 @@
 
 - 日期：2026-07-15
 - 决定：按模型源顺序线性扫描 tool calls；连续且显式 `CanRunParallel` 的调用组成一个并行阶段，其他调用各自形成串行屏障。能力默认 false，第一期只有 `read` 为 true，`write`、`edit`、`bash` 和未知工具均为 false。事件可按真实完成顺序出现，写入 transcript 的 tool results 必须恢复模型源顺序。
-- 原因：保留无副作用 read 的简单并行能力，同时避免把整个混合批次并行造成读写和命令竞态。该策略是 pi-go 对 Pi 整批调度的有意差异。
+- 原因：保留无副作用 read 的简单并行能力，同时避免把整个混合批次并行造成读写和命令竞态。该策略是 Pia 对 Pi 整批调度的有意差异。
 
 ### D20. 普通工具错误形成结果并继续
 
@@ -160,13 +160,13 @@
 
 - 日期：2026-07-16
 - 决定：`AssistantMessage` 第一阶段只保留有序 content blocks、token usage、stop reason 和 error message。暂不加入 api/provider/model、response ID/model、diagnostics、timestamp、cost 或未核验的 cache/reasoning usage 细分；stream delta 不重复携带完整 partial message，terminal event 携带权威 final/aborted message。
-- 原因：当前 Agent Loop 只观察内容、用量和终态；其余字段属于 Pi 的多 Provider、路由、Session/UI、诊断或费用生态。第 02 课核对后没有发现 pi-go 第一阶段需要完整 partial snapshot 的消费者；第 04 课若核对 DeepSeek 后出现新的 usage/trace 需求，再用证据扩展内部协议。
+- 原因：当前 Agent Loop 只观察内容、用量和终态；其余字段属于 Pi 的多 Provider、路由、Session/UI、诊断或费用生态。第 02 课核对后没有发现 Pia 第一阶段需要完整 partial snapshot 的消费者；第 04 课若核对 DeepSeek 后出现新的 usage/trace 需求，再用证据扩展内部协议。
 
 ### D26. Partial assistant 不属于正式 transcript
 
 - 日期：2026-07-16
 - 决定：第一阶段正式 transcript 对每个 Provider turn 只追加一条 terminal final/aborted assistant message，不保存、持久化或暴露可查询的完整 partial assistant view。第 03 课增加的 tool-result settlement 不属于 partial 或第二条 assistant；error/aborted terminal 中已完成但未执行的 tool calls 会在该 assistant 后得到同 ID not-executed results。formation events 与实时展示明确推迟到未来 TUI 或其他交互式消费者，不在第一阶段建立 event sink。
-- 原因：冻结 Pi 的低层 loop 会把 partial 临时放进私有 working context，但高层 `Agent.state.messages` 只在 `message_end` 追加 terminal message，并用独立 `streamingMessage` 服务 UI。pi-go 第一期是 headless Runtime，没有必须查询完整 partial snapshot 的消费者；把权威 transcript 与临时展示状态分开可以避免半成品 text、thinking 或 tool-call 参数成为下一轮上下文事实。
+- 原因：冻结 Pi 的低层 loop 会把 partial 临时放进私有 working context，但高层 `Agent.state.messages` 只在 `message_end` 追加 terminal message，并用独立 `streamingMessage` 服务 UI。Pia 第一期是 headless Runtime，没有必须查询完整 partial snapshot 的消费者；把权威 transcript 与临时展示状态分开可以避免半成品 text、thinking 或 tool-call 参数成为下一轮上下文事实。
 
 ### D27. RunResult 携带数据，Go error 表达调用终态
 
@@ -190,7 +190,7 @@
 
 - 日期：2026-07-16
 - 决定：`Agent.Run(ctx, userInput)` 在同一个锁内先拒绝已有 active Run，再检查 `context.Cause(ctx)`；若 context 此时已经取消，Run 未被接受，不追加 user 或 aborted assistant，不调用 Provider，并返回当前稳定 transcript snapshot 与 context cause。若检查通过，设置 active 并追加 user 构成 Run acceptance point；此后到 terminal settlement 之前发生的取消属于已开始的 Run，保留 user，并最终只追加一条 aborted assistant。若该 assistant 含取消前已完成组装的 tool calls，可以在其后追加 non-executed settlement results；assistant exactly-once 不等于 transcript 只能再增加一条消息。
-- 原因：Pi 高层 `Agent.prompt()` 不接收外部 signal，而是在 prompt 被接受后创建内部 `AbortController`，所以没有完全对应的预取消调用；Pi 低层则会在 Provider 观察 signal 前把 prompt 加入 context。pi-go 需要同时遵守 Go 的预取消 context 不启动副作用惯例，以及 Pi 对已接受 prompt 保留 user 与 aborted assistant 的行为。
+- 原因：Pi 高层 `Agent.prompt()` 不接收外部 signal，而是在 prompt 被接受后创建内部 `AbortController`，所以没有完全对应的预取消调用；Pi 低层则会在 Provider 观察 signal 前把 prompt 加入 context。Pia 需要同时遵守 Go 的预取消 context 不启动副作用惯例，以及 Pi 对已接受 prompt 保留 user 与 aborted assistant 的行为。
 
 ### D31. 每个 Provider turn 只在一个位置追加 terminal assistant
 
@@ -208,8 +208,8 @@
 
 - 日期：2026-07-17
 - 决定：当 Run 在工具阶段取消时，Agent 等待已启动 worker 收敛，并为 terminal assistant 中每个 tool call 追加且只追加一个同 ID settlement result：completed 使用实际结果，执行中取消标为 canceled，尚未启动标为因 Run 取消而 not executed。若 Run 在 Provider stream 阶段取消，或 Provider 以 error 结束，error/aborted assistant 中已完成的 tool calls 全部不执行，但分别追加同 ID not-executed result。所有结果按模型源顺序写入 transcript，随后直接返回 Run/Turn error，不再调用 Provider。未启动 result 只陈述没有执行，不代表发生过工具副作用。
-- Pi 分歧：冻结 Pi 的 Agent Loop 可能把未执行调用留成 orphaned tool calls，再由 `packages/ai/src/api/transform-messages.ts` 在下一次 Provider request 中临时插入 `No result provided`，不写回 Agent state。pi-go 不复制这层隐藏修复，而是在权威 transcript 中显式闭合调用。
-- 原因：pi-go 已确定同一 Agent 跨顺序 Run 保存完整 transcript，并把它作为 Provider history 的单一事实源。显式 settlement 让 `RunResult`、Agent state 和下一次 Provider request 保持一致，也让取消后的对话可以直接继续。离线 Faux 测试和真实 DeepSeek compatibility smoke 都要专门验证这一分歧。
+- Pi 分歧：冻结 Pi 的 Agent Loop 可能把未执行调用留成 orphaned tool calls，再由 `packages/ai/src/api/transform-messages.ts` 在下一次 Provider request 中临时插入 `No result provided`，不写回 Agent state。Pia 不复制这层隐藏修复，而是在权威 transcript 中显式闭合调用。
+- 原因：Pia 已确定同一 Agent 跨顺序 Run 保存完整 transcript，并把它作为 Provider history 的单一事实源。显式 settlement 让 `RunResult`、Agent state 和下一次 Provider request 保持一致，也让取消后的对话可以直接继续。离线 Faux 测试和真实 DeepSeek compatibility smoke 都要专门验证这一分歧。
 
 ### D34. Tool-call terminal 协议按 call identity 和可执行性分层
 
@@ -238,7 +238,7 @@
 - `read` 契约：参数体最多 8192 bytes，输入为 `path`、可选 1-based `offset` 和可选 `limit`；同一页最多 2000 个完整行或 50 KiB 实际内容。完整行保留终止换行，尾部换行不产生空 continuation page。结果固定返回规范化相对路径、实际行范围、内容与 EOF/next-offset 状态，不暴露 host absolute path，也不为总行数继续扫描整文件。
 - 文件与编码：所有 I/O 通过 root-relative handle；`fileutil.OpenRegularFile` 在 macOS/Linux 以 nonblocking read-only 方式取得 candidate，再对实际 opened handle 校验 regular-file，因此 FIFO 不会在校验前等待 writer，path replacement 也不能造成“检查 A、读取 B”。该行为由互斥 `go:build` 文件限定到已验证的平台；其他平台暂用普通 `Open` 保持包可构建，仍在打开成功后校验 regular-file，但不承诺无 writer FIFO 的非阻塞打开，也不扩展第一阶段的平台支持范围。本次返回页包含非法 UTF-8 时形成 call-local error，不使用 replacement character；未返回内容不为整文件编码判断而额外扫描。
 - 有界性：选中单行超过 50 KiB 时立即报错并停止读取，不 drain 剩余行；offset 跳过的任一单行也受相同限制，不能用 seek-by-line 绕过边界。参数/path 上限同时约束标准库错误可能回显的模型输入，使失败结果也保持有界。`read` 无可变 call state，依赖 `os.Root` 的并发安全并声明 `CanRunParallel=true`。
-- Pi 分歧：冻结 Pi 的默认 operations 使用 `fsAccess(R_OK)` 后直接 `fsReadFile`，没有 regular-file/FIFO 校验、nonblocking open 或相应 FIFO 测试；因此它不是用 pi-go 的 opened-handle 方案解决该问题。冻结 Pi 还允许绝对路径和可清理的 `..`、整文件读入后 `split/join`、非法 UTF-8 replacement、总行数提示、图片/UI/remote operations，并在首行超限时提示 bash fallback。pi-go 第一期选择 root containment、实际 handle 校验、macOS/Linux FIFO 非阻塞拒绝、精确文本视图和流式有界输出，不移植这些能力，也不建议通过 bash 绕过文件工具边界。
+- Pi 分歧：冻结 Pi 的默认 operations 使用 `fsAccess(R_OK)` 后直接 `fsReadFile`，没有 regular-file/FIFO 校验、nonblocking open 或相应 FIFO 测试；因此它不是用 Pia 的 opened-handle 方案解决该问题。冻结 Pi 还允许绝对路径和可清理的 `..`、整文件读入后 `split/join`、非法 UTF-8 replacement、总行数提示、图片/UI/remote operations，并在首行超限时提示 bash fallback。Pia 第一期选择 root containment、实际 handle 校验、macOS/Linux FIFO 非阻塞拒绝、精确文本视图和流式有界输出，不移植这些能力，也不建议通过 bash 绕过文件工具边界。
 - 原因：Agent 后续会把 read result 直接写入 transcript，并用其中的原文驱动 exact edit；路径、内容、错误和并发行为都必须在进入模型前可预测、有界且与磁盘对象一致。只抽取已有真实消费者的聚焦 helper，避免为尚未讨论的工具建立猜测性接口。
 
 ### D38. write 只替换普通文件，并在固定父目录内原子提交
@@ -247,7 +247,7 @@
 - 能力边界：`write(path, content)` 创建或完整覆盖普通文件并递归创建父目录；空内容合法，不增加计划未要求的 content 上限。目录、最终 symlink、FIFO、socket 和 device 都拒绝，创建或直接操作这些对象属于 bash 的显式能力。workspace 内 ancestor symlink 可以使用，逃逸或 dangling ancestor 由 `os.Root` 拒绝。
 - 提交边界：先以 `root.OpenRoot(parent)` 固定实际父目录，再在该 root 内 `Lstat` 最终 component、创建随机 `O_EXCL` 临时文件、写完并关闭，最后以同目录 rename 提交。这样 ancestor swap 不会让临时文件、目标和清理落入不同目录；最终 symlink 在检查时直接拒绝，在检查后才出现则由 rename 替换 link entry 而不是跟随 referent。rename 前失败或取消删除临时文件并保留原目标，父目录创建不回滚；rename 后不再因 context 取消反报失败。
 - 可观察语义：替换保证运行时读者只看到旧内容或完整新内容，不通过 `fsync` 承诺 crash durability。新文件 `0666`、父目录 `0777` 并服从 umask；覆盖保留九个 permission bits，但新 inode 不保留原 hard-link relationship、owner、ACL、extended attributes 或特殊 mode bits。成功文本只返回规范化相对路径和 Go string 的实际 UTF-8 byte length，不回显 content。
-- Pi 分歧：冻结 Pi 递归建目录后直接 `fsWriteFile`，会跟随最终 symlink、直接截断目标，并用全局 per-path mutation queue；其成功文本把 JavaScript UTF-16 `content.length` 标作 bytes。pi-go 使用 Agent serial barrier、`os.Root`、普通文件限制和替换提交，不复制额外 mutation queue，并修正 byte count。
+- Pi 分歧：冻结 Pi 递归建目录后直接 `fsWriteFile`，会跟随最终 symlink、直接截断目标，并用全局 per-path mutation queue；其成功文本把 JavaScript UTF-16 `content.length` 标作 bytes。Pia 使用 Agent serial barrier、`os.Root`、普通文件限制和替换提交，不复制额外 mutation queue，并修正 byte count。
 - 共享能力：同目录替换提交进入 `internal/coding/tools/fileutil`，因为计划已经明确 `write` 与后续 `edit` 共用该责任；模型协议、父目录策略和结果格式仍留在 `internal/coding/tools/write`。`internal/coding/tools/toolargs` 中的 decoder 只截断可能回显模型输入的超长诊断，不限制合法 write content。
 - 原因：完整覆盖是模型需要的原子文件能力，不应隐式获得 symlink/特殊文件语义；固定 parent root 和 rename 同时满足 workspace boundary、取消前不暴露半写目标，以及后续 edit 可复用的提交契约。
 
@@ -268,7 +268,7 @@
 - 日期：2026-07-18
 - 模型协议：输入为 workspace-relative `path` 和非空 `edits[]`，每项使用 `oldText`/`newText`；`oldText` 非空且必须在原始文件中恰好出现一次，`newText` 可以为空。全部位置都基于同一原文件快照，重叠区域拒绝；只有所有项通过后才构造完整新内容，因此任一失败不会部分应用。目标必须是已经存在的 UTF-8 regular file，成功结果只返回规范化路径和 block count。
 - 提交与调度：先固定 resolved parent，再用共享 `OpenRegularFile` 读取实际 handle，并通过 `ReplaceRegularFile` 在同一 parent root 内提交完整替换。最终 symlink/特殊文件、取消和 rename commit point 沿用 D38；`edit` 保持默认串行屏障，不复制冻结 Pi 的进程级 per-path mutation queue。
-- Pi 证据与分歧：冻结 Pi commit 的主协议同样是 `edits[]`，所有项在原文件上匹配、要求唯一且不重叠，并在写入前完成整组校验；但其 exact 失败后会进行空白、Unicode 与行结束符 fuzzy normalization，还兼容旧单编辑参数和字符串化 `edits`，生成 TUI preview/diff/patch，支持可替换 operations，并由 mutation queue 后直接 `writeFile`。pi-go 第一期不移植这些扩展。
+- Pi 证据与分歧：冻结 Pi commit 的主协议同样是 `edits[]`，所有项在原文件上匹配、要求唯一且不重叠，并在写入前完成整组校验；但其 exact 失败后会进行空白、Unicode 与行结束符 fuzzy normalization，还兼容旧单编辑参数和字符串化 `edits`，生成 TUI preview/diff/patch，支持可替换 operations，并由 mutation queue 后直接 `writeFile`。Pia 第一期不移植这些扩展。
 - fuzzy 延后原因：精确失败保留原文件并允许模型重新读取恢复，模糊误匹配却可能提交非预期修改。normalization 后唯一性、offset 映射、原字节保留、CRLF/BOM 和多编辑组合需要单独设计及大量测试；学习者确认它是出现真实需求后的一次独立工作，不能因为冻结 Pi 已实现就顺带加入当前 exact mutation contract。
 - 选择原因：`edits[]` 是冻结源码已经证明的核心可观察协议，保留它避免先建立马上废弃的单编辑 schema；fuzzy、UI、remote operations 和额外队列则没有第一期消费者。这个边界同时满足 semantic port、当前计划的“精确且可验证”以及不为未发现需求过度设计的约束。
 
@@ -298,13 +298,13 @@
 ### D44. 课程规模是拆分门槛，不是工期估算
 
 - 日期：2026-07-19
-- 决定：未来已编号课程表至少记录解锁能力、Pi 大致做法、pi-go 当前边界与非目标、结束信号、依赖、相对规模和状态。规模使用 Small、Medium、Large、XLarge；XLarge 不能直接开课，必须先讨论并拆成能独立讲解和验收的闭环。越远的阶段信息越粗，不因为表格列更多而提前设计实现细节。
+- 决定：未来已编号课程表至少记录解锁能力、Pi 大致做法、Pia 当前边界与非目标、结束信号、依赖、相对规模和状态。规模使用 Small、Medium、Large、XLarge；XLarge 不能直接开课，必须先讨论并拆成能独立讲解和验收的闭环。越远的阶段信息越粗，不因为表格列更多而提前设计实现细节。
 - 原因：这些字段让后续实施者理解“为什么这样排”和“何时算完成”，同时保留根据真实源码与代码推翻早期假设的空间。把多个状态所有权、生命周期或消费者塞进一课，会让讲解、review 和验收同时失焦。
 
 ### D45. 以 Pi parity 为能力下限，并用受控评测追求稳定超过 Pi
 
 - 日期：2026-07-19
-- 决定：完成 coding-relevant Pi 能力覆盖后，建立稳定、可重复的 pi-go 与冻结 Pi 对照评测。Pi parity 是不可退让的能力下限，稳定超过是演进目标。公平比较固定模型/Provider profile、任务与初始仓库并做多次独立运行；以客观 resolve rate 为主要能力指标，同时记录成本、turn、时延、tool error、恢复和长上下文表现，并把协议完整性与安全回归作为门槛。其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据只提供候选机制与工程经验，不替代 Pi 对照组。
+- 决定：完成 coding-relevant Pi 能力覆盖后，建立稳定、可重复的 Pia 与冻结 Pi 对照评测。Pi parity 是不可退让的能力下限，稳定超过是演进目标。公平比较固定模型/Provider profile、任务与初始仓库并做多次独立运行；以客观 resolve rate 为主要能力指标，同时记录成本、turn、时延、tool error、恢复和长上下文表现，并把协议完整性与安全回归作为门槛。其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据只提供候选机制与工程经验，不替代 Pi 对照组。
 - 范围：当前只确定目标和公平性原则，不提前确定 benchmark corpus、runner 架构、统计阈值、trace schema 或产物存储。Lesson 06 的本地 fixture 仍只是第一期验收；正式评测方向在前置能力稳定后另行拆课。
 - 原因：项目目标是先确保不弱于 Pi，再通过可验证机制变得更强，而不是仅达到文件结构或功能清单相似。没有同模型、同任务、重复运行和客观判据，“达到或超过 Pi”都只能是主观印象，不能指导后续优化。
 
@@ -313,21 +313,21 @@
 - 日期：2026-07-19
 - 决定：Lesson 07 采用外层最小内存 Conversation Owner 保存完整、有序的 Conversation History；Core Agent 只拥有可替换的 Working Context，并继续负责 Provider/tool loop；每次 Provider 调用使用由 Working Context 构造的 ownership-independent Request Snapshot。这里的 Conversation Owner 是语义责任，不预先要求同名 Go 类型或独立 package。
 - 范围：当前决定不引入持久化 Session、entry tree、branch、compaction 算法、事件订阅或 TUI。Conversation Owner 与 Core Agent 之间的同步、首份 package 归属、active 边界、消息复制和 Working Context replacement 分别采用 D47 至 D51。
-- 原因：冻结 Pi 在 `message_end` 后先把 terminal assistant 保存进完整 Session entries，再由外层在 threshold/overflow compaction 后替换 `agent.state.messages`；overflow error 可以保留在完整历史中，却从 retry 的 Working Context 中移除。当前 pi-go 的单 `transcript` slice 在无 compaction 时成立，但继续合并会迫使 Lesson 08 在“丢失原始历史”和“压缩不减少模型输入”之间二选一。只确定最小内存 owner 边界可以解决这项真实张力，同时避免提前复制 Pi 的完整 Session 基础设施。
+- 原因：冻结 Pi 在 `message_end` 后先把 terminal assistant 保存进完整 Session entries，再由外层在 threshold/overflow compaction 后替换 `agent.state.messages`；overflow error 可以保留在完整历史中，却从 retry 的 Working Context 中移除。当前 Pia 的单 `transcript` slice 在无 compaction 时成立，但继续合并会迫使 Lesson 08 在“丢失原始历史”和“压缩不减少模型输入”之间二选一。只确定最小内存 owner 边界可以解决这项真实张力，同时避免提前复制 Pi 的完整 Session 基础设施。
 
 ### D47. Core Agent 以同步 run-local message delta 提交一次 Run 的新增消息
 
 - 日期：2026-07-19
 - 决定：一次 accepted Core Agent Run 在 settlement 后同步返回该 Run 新增的完整有序 message delta，并同时返回独立的 Go error；Conversation Owner 无论 error 是否为 nil，都先把 ownership-independent delta 一次性追加到 Conversation History。acceptance point 前取消或 concurrent Run rejection 返回空 delta且不修改 History。当前同步路径使用普通函数返回，不引入 Go channel、message callback 或完整 Agent event stream。
 - 范围：这里确定的是 settlement 语义，不预先锁定 Go struct/field 名；课程使用 `NewMessages` 表示该 delta。History 在当前最小内存实现中以 settled Run 为提交边界，不承诺 active Run 中途可观察或进程崩溃恢复。实时持久化、TUI progress、extensions、steering/follow-up 和多订阅者事件仍在后续真实消费者出现时设计。
-- 原因：冻结 Pi 的低层 `runAgentLoop()` / `runAgentLoopContinue()` 已经独立维护并返回 `newMessages`，同时另行发出逐消息和 `agent_end` 事件；前者表达 Run 结果，后者服务 `AgentSession` persistence、extensions 与 UI。pi-go 当前只有 settlement 后的 Conversation History 消费者，直接返回 delta 足够；提前使用 channel/callback 会额外引入 close、backpressure、drain、panic、reentrancy 和 listener settlement 契约，却没有当前收益。
+- 原因：冻结 Pi 的低层 `runAgentLoop()` / `runAgentLoopContinue()` 已经独立维护并返回 `newMessages`，同时另行发出逐消息和 `agent_end` 事件；前者表达 Run 结果，后者服务 `AgentSession` persistence、extensions 与 UI。Pia 当前只有 settlement 后的 Conversation History 消费者，直接返回 delta 足够；提前使用 channel/callback 会额外引入 close、backpressure、drain、panic、reentrancy 和 listener settlement 契约，却没有当前收益。
 
 ### D48. 首份 Conversation Owner 是 coding-owned 私有实现
 
 - 日期：2026-07-19
 - 决定：首份 Conversation Owner 实现在现有 `internal/coding` package 的独立 `conversation.go` 中，使用未导出的类型协调具体 Core Agent 与完整内存 Conversation History。当前不创建 `internal/conversation`、`internal/session` 或同名公共抽象，也不把完整 History 的所有权放回 `internal/agent`。
 - 范围：这是第一个真实 Coding Agent 消费者的 package 归属，不宣称 research、OCR、web search 等未来应用必然复用同一种 history policy。出现第二个非 coding 消费者时，必须从双方已经证明相同的责任重新审查 package 布局，再决定是否提取共享实现或接口；概念上的通用性本身不是提前建包的证据。
-- 原因：冻结 Pi 同样把持久 conversation/session 协调放在 coding-agent 的 `AgentSession`，而不是低层 agent loop。pi-go 当前只有 Coding Agent 需要该责任；将私有实现放在 composition 所在应用层，既保持 Core Agent 通用，也避免为尚不存在的消费者设计宽泛 API。独立文件让 history ownership 与 `runtime.go` 的一次性装配责任保持收敛。
+- 原因：冻结 Pi 同样把持久 conversation/session 协调放在 coding-agent 的 `AgentSession`，而不是低层 agent loop。Pia 当前只有 Coding Agent 需要该责任；将私有实现放在 composition 所在应用层，既保持 Core Agent 通用，也避免为尚不存在的消费者设计宽泛 API。独立文件让 history ownership 与 `runtime.go` 的一次性装配责任保持收敛。
 
 ### D49. Conversation Owner 以 fail-fast active guard 保证 Run 提交顺序
 
@@ -348,7 +348,7 @@
 - 日期：2026-07-19
 - 决定：Core Agent 提供窄方法 `ReplaceWorkingContext([]ai.Message) error`。该方法只在没有 active Run 时深复制并原子替换当前 Working Context；active Run 期间立即返回 active-run error，不等待、不排队，也不在同一 Run 的 Turns 之间切换 context。替换不读取或修改 Conversation History。
 - 范围：这是 Lesson 08 compaction 投影可接入的状态边界，不在本课实现摘要、token budget、overflow recovery 或通用 message-graph validator。方法是即时内存操作，不接收 `context.Context`，也不返回旧 context 或暴露可变 Agent state。
-- Pi 差异：冻结 Pi 通过赋值 `agent.state.messages` 替换 working messages，setter 只复制顶层数组；coding-agent 的实际 compaction replacement 位于 `agent_end` 之后、下一次 prompt 之前。pi-go 保留这一 idle-time 使用时序，但用显式 Go 方法、active guard 和深复制收紧所有权，而不暴露可变 state object。
+- Pi 差异：冻结 Pi 通过赋值 `agent.state.messages` 替换 working messages，setter 只复制顶层数组；coding-agent 的实际 compaction replacement 位于 `agent_end` 之后、下一次 prompt 之前。Pia 保留这一 idle-time 使用时序，但用显式 Go 方法、active guard 和深复制收紧所有权，而不暴露可变 state object。
 - 原因：Run 内后续 Turn 依赖前面 Turn 和 tool results；中途替换会让同一 Run 使用两套上下文，破坏 delta 与 Provider request 的可推理关系。等待式 API 又会隐式引入生命周期和排队语义；调用方本就应由 Conversation Owner 在 Run settlement 之后协调 replacement，因此 fail-fast 最清晰。
 
 ### D52. 长期产品是由 Orchestrator 驱动的多 Session coding-agent service
@@ -372,14 +372,14 @@
 - 决定：Conversation Owner 在下一次 `conversation.run()` 取得自己的 active guard 后、Core Agent 接受新 user input 之前，根据上一份 settled Working Context 检查 threshold 并按需执行 compaction。没有后续 Run 就不调用 summarizer；threshold compaction 成功后不自动调用 `continue`。Conversation guard 持续覆盖 compaction、后续 Core Run、History commit 与返回 snapshot。
 - 失败语义：summary request 不经过 Core Agent loop且不提供 coding tools，其 request、terminal response 和 usage 不进入 Conversation History。summary Provider error、取消、空文本、意外 tool call、无效 candidate context 或 `ReplaceWorkingContext` failure 都不修改 History、Working Context 或 projection metadata，新 user input 保持未接受，并返回当前完整 History snapshot 与错误。candidate 验证及最后一次 cancellation check 通过后，Working Context replacement 与 projection metadata 发布构成同步 commit；commit 之后发生的取消不回滚合法的新 projection，但 Core Agent 仍可拒绝尚未接受的 input。
 - 范围：本决定只覆盖 threshold compaction 的 between-Runs lifecycle；明确不在同一个 active Run 的相邻 Provider Turns 之间 compaction，也不增加后台/eager compaction、manual command、compaction event、overflow compact-and-retry 或输入队列。取得 Conversation active guard 只是 lifecycle 协调，不等于 Core Agent 已接受 user input。
-- Pi 差异：冻结 Pi 通常在 `agent_end` 后立即检查 threshold，并在新 prompt 前补做检查。pi-go 当前 one-shot composition 没有独立 compaction status/event，采用 pre-next-Run lazy 时机可以避免无后续调用时的额外模型成本，也不会把上一次已经成功的 Run 因后处理失败改写成 error，同时仍保持“settled Run 后、下一次 Provider call 前”的外部语义。
+- Pi 差异：冻结 Pi 通常在 `agent_end` 后立即检查 threshold，并在新 prompt 前补做检查。Pia 当前 one-shot composition 没有独立 compaction status/event，采用 pre-next-Run lazy 时机可以避免无后续调用时的额外模型成本，也不会把上一次已经成功的 Run 因后处理失败改写成 error，同时仍保持“settled Run 后、下一次 Provider call 前”的外部语义。
 - 原因：当前最小 API 用 `RunResult + error` 表达一次 user input 是否被接受并完成，没有另一个通道承载 eager compaction failure。lazy 检查让失败明确归属于尚未接受的新 Run，旧的 settled result 与完整 History 都保持稳定。
 
 ### D55. 首版 between-Runs compaction 使用 192K threshold 与 64K soft ceiling
 
 - 日期：2026-07-20
 - 决定：Lesson 08 以 projected Provider input `192_000` tokens 作为首版 between-Runs quality-oriented compaction threshold；`64_000` tokens 是 compaction 后完整 projected Provider input 的普通情况 soft ceiling，不是 summary size、必须填满的目标或成功所需的硬上限。projected input 包含稳定 system prompt、tool schemas、synthetic summary、retained raw suffix 与尚未接受的新 user input。`1_000_000` model context 仍只表示 Provider hard capacity，不作为日常 coding target。
-- 证据与折中：DeepSeek V4 官方 MRCR 证据显示到 `128K` 基本稳定、之后开始可见退化，而 `256K` 已明显下降；它证明不能把 1M 容量当质量区间，但不足以把 128K 认定为 coding 精确最优点。OpenAI 对 Codex agent loop 的说明和其链接源码显示 Codex 默认以 model context 的 `90%` 触发 auto-compaction，`272K` coding context 对应约 `244.8K`；GPT-5.3-Codex system card 中一项以最大化长任务表现为目标的评测则每 `100K` 触发。pi-go 的普通文本 summary 又弱于 OpenAI 模型原生 opaque compaction item，因此 `192K` 在容量、压缩频率与质量风险之间取中间偏保守位置；达到 `64K` ceiling 时提供约 `128K` 的再增长空间。
+- 证据与折中：DeepSeek V4 官方 MRCR 证据显示到 `128K` 基本稳定、之后开始可见退化，而 `256K` 已明显下降；它证明不能把 1M 容量当质量区间，但不足以把 128K 认定为 coding 精确最优点。OpenAI 对 Codex agent loop 的说明和其链接源码显示 Codex 默认以 model context 的 `90%` 触发 auto-compaction，`272K` coding context 对应约 `244.8K`；GPT-5.3-Codex system card 中一项以最大化长任务表现为目标的评测则每 `100K` 触发。Pia 的普通文本 summary 又弱于 OpenAI 模型原生 opaque compaction item，因此 `192K` 在容量、压缩频率与质量风险之间取中间偏保守位置；达到 `64K` ceiling 时提供约 `128K` 的再增长空间。
 - Soft-ceiling 语义：cut selection 应尽量使 candidate 不超过 `64K`，但不得为了凑该数值丢弃没有进入 summary 的消息。不可压缩的新 input、固定 prompt/tools、单条大 message、实际 summary 或 protocol-safe granularity 使 `64K` 无法达到时，允许以高于 `64K` 但低于 `192K` 的 candidate 成功；连 threshold 都无法降到时按 D54 原子失败，新 input 不被接受。
 - 范围：这是 D54 lifecycle 下的首版产品 policy，不是 active Run hard ceiling，也不改变本课不做 run 内 compaction、overflow compact-and-retry 或模型 registry 的范围。它不宣称一次 active Run 不会从低于 threshold 增长到更高区间。
 - 复评义务：真实 DeepSeek coding traces 可用后，必须按 `<128K`、`128K-192K`、`192K-256K` 与 `>256K` 分桶比较任务成功率、重复 compaction 后的信息损失、成本和频率。`128K-192K` 已显著退化时下调；只有 `192K-256K` 质量稳定且 compaction 过频时才上调。更换模型、reasoning mode、tool schema、Skills 暴露、summary prompt/表示或 tool-result bounds 时必须重新校准。
@@ -387,7 +387,7 @@
 ### D56. 首版 summary prompt 与 model-visible 表达沿用冻结 Pi
 
 - 日期：2026-07-20
-- 决定：没有 DeepSeek 或 pi-go 证据要求偏离时，Lesson 08 原样沿用冻结 Pi commit `dcfe36c79702ec240b146c45f167ab75ecddd205` 的 summarization system prompt、首次 structured checkpoint prompt、已有 summary 时的 update prompt、split-turn prefix prompt，以及 `<conversation>` / `<previous-summary>` 输入组织。待摘要消息按 Pi 规则序列化为带 role labels 的纯文本，每个 tool result 在 summary input 中最多保留 `2000` characters；从 tool calls 确定性提取的 read/modified file lists 追加到模型 summary。
+- 决定：没有 DeepSeek 或 Pia 证据要求偏离时，Lesson 08 原样沿用冻结 Pi commit `dcfe36c79702ec240b146c45f167ab75ecddd205` 的 summarization system prompt、首次 structured checkpoint prompt、已有 summary 时的 update prompt、split-turn prefix prompt，以及 `<conversation>` / `<previous-summary>` 输入组织。待摘要消息按 Pi 规则序列化为带 role labels 的纯文本，每个 tool result 在 summary input 中最多保留 `2000` characters；从 tool calls 确定性提取的 read/modified file lists 追加到模型 summary。
 - Model-visible 表达：成功 summary 在 Working Context 中投影成普通 synthetic user message，沿用 Pi 的 `The conversation history before this point was compacted into the following summary:` preamble 与 `<summary>` tags，随后保留 D53 的 protocol-valid raw suffix。它不进入完整 Conversation History，也不冒充真实 user input；Conversation Owner 私有 projection metadata 分别保存 summary 与 cut boundary。重复 compaction 只把新丢弃的原始消息放入 `<conversation>`，把前次 summary 放入 `<previous-summary>` 交给 update prompt，不把 synthetic summary 当普通对话再次摘要。
 - 范围：本决定不引入新的 `ai.Message` role、custom summary instructions、branch summary、extensions/hooks、持久化 compaction entry 或 Session entry tree。具体预算由 D57 规定；Go constants 与文件拆分在实现设计中继续收敛。D54 对空 summary、意外 tool call、Provider failure 与 cancellation 的严格原子失败语义保持不变。
 - 原因：prompt 直接影响模型保留哪些工作状态，属于需要证据才能改动的行为契约；当前没有真实 DeepSeek 结果证明 Pi prompt 不适用。精确复用还能先建立可比较基线，后续只有结构遵循率、事实保真度或 coding continuation 评测显示具体问题时才做有针对性的修改。
@@ -409,12 +409,14 @@
 - 所有权：fixed request limits 由 coding product profile 提供；`ai.RequestLimits` 只实现 model-neutral clamp，`ai.Request.MaxOutputTokens` 只承载一次调用的值；threshold、soft ceiling、retained target、summary prompts、cut、projection 与 failure semantics 仍由 coding-owned Conversation 负责。Provider 只映射 `max_tokens`，不拥有估算或 compaction policy。
 - 精度边界：字符近似是冻结 Pi 基线，不是 tokenizer 等价物。真实 traces 必须比较 estimate 与 Provider-reported input；大型项目、Skills、模型/reasoning/tool schema 或 prompt 变化仍按 D55/D57 强制复评。
 
-### D59. 产品统一命名为 Pia
+### D59. 产品、仓库与 Go module 统一命名为 Pia
 
 - 日期：2026-07-20
-- 决定：产品、架构和后续课程讨论统一使用 **Pia**。`pi-go` 只保留为当前 repository、workspace directory、Go module/import path 与历史记录中的技术标识；是否重命名 repository/module 是另一项有迁移影响的工作，未经明确批准不在本课机械修改。
+- 修正日期：2026-07-21
+- 决定：产品、repository、workspace directory 约定和后续课程讨论统一使用 **Pia**；repository 为 `yuanbohan/pia`，Go module/import path 为 `github.com/yuanbohan/pia`。2026-07-21 的明确迁移指令取代此前暂缓 technical-path migration 的边界。
 - CLI 边界：`pia` 不再被描述为临时产品名；`cmd/pia` 是当前本地入口，但其参数、输出协议、部署形态与公共 SDK 承诺仍不稳定。
-- 原因：产品身份与现存技术路径是两个维度。现在统一术语可以避免把 Pi 基线、pi-go repository 和最终产品混成同一个概念，同时不为命名讨论引入无关 module migration。
+- 迁移边界：内部 imports、operator-facing environment variables、临时文件前缀、课程、计划和引用同步使用 Pia 命名；不保留旧项目名的兼容 alias。冻结 Pi 的源码、链接和来源说明仍使用上游名称。
+- 原因：repository 与远端已使用 Pia；统一 module、imports 和文档可以消除同一项目的双重身份，同时继续明确区分上游 Pi 基线与本项目 Pia。
 
 ### D60. read 支持 workspace-relative 与 absolute host path
 
@@ -466,7 +468,7 @@
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
 - 2026-07-15：增加证据驱动的学习原则、先讲后问顺序和 `run_start/run_end` 课程术语。
 - 2026-07-15：移除课程专用 `internal/contract`；冻结基线仅保存在文档。
-- 2026-07-15：取消当前阶段的外部调用承诺；`cmd/pi-go` 仅用于本地运行与验收。
+- 2026-07-15：取消当前阶段的外部调用承诺；`cmd/pia` 仅用于本地运行与验收。
 - 2026-07-15：第一期收敛为单目录、单 active task 的最小 coding loop；Goal Runtime、持久化 Session、完整 lifecycle/subscription、Manager 和外部集成移至二期。
 - 2026-07-15：确定屏障式工具调度、错误继续、取消 settlement、`os.Root` 文件边界、DeepSeek 数据外发和固定 bug-fix 验收。
 - 2026-07-16：根据冻结 Pi `Context` 与 coding-agent system prompt 证据，明确 workspace/cwd 说明进入稳定 system prompt，不建立独立 `WorkspaceContext` AI 协议字段。
@@ -480,9 +482,9 @@
 - 2026-07-16：学习者继续进入实现前收尾，确认已接受 Run 的全部退出路径统一返回一条 terminal assistant，由外层 Run 在唯一位置写入 transcript；第一条有效 terminal event 是 settlement point。
 - 2026-07-16：第 02 课实现与测试完成；补充锁定同一次 Receive 同返 terminal event 与 error 时 terminal 优先，以及 nil stream 合成协议错误 assistant。
 - 2026-07-16：学习者确认第 02 课无需继续讲解，要求完整性审查、补齐测试后提交并 push 到 `main`，随后开始第 03 课。
-- 2026-07-16：第 02 课已推送到 `main`，学习者明确要求开始第 03 课；课程先核对冻结 Pi 的 Tool Loop 与整批调度，再讨论 pi-go 的 Tool contract 和屏障式分段实现。
+- 2026-07-16：第 02 课已推送到 `main`，学习者明确要求开始第 03 课；课程先核对冻结 Pi 的 Tool Loop 与整批调度，再讨论 Pia 的 Tool contract 和屏障式分段实现。
 - 2026-07-17：学习者接受第 03 课 Tool retry 结论；Agent 不自动重试 tool call，模型负责从 error tool result 恢复，后端内部重试必须有明确的瞬时错误证据。
-- 2026-07-17：冻结 Pi 的 orphaned tool-call request 修复暴露出旧取消契约与完整 transcript 复用的冲突；学习者选择方案 2，pi-go 在 Agent transcript 中为 canceled/not-executed 调用追加明确 settlement results，并要求后续真实 DeepSeek 验证特别覆盖该分歧。
+- 2026-07-17：冻结 Pi 的 orphaned tool-call request 修复暴露出旧取消契约与完整 transcript 复用的冲突；学习者选择方案 2，Pia 在 Agent transcript 中为 canceled/not-executed 调用追加明确 settlement results，并要求后续真实 DeepSeek 验证特别覆盖该分歧。
 - 2026-07-17：第 03 课实现 review 发现 Provider aborted assistant 可以保留已完成 tool calls，而第 01/02 课的旧表述只约束了 assistant exactly-once。学习者确认扩展方案 2：失败 Turn 不执行这些 calls，但在唯一 terminal assistant 后追加同 ID not-executed results，并同步修正旧课程记录。
 - 2026-07-17：学习者明确开始继续课程并进入第 04 课；确认参考冻结 Pi 的 Provider/API 分层，以薄 DeepSeek 层复用最小 OpenAI-compatible Chat Completions 协议层，不扩建多 Provider registry。
 - 2026-07-17：学习者提出统一 Provider 目录；确定 `internal/ai/provider/` 只归类 Faux、OpenAI-compatible 与 DeepSeek 实现，consumer-owned `ai.Provider` 仍留在 `internal/ai`，并记录这与 Pi 大 Provider runtime abstraction 的差别。
@@ -491,7 +493,7 @@
 - 2026-07-17：学习者明确要求第 04 课不为没有真实 DeepSeek/Pi 证据的 3xx 增加特殊逻辑或专门测试；Provider 保持标准 `http.Client` 行为，redirect 影响记录为后续独立验证项，“零自动重试”只表示 Provider 不自行 retry。
 - 2026-07-17：学习者开始第 05 课并确认 `read` 的 offset/limit、非法 UTF-8 error 与固定模型输出；共享 JSON/path 能力先进入 coding tools 的集中辅助 package，具体读取语义保留在 `read`。
 - 2026-07-17：`read` 子阶段完成测试先行实现和审查修复；workspace root、non-regular/FIFO、symlink/`..`、分页/双上限、错误有界、取消和并发测试通过。学习者随后确认理解并要求本地提交，下一步进入 `write`。
-- 2026-07-17：核对冻结 Pi 后确认其默认 `read` 没有 regular-file/FIFO 特殊处理；pi-go 的 `O_NONBLOCK` 加 opened-handle 校验是有意增强。课程同时修正 `go:build` 理由：当前只将该保证开放给已有测试的 macOS/Linux，而不是声称其他 Go 平台一定缺少该常量。代码注释统一使用英文，课程和其他文档语言不作限制。
+- 2026-07-17：核对冻结 Pi 后确认其默认 `read` 没有 regular-file/FIFO 特殊处理；Pia 的 `O_NONBLOCK` 加 opened-handle 校验是有意增强。课程同时修正 `go:build` 理由：当前只将该保证开放给已有测试的 macOS/Linux，而不是声称其他 Go 平台一定缺少该常量。代码注释统一使用英文，课程和其他文档语言不作限制。
 - 2026-07-18：学习者确认 `write` 只负责普通文件完整内容，其他文件系统对象由 bash 显式处理；完成固定 parent root、同目录临时文件替换、最终 symlink/特殊文件拒绝、取消清理、UTF-8 byte count 和 outside-canary 竞态测试。
 - 2026-07-18：加入 `write` 后重新审查 coding tools 结构，学习者确认按工具拆为 `read`/`write` 子 package；私有 helper 去掉多余工具前缀，测试 helper 不再跨工具隐式共享，并记录共享 package 只接纳已证明复用的责任。
 - 2026-07-18：学习者重新审查参数解码归属，确认暂不因为潜在通用性上移到 `internal/agent`；集中 `utils` 拆为 coding-owned `toolargs` 与 `fileutil`，待出现真实跨领域消费者后再讨论上移。
@@ -503,7 +505,7 @@
 - 2026-07-19：Lesson 06 以新的 one-shot 实施计划修正旧设定：临时入口改为 `cmd/pia`，只输出最终 assistant 文本，不增加 event sink 或启动 warning；真实 Fibonacci 验收只保存在被忽略的 `tmp/`，连续两次 fresh 运行通过后完成。
 - 2026-07-19：Lesson 06 在最终产品代码、system prompt 和任务文字冻结后完成两次连续真实 DeepSeek 验收；两个新进程都从 untouched baseline 修复通用 Fibonacci base case、增加能让原错误实现失败的测试，并通过独立测试与程序输出 `55`。本地 workspace 和 trace 保留在 ignored `tmp/`，课程进入待理解确认且尚未提交。
 - 2026-07-19：学习者独立运行第三个 `pia` acceptance workspace，复核了最终修改、测试与 trace，并确认理解 stable system prompt、每轮完整 transcript 重放、结构化 tool schemas、thinking replay 与 final-only 输出的组合流程；随后明确要求提交并推送第 06 课。
-- 2026-07-20：为后续 Pi 横向评测复核 Lesson 06 system prompt 后，学习者明确要求以 pi-go 能力为边界但尽量保留冻结 Pi 默认 Prompt，且不改 one-shot workflow。D42 因此从自由 pi-go wording 修正为“冻结 Pi 基线加窄适配”，并以完整字符串测试固定 identity、四工具 snippets/guidelines、project-context 与 cwd 顺序。
+- 2026-07-20：为后续 Pi 横向评测复核 Lesson 06 system prompt 后，学习者明确要求以 Pia 能力为边界但尽量保留冻结 Pi 默认 Prompt，且不改 one-shot workflow。D42 因此从自由 Pia wording 修正为“冻结 Pi 基线加窄适配”，并以完整字符串测试固定 identity、四工具 snippets/guidelines、project-context 与 cwd 顺序。
 - 2026-07-20：Prompt 修正使此前真实验收 streak 按 D23 清零。当前分支构建的 `pia` 在 fresh `attempts/004` 中仍 one-shot 修复 Fibonacci、添加能让原实现失败的测试，并通过独立测试与程序输出 `55`；`evidence/004.json` 确认实际使用新 prompt 和四工具 schema。当前新基线计数为 `1/2`，不与旧 prompt 的历史运行合并。
 - 2026-07-20：进一步逐段 review 发现 `004` 使用的 prompt 仍有三项可避免的 Pi 差异：identity 额外描述、pia guidance 插入默认 body、instruction trailing-newline framing 不同。修正后再次清零，并以同一最终二进制和固定任务连续运行 fresh `attempts/005`、`006`；两次都修复通用 Fibonacci base case、增加能让原错误实现失败的测试、通过独立 `go test ./...` 且程序输出 `55`。`evidence/005.json`、`006.json` 确认最终 prompt、四工具 schema、正常 `stop` 和空 Run error，新基线完成 `2/2`。
 - 2026-07-20：代码命名进一步收敛为业务行为和契约职责；文档、注释和断言可保留 Pi 来源说明，但 Go 标识符、测试函数与 subtest 不使用参考实现名称。此次纯命名重构未改变 prompt、workflow 或任务文字，但仍按 D23 清零；当前二进制在 fresh `attempts/007`、`008` 中再次连续完成通用 Fibonacci 修复、测试判别、独立测试和程序输出验证，规范化路径后的 prompt 与 `006` 一致，新基线重新达到 `2/2`。
@@ -518,19 +520,19 @@
 - 2026-07-19：Lesson 07 按 D46–D51 完成实现：Core Agent 改为 Working Context 加 run-local `NewMessages`，coding-owned 私有 Conversation Owner 提交完整 History，idle-only replacement 提供 Lesson 08 接入点。完整 tests、vet 和 race 通过，课程进入待理解确认且尚未提交。
 - 2026-07-19：学习者确认理解 Lesson 07 的 Core Agent delta、Conversation History commit 与 idle-only replacement 主线，并明确要求提交；课程状态更新为已提交，不夹带 Lesson 08 工作。
 - 2026-07-19：学习者确认长期产品方向为 Orchestrator 驱动的多 Session coding-agent service：通过 Gateway 和 IM 创建、推进任务，并要求 Session 持久化、恢复、并发隔离；当前只记录策略与责任方向，不提前设计实现。
-- 2026-07-20：学习者明确开始 Lesson 08。开课源码校准确认 threshold compaction 仍是一个可进入的 Large 闭环：Pi 以有效 Provider usage 为主要预算事实、近似估算 usage 后的尾部，在 coding-owned `AgentSession` 边界生成 summary、保留 protocol-valid suffix 并替换 working messages；当前 pi-go 已有 usage、独立 History owner 与 idle-only Working Context replacement，因此本课不需要先引入 tokenizer、Session persistence、branch 或事件系统。具体 budget owner、cut granularity、summary 表达和失败语义留待本课讨论后形成新决定。
+- 2026-07-20：学习者明确开始 Lesson 08。开课源码校准确认 threshold compaction 仍是一个可进入的 Large 闭环：Pi 以有效 Provider usage 为主要预算事实、近似估算 usage 后的尾部，在 coding-owned `AgentSession` 边界生成 summary、保留 protocol-valid suffix 并替换 working messages；当前 Pia 已有 usage、独立 History owner 与 idle-only Working Context replacement，因此本课不需要先引入 tokenizer、Session persistence、branch 或事件系统。具体 budget owner、cut granularity、summary 表达和失败语义留待本课讨论后形成新决定。
 - 2026-07-20：学习者确认 Lesson 08 采用 protocol-safe message-level cut：可以在一个长 Run 内从 user 或 assistant message 开始保留，绝不从 tool result 或 message 内部切分；若切进 Run，中间被移除的 prefix 进入 summary，完整 History 保持原样。该语义记录为 D53。
 - 2026-07-20：学习者确认 Lesson 08 在下一次 Run 接受新 input 前执行 lazy threshold compaction；summary 或 replacement 失败时旧 History、Working Context 和 projection metadata 全部不变，新 input 未接受，commit 后的取消不回滚合法 projection。该 lifecycle 与失败语义记录为 D54。
-- 2026-07-20：针对 1M window 是否会降低 coding 质量继续核对产品和研究证据。DeepSeek V4 官方 MRCR 曲线在 128K 后出现可见退化，coding 长上下文研究也显示未过滤长输入可能降低真实仓库修复表现；因此冻结 Pi 在 1M model 上约 983616 tokens 才触发的 capacity-oriented 默认值不能直接成为 pi-go 的 quality policy。当前提出 projected input `128K` between-Runs quality-oriented threshold、`32K–64K` 正常高信号区间作为待验证假设，并明确它不是 active Run 内每次 Provider call 的 hard ceiling；尚未形成新 durable decision。
+- 2026-07-20：针对 1M window 是否会降低 coding 质量继续核对产品和研究证据。DeepSeek V4 官方 MRCR 曲线在 128K 后出现可见退化，coding 长上下文研究也显示未过滤长输入可能降低真实仓库修复表现；因此冻结 Pi 在 1M model 上约 983616 tokens 才触发的 capacity-oriented 默认值不能直接成为 Pia 的 quality policy。当前提出 projected input `128K` between-Runs quality-oriented threshold、`32K–64K` 正常高信号区间作为待验证假设，并明确它不是 active Run 内每次 Provider call 的 hard ceiling；尚未形成新 durable decision。
 - 2026-07-20：学习者要求明确保留 ceiling 复评义务，并指出“在同一 Run 内选择 cut point”容易被误读为“active Run 内触发 compaction”。课程记录已澄清：D53 只允许事后切入一个 settled Run 的消息序列，D54 的执行时机严格位于两个 Runs 之间；`128K` 与 `32K–64K` 仅为首版可测参数，必须依据后续 DeepSeek coding 分桶评测以及模型、reasoning mode、tools 或 summary policy 的变化重新校准。
 - 2026-07-20：重新对照当前代码后保持 D54 的 between-Runs 范围。Conversation Owner 只能在 `core.Run()` 返回后取得完整 delta，而 Core Agent 明确拒绝 active-time Working Context replacement；因此 run 内 compaction 不是同级参数选择，而会要求新的增量状态所有权和 safe point。当前 read/bash 结果已有单次 50 KiB 模型可见上限，且尚无单个 Run 经常超过候选阈值的 trace 证据；该风险保留为显式缺口，出现真实越界或 coding 质量分桶证据后再拆分能力。
-- 2026-07-20：参考 Codex 通用客户端约 `244.8K` 默认 auto-compaction 点与高强度长任务评测每 `100K` compaction 的两端，并结合 DeepSeek 在 128K 后开始退化及 pi-go 仅有普通文本 summary 的差异，学习者委托确定首版折中值：projected Provider input `192K` 触发、普通情况以 `64K` 为 post-compaction soft ceiling。该 policy 记录为 D55，并保留按真实 coding 长度分桶强制复评的义务。
+- 2026-07-20：参考 Codex 通用客户端约 `244.8K` 默认 auto-compaction 点与高强度长任务评测每 `100K` compaction 的两端，并结合 DeepSeek 在 128K 后开始退化及 Pia 仅有普通文本 summary 的差异，学习者委托确定首版折中值：projected Provider input `192K` 触发、普通情况以 `64K` 为 post-compaction soft ceiling。该 policy 记录为 D55，并保留按真实 coding 长度分桶强制复评的义务。
 - 2026-07-20：学习者说明尚未逐字 review summary prompt，并要求没有特殊理由时继续沿用 Pi。重新核对冻结源码后没有发现 DeepSeek 或当前内存边界要求改写 prompt；因此首次/update/split-turn 三套 prompt、对话序列化、tool-result summary truncation、file-operation tags 与 synthetic user-message projection 按 Pi 建立首版基线，排除 branch/extensions/persistence，并记录为 D56。
 - 2026-07-20：学习者确认首版 budget allocation 参考 Pi，并要求把 `64K` 澄清为不要求填满的 soft ceiling。课程采用 `20K` retained raw、`13,107` initial/update summary、`8,192` split-turn prefix 和 `4,096` Provider safety；同时明确记录这组值可能不足以支撑真实大型项目，尤其未来 Skills 会改变 context 组成。当前不解决或自动调参，待 Skills 引入及真实长项目验证时强制复评。该决定记录为 D57。
 - 2026-07-20：学习者要求开始实现，并在实现后展开说明无精确 tokenizer 时如何判断下一次请求达到 `192K`。实现采用最后有效 Provider usage 加尾部 `ceil(characters / 4)`、无 usage 时完整 request fallback，并在 compaction 后使旧 usage 显式失效；所有权和精度边界记录为 D58。
 - 2026-07-20：Lesson 08 首版实现和最终审查完成。request-local output clamp、between-Runs lazy compaction、Pi prompts、message-level cut、重复 summary、完整 History/Working Context 分离以及失败、取消、并发和 protocol 校验均有确定性测试；审查把连续 cut point 前移的重复线性扫描收敛为二分查找，并补齐 projected input 恰好等于 threshold 的测试。`make check` 与 `go test -race ./...` 全部通过，课程进入待理解确认且尚未提交。
 - 2026-07-20：学习者要求把 Lesson 08 直接提交并推送到 `main`；提交 `c967027` 已推送，未创建 feature branch 或 PR。学习者随后明确要求开始 Lesson 09。
-- 2026-07-20：Lesson 09 开课源码校准确认渐进披露主线：冻结 Pi 启动时只把 Skill name、description 与 location 放入 system prompt，模型匹配后通过普通 `read` 获取 `SKILL.md` 正文。旧提纲同时被收紧：完整来源发现属于 ResourceLoader/package/settings/trust 组合，而 Pi 的 `read` 可读绝对路径、pi-go 的 `read` 严格限制在 workspace；因此全局 Skill 不能在不改变读取安全边界的情况下机械移植。课程先讨论 project-only Skills 与外部 trusted roots 的边界，再形成实现决定。
+- 2026-07-20：Lesson 09 开课源码校准确认渐进披露主线：冻结 Pi 启动时只把 Skill name、description 与 location 放入 system prompt，模型匹配后通过普通 `read` 获取 `SKILL.md` 正文。旧提纲同时被收紧：完整来源发现属于 ResourceLoader/package/settings/trust 组合，而 Pi 的 `read` 可读绝对路径、Pia 的 `read` 严格限制在 workspace；因此全局 Skill 不能在不改变读取安全边界的情况下机械移植。课程先讨论 project-only Skills 与外部 trusted roots 的边界，再形成实现决定。
 - 2026-07-20：学习者明确推翻 Lesson 09 的 project-only 候选并统一产品名为 Pia：`read` 必须接受 workspace-relative 与 workspace 外 absolute paths，Skills 是 Pia 核心需求而不是 Pi 式 extension 附属能力。对应产品、读取和 Skills 决定记录为 D59–D61。
 - 2026-07-20：继续核对 Agent Skills specification/client guide、Claude Code 与 Codex 官方文档后，Lesson 09 从 Medium 修正为 Large 的核心生命周期闭环：直接兼容 `.agents/skills` 与 `.claude/skills` 的 portable 内容，同时保留 `.pia/skills` native root；厂商私有 runtime extensions 明确不伪装成 portable semantics。普通 read 与 dedicated activation、同名 precedence 和 catalog budget 留待实现前讨论。
 - 2026-07-20：D59/D60 前置改造完成：system prompt identity 统一为 Pia；`read` 对 relative path 保留 `os.Root` containment，对 absolute path 使用 host nonblocking open 并校验实际 regular-file handle。项目内/外 absolute file、absolute symlink、relative escaping symlink、absolute directory/FIFO、分页、UTF-8、取消和 concurrency 契约均有测试；`make check` 与 `go test -race ./...` 通过。
@@ -546,3 +548,4 @@
 - 2026-07-21：最新复审发现 Unix Skill directory name 可以包含非法 UTF-8 bytes，而 Provider JSON encoding 会用 replacement character 改写 catalog location，令模型随后无法用该 location 读取真实 `SKILL.md`。discovery 现在在候选进入 catalog 前跳过此类目录，并返回自身仍为合法 UTF-8 的有界诊断。
 - 2026-07-21：再后续复审发现 `os.Root` 会安全跟随 workspace 内的 `.pia/skills` relative symlink，但 Pia Skill v1 已明确排除 symlink source。source opening 增加前置 non-following check 与打开后的 handle/entry identity 复核，既拒绝 symlink，也不引入 check-then-open 竞态。
 - 2026-07-21：同一复审链继续暴露两个残余类问题：source handle 验证后，candidate metadata 仍从 workspace path 重开，source replacement 可混入另一目录；非 UTF-8 过滤也只覆盖 directory 而漏掉 symlink diagnostic path。discovery 改为在 verified source handle 上完成 direct-directory 与 `SKILL.md` 的逐级 no-follow `openat`，并在 filesystem type 分支前统一过滤所有 Skill-like invalid-UTF-8 entry names；回归测试覆盖 source replacement、directory/file symlink 与 Linux 非 UTF-8 directory/symlink。
+- 2026-07-21：学习者明确批准此前延后的 repository/module 命名迁移。D59 更新为当前统一契约；module/import path、环境变量、临时文件前缀以及全部 tracked 课程、计划和引用同步使用 Pia。

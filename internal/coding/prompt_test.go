@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/agent"
+	"github.com/yuanbohan/pia/internal/agent"
 )
 
 func TestBuildSystemPromptUsesCanonicalWorkspaceAndRealTools(t *testing.T) {

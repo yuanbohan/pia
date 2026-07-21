@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/coding/tools/fileutil"
+	"github.com/yuanbohan/pia/internal/coding/tools/fileutil"
 )
 
 func TestOpenAtUsesDirectoryHandleAndRejectsFinalSymlinks(t *testing.T) {

@@ -193,7 +193,7 @@ func (a *outputAccumulator) ensureFullFile() error {
 	if a.fullFile != nil || a.fullPath != "" {
 		return nil
 	}
-	file, err := os.CreateTemp("", "pi-go-bash-*.log")
+	file, err := os.CreateTemp("", "pia-bash-*.log")
 	if err != nil {
 		return fmt.Errorf("bash: create complete-output temp file: %w", err)
 	}

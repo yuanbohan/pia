@@ -10,8 +10,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
-	"github.com/yuanbohan/pi-go/internal/ai/provider/openaicompatible"
+	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai/provider/openaicompatible"
 )
 
 // DefaultEndpoint is DeepSeek's streamed Chat Completions endpoint. Callers

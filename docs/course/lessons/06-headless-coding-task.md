@@ -23,10 +23,10 @@ pia "Inspect this Go project, fix the bug, add meaningful tests, and verify the 
 本课继续使用 commit `dcfe36c79702ec240b146c45f167ab75ecddd205`：
 
 - `packages/coding-agent/src/core/system-prompt.ts`：Pi 的 coding 层拥有 agent identity、tool guidance、工作目录和 project context；这些不是 OpenAI-compatible Provider request 的独立业务字段。
-- `packages/coding-agent/src/core/resource-loader.ts`：Pi 会加载项目级指令并把它们放入 system prompt。pi-go 只采用根目录文件这一小部分语义，不移植全局配置、ancestor 搜索、扩展、skills 或动态资源刷新。
-- `packages/coding-agent/src/modes/print-mode.ts`：Pi 的 print text mode 在结束时投影最终 assistant 文本。它提供 final-only 行为证据，但 Pi 的完整 CLI 仍有更多模式和事件基础设施，不能机械复制为 pi-go 的第一版需求。
+- `packages/coding-agent/src/core/resource-loader.ts`：Pi 会加载项目级指令并把它们放入 system prompt。Pia 只采用根目录文件这一小部分语义，不移植全局配置、ancestor 搜索、扩展、skills 或动态资源刷新。
+- `packages/coding-agent/src/modes/print-mode.ts`：Pi 的 print text mode 在结束时投影最终 assistant 文本。它提供 final-only 行为证据，但 Pi 的完整 CLI 仍有更多模式和事件基础设施，不能机械复制为 Pia 的第一版需求。
 
-## 已确定的 pi-go 设计
+## 已确定的 Pia 设计
 
 ### 分层与所有权
 

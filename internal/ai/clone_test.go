@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/yuanbohan/pi-go/internal/ai"
+	"github.com/yuanbohan/pia/internal/ai"
 )
 
 func TestCloneRequestDeepCopiesNestedMutableData(t *testing.T) {

@@ -75,11 +75,11 @@ func TestNewValidatesConfiguration(t *testing.T) {
 
 func TestExecuteUsesWorkspaceAndCompleteParentEnvironment(t *testing.T) {
 	workspace := t.TempDir()
-	t.Setenv("PI_GO_BASH_PARENT_ENV", "from-zsh-parent")
+	t.Setenv("PIA_BASH_PARENT_ENV", "from-zsh-parent")
 	tool := newTestTool(t, workspace)
 
 	result, err := tool.Execute(context.Background(), argumentsJSON(t,
-		`printf 'cwd=%s\nenv=%s\n' "$PWD" "$PI_GO_BASH_PARENT_ENV"`, nil))
+		`printf 'cwd=%s\nenv=%s\n' "$PWD" "$PIA_BASH_PARENT_ENV"`, nil))
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -97,7 +97,7 @@ func TestExecuteStartsFreshNonInteractiveShell(t *testing.T) {
 	workspace := t.TempDir()
 	tool := newTestTool(t, workspace)
 	first, err := tool.Execute(context.Background(), argumentsJSON(t,
-		`mkdir -p nested && cd nested && export PI_GO_CALL_STATE=changed && printf '%s\n' "$PWD"`, nil))
+		`mkdir -p nested && cd nested && export PIA_CALL_STATE=changed && printf '%s\n' "$PWD"`, nil))
 	if err != nil {
 		t.Fatalf("first Execute() error = %v", err)
 	}
@@ -106,7 +106,7 @@ func TestExecuteStartsFreshNonInteractiveShell(t *testing.T) {
 	}
 
 	second, err := tool.Execute(context.Background(), argumentsJSON(t,
-		`printf 'cwd=%s\nstate=%s\n' "$PWD" "${PI_GO_CALL_STATE-unset}"`, nil))
+		`printf 'cwd=%s\nstate=%s\n' "$PWD" "${PIA_CALL_STATE-unset}"`, nil))
 	if err != nil {
 		t.Fatalf("second Execute() error = %v", err)
 	}
