@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-Pia is a learning-driven Go semantic port of Pi's core coding loop and an evidence-driven path toward a stronger Go coding agent. Use Pia as the product name in new discussion and documentation; `pi-go` remains only the current repository and Go module identifier until a separate rename is explicitly approved. Preserve observable behavior rather than TypeScript file or API shape.
+Pia is a learning-driven Go semantic port of Pi's core coding loop and an evidence-driven path toward a stronger Go coding agent. Use Pia as the repository and product name in new discussion and documentation; `github.com/yuanbohan/pi-go` remains only the current Go module identifier until a separate module-path migration is explicitly approved. Preserve observable behavior rather than TypeScript file or API shape.
 
 Phase 1 delivered a DeepSeek-first, headless coding agent for one workspace and one active task at a time. It includes the AI protocol, Faux and DeepSeek providers, the generic model/tool loop, coding tools, and a local acceptance command that exercises one initial coding task. Lesson 07, the first Phase 2 lesson, added a coding-owned Conversation Owner for the complete ordered in-memory Conversation History while the Core Agent owns the replaceable Working Context.
 
