@@ -463,6 +463,65 @@
 - Catalog budget：稳定 system prompt 只加入 XML-escaped name、description 和 workspace-relative `SKILL.md` location，并指导模型匹配时用现有 `read` 获取完整文件；没有有效 Skill 时整个 section 省略。catalog 使用 D58 的 `ceil(characters / 4)` 估算，最多 4096 estimated tokens；超限时先统一缩短 descriptions，仍放不下才省略 lexical tail entries，所有实际裁剪都有 warning。该值只是首版 ceiling，必须随真实大型项目和 Skills-enabled context 分桶继续复评。
 - Diagnostics 与 trust：单个 Skill 或整个可选 source 的发现失败不阻塞普通 coding task。最多保留 64 条有界 `SkillDiagnostic`，进入内部 `RunResult` 和可选 trace；`cmd/pia` 只在 Run 和 trace 都成功后把它们作为简短 warning 写入 stderr，并在唯一输出边界同时 quote untrusted path 与 message，避免任何 producer 遗漏的控制字符伪造日志或操纵终端。首版没有 trust UI 或逐 Skill approval；选择 workspace 是操作者的 trust decision，metadata 可能自动发送给 Provider，完整 `SKILL.md` 在模型选择普通 `read` 后可能发送，Skill instructions 可以进一步引导现有高权限 tools。
 
+### D66. Lesson 10 延后重复 Skill activation 去重
+
+- 日期：2026-07-21
+- 决定：Lesson 10 继续实现 stable Skill identity、structured activation、bounded instructions 与 compaction 后的 durable model-visible continuity，但不实现或验收重复 activation 的短路、`already active` 结果或重复原始 tool result 抑制。该决定收紧 D61/D62 中把 dedupe 与 activation/continuity 同课完成的旧范围；完整 activation dedupe 进入 Lesson 10 之后重新编号的后续能力。
+- 保留约束：dedupe 延后不代表 durable projection 可以随重复调用无限复制。重复 activation 如何更新受保护状态、projection 是否按 stable identity 保留一个当前 snapshot，以及再次读取是否允许更新正文，仍是本课实现前必须讲清并形成决定的 bounded-state 问题，但不扩成用户可见的完整 dedupe lifecycle。
+- 预算义务：system prompt、Skill metadata、tool schemas、synthetic summary、retained suffix、新 user input 与任何 compaction-protected Skill instructions 都属于 projected Provider input。Lesson 10 必须先确定单 Skill 与全部 active instructions 的预算及超限失败语义；不能把 durable instructions 当作 compaction 之外的免费状态。
+- 原因：本课的首要教学和实现目标是先建立 activation identity 与 Working Context replacement 的 continuity。把重复调用行为、重新加载策略与完整去重验收同时加入会掩盖 compaction 所有权主线；预算和有界 projection 则是状态安全约束，不能随 dedupe 一并延后。
+
+### D67. Lesson 10 保留重复 Skill activation 去重
+
+- 日期：2026-07-21
+- 决定：D67 supersedes D66 的临时范围收缩。Lesson 10 同时完成 stable Skill identity、structured activation、bounded instructions、重复 activation 去重与 compaction 后的 durable model-visible continuity。同一 Conversation 内首次成功 activation 建立一份 durable snapshot；重复 activation 不再次注入完整正文，compaction projection 对同一 stable identity 最多保留一份。第二次调用返回何种小型结果、是否支持显式 refresh 以及文件变化语义仍需在实现前教学和讨论，不由本决定预先指定 API。
+- 范围：dedupe 只针对当前 Conversation 的 Skill activation 与 protected projection；不引入跨 Conversation cache、持久化 activation、全局 Skill 状态、manual deactivate、版本管理或 watcher。新 Conversation 重新开始 activation lifecycle。
+- 原因：一旦 activated instructions 被保护并跨 compaction 持续占据 Provider input，重复正文就会成为无法由普通 compaction 回收的固定成本。Stable identity、dedupe 和 continuity 因而共享同一有界状态不变量；把去重延后会让本课完成一个可无限放大的 durable projection，违背 context budget 与最小可靠闭环。
+- 后续教学纠偏：D67 的“一份 durable snapshot / projection”不应被解释为完整正文永久 model-visible。学习者指出多个历史 Skill 永久 pinning 会造成不可回收的 token 成本和过期相关性；当前候选改为区分 Conversation-scoped snapshot 与 Working Context residency，并在正文被 compaction 切掉后按需精确 rehydrate。逐 Skill dormant receipt 与通用 reactivation 提示之间尚未形成新决定。
+
+### D68. Lesson 10 采用 Grok Build 风格的无状态按需 Skill activation
+
+- 日期：2026-07-21
+- 决定：D68 supersedes D62 中要求 durable model-visible activation projection 的 Lesson 10 条款，并 supersedes D67。Pia 增加 project-local `skill(name)` dedicated tool；每次调用按 Conversation 启动时的 bounded catalog snapshot 解析 name/location，读取调用时的当前 `SKILL.md`，并返回有界、结构化的完整 instructions。一次 activation 只是一次 tool invocation，不建立长期 active 状态。
+- Compaction：Skill result 是普通 tool result。它落在 retained suffix 时保留原文，落入被压缩 prefix 时只由现有 summary 表达；不增加 protected Skill block、dormant receipt、activation registry projection、frozen body snapshot、自动 reactivation 或 Skill-specific compaction policy。稳定 catalog 已位于 system prompt，compaction 后无需按“曾激活”集合增加第二份 model-visible metadata。
+- 重复调用与 freshness：不做跨调用 activation dedupe、`already active` 短路或 hidden residency tracking。重复 `skill(name)` 重新读取当前文件并再次返回正文；文件在两次调用间变化时，第二次调用观察新内容。删除、替换、非 regular file、非 UTF-8、超限和读取失败必须产生有界且保因的明确 tool failure，而不是回退到旧 cache。
+- 采用依据：冻结 Pi、OpenCode、Codex open source 和 Grok Build 均未把所有曾加载 Skill 正文永久投影到 full-compaction 后的 model context。Grok Build 的 dedicated tool + current-file read + ordinary compaction 与 Pia 当前 headless tool loop、Lesson 09 metadata-only catalog 和 project-local safety boundary 最吻合；OpenCode 的 instance content cache 会重新打开 Lesson 09 已关闭的全量正文预取/缓存问题，Codex 的显式 mention 与 Pi 的 slash/read 路径则会引入当前没有的 user invocation surface，或继续缺少 first-class Skill tool identity。
+- 范围与规模：Lesson 10 从 Large 收敛为 Medium，只完成 `skill` tool、bounded body/result、当前文件读取、composition 接入和普通 compaction 验证。不加入 slash syntax、community/global roots、supporting resources runtime、plugins、MCP、watcher、manual refresh/deactivate、跨 Conversation cache 或 Session persistence。以后只有真实 trace 证明重复调用造成质量或预算问题时，才重新评估 dedupe；不为假设性问题预建 lifecycle。
+- 学习者确认与验证：学习者于 2026-07-21 确认该方向符合其对 compaction 的理解，并接受先实现、后验证效果。离线 Faux tests 只证明 D68 契约；真实效果必须在固定任务和模型配置下，对相关、无关及跨 compaction 再使用场景做多次对照运行，记录 Skill 选择、instruction adherence、任务完成、调用次数和输入成本。单个 fixture、单次模型运行或主观 review 不能证明设计更好，也不能据此增加 dedupe 或 durable Skill state。
+
+### D69. Skill activation 使用 50 KiB 完整结果上限和可恢复单调用失败
+
+- 日期：2026-07-21
+- 决定：一次成功的最终 model-visible `skill` structured result 以 UTF-8 计最多 `50 * 1024` bytes，预算覆盖 result envelope 与完整 instructions。成功必须表示正文完整；不得把截断内容包装成 activation success。超过上限时返回有界、保因且 `IsError=true` 的 call-local tool result，明确说明未激活、实际大小、上限和稳定 workspace-relative location。D20 继续适用：该错误不结束 Run 或 Conversation，同批后续 tool stages 和下一轮 Provider call 继续。
+- 恢复语义：超限文件不进入永久 blacklist 或失败 cache。模型可以通过现有 `read` 按 offset 分页查看原始 `SKILL.md`，作者可以把核心 instructions 留在主文件并把条件性细节移到普通 reference files；文件缩小或重构后，下一次 `skill(name)` 重新读取当前文件。分页只是一条明确降级路径，不能被表述为已经完成完整 activation。Lesson 10 不为已经存在且可分页读取的 source 再创建 OpenCode 风格临时副本，也不增加 paged activation API。
+- 作者指导：主 `SKILL.md` 以少于约 5000 estimated tokens 和不超过 500 行为非强制目标；500 行不是 validity hard limit，也不另设运行时行数 ceiling。Pia Skill v1 仍不建立 supporting-resource engine，references 只是通用 tools 可按 Skill 明确引用读取的普通项目文件。
+- 阈值复评：`50 KiB` 是首版 safety ceiling，不是 Agent Skills 标准或永久常量。实现稳定后按真实 Skill 大小分布、超限率、恢复成功率、Provider input 成本、instruction adherence 和任务完成质量复评；调整必须有多次受控运行或真实 trace 证据，不能只因为 Provider context capacity 更大就上调。
+- 学习者确认：学习者于 2026-07-21 接受该首版语义，并明确要求以后根据效果再调整阈值。
+
+### D70. Skill catalog identity 按 Conversation 冻结，activation 正文按调用读取当前位置
+
+- 日期：2026-07-22
+- 决定：Conversation 启动 snapshot 只冻结 model-visible catalog name 到 direct Skill directory/location 的 lookup mapping，不冻结正文 bytes 或长期 file handle。每次 `skill(name)` 都从当前 `.pia/skills` source 重新走 direct-directory/final-file handle chain，并读取该 location 当时的正文；同路径的 body edit 或 regular-file replacement 在下一次调用生效。catalog name、description、winner 或 source topology 的重新发现只发生在新 Conversation，Lesson 10 不加入 watcher、reload 或 per-call full discovery。
+- Current metadata：activation 只重新识别有界 frontmatter delimiters 以分离正文，不重新解析 current name/description，也不要求 current frontmatter name 等于 frozen catalog name。此前课程记录中的 identity-drift failure 候选撤回。文件或目录消失、类型不允许、delimiter 无法识别、正文非 UTF-8、result 超限或实际 I/O 失败仍按 D68/D69 形成 call-local failure，不回退 discovery 时正文或任何 stale cache。
+- 依据：学习者希望本地修改的 Skill 在下一次调用立即生效；Agent Skills client guide 明确把 activation-time body read 作为观察两次 activation 之间文件变化的实现选项。核对的冻结 Pi、当前 Codex 与 Grok Build path-based reread 均未普遍增加 current-frontmatter-name equality check，OpenCode 则明确选择 instance body cache。为 Pia 单独加入 metadata authentication 会把稳定 lookup 误解为第二次 discovery，并在没有横向证据的情况下拒绝同路径最新正文。
+- 并发边界：handle-relative no-follow open 固定一次 path lookup 得到的对象并抵抗 path replacement/symlink 竞态，但不承诺另一个进程对同一 inode 原地改写时的事务性 byte snapshot。原子替换会让一次调用读取旧文件或新文件之一；Lesson 10 不增加跨进程锁、版本号或文件 watcher。
+
+### D71. Lesson 10 明确不支持 activation dedupe
+
+- 日期：2026-07-22
+- 决定：Lesson 10 的同名重复 `skill(name)` 调用不会短路、合并或返回 `already active`；每次调用都重新读取 current file，并各自形成完整或失败的普通 tool result。不维护 Conversation active set、content hash、body/failure cache 或 transcript/projection dedupe。Lesson 09 对 duplicate catalog names 的 lexical winner selection 继续保留，但它是 discovery conflict resolution，不是 activation dedupe；通用 compaction 对旧重复结果的 summary 也不被称为 dedupe。
+- 纠偏：此前只有在 durable protected body 设计下，dedupe 才是防止不可回收重复 projection 的必要有界状态约束。D68 已取消 protected body，普通 compaction 可以回收旧 result；继续保留 activation dedupe 反而需要追踪正文 freshness、Working Context residency 和 compaction 后 rehydration，重新引入本课已经删除的 lifecycle state。D71 因而不是再次延期 D66，而是确认当前无状态语义根本不包含该能力。
+- 演进门槛：package boundary 可以容纳未来单独评估的 dedupe，但只有多次真实 trace 证明正文仍在当前 model input 时出现高频无意义重复调用，并且其输入成本显著影响任务结果，才重新编号、设计和评测。未来可扩展不等于当前支持，也不得倒推回永久 protected body。
+- 学习者确认：学习者于 2026-07-22 明确认可当前方案足够简单、便于维护，并要求把不支持 activation dedupe 的边界记录清楚。
+
+### D72. Skill 单调用上限不扩成 Skill-specific mid-Run aggregate policy
+
+- 日期：2026-07-22
+- 决定：D69 的 `50 * 1024` bytes 只约束一次最终 model-visible `skill` result，不承诺同一 assistant batch 或 Run 内全部 Skill/tool results 的总和永不超过 Provider context。Lesson 10 不增加 Skill-specific aggregate counter、每批调用数量限制、半批跳过、hidden reservation 或特殊 compaction trigger。
+- 所有权边界：当前 compaction 只在下一次 accepted Run 开始前由 Conversation Owner 执行；Core Agent 在同一 Run 的 tool result 后直接继续下一次 Provider turn。要在这条路径增加 aggregate overflow prevention、mid-Run compaction 或 context-overflow retry，会改变通用 Agent Loop、tool settlement、Working Context replacement 与 Provider error recovery，而问题同样适用于多个有界 `read`、`bash` 和其他 tool results，不属于 Skill tool 的独立责任。
+- 当前保证：每个 `skill` result full-or-error 且有界，所有成功/失败结果都进入现有 request estimation、Working Context 和普通 compaction 语义。Runtime 必须继续把单调用 ceiling 与完整 projected request capacity 分开；真实 trace 若出现 aggregate overflow，应在未编号 Runtime 韧性方向统一设计和验证，不能只在 Skill 层静默丢调用或正文。
+- 学习者确认：在该边界被明确提出后，学习者于 2026-07-22 要求继续实现；Lesson 10 按此范围完成。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -549,3 +608,13 @@
 - 2026-07-21：再后续复审发现 `os.Root` 会安全跟随 workspace 内的 `.pia/skills` relative symlink，但 Pia Skill v1 已明确排除 symlink source。source opening 增加前置 non-following check 与打开后的 handle/entry identity 复核，既拒绝 symlink，也不引入 check-then-open 竞态。
 - 2026-07-21：同一复审链继续暴露两个残余类问题：source handle 验证后，candidate metadata 仍从 workspace path 重开，source replacement 可混入另一目录；非 UTF-8 过滤也只覆盖 directory 而漏掉 symlink diagnostic path。discovery 改为在 verified source handle 上完成 direct-directory 与 `SKILL.md` 的逐级 no-follow `openat`，并在 filesystem type 分支前统一过滤所有 Skill-like invalid-UTF-8 entry names；回归测试覆盖 source replacement、directory/file symlink 与 Linux 非 UTF-8 directory/symlink。
 - 2026-07-21：学习者明确批准此前延后的 repository/module 命名迁移。D59 更新为当前统一契约；module/import path、环境变量、临时文件前缀以及现行课程、计划和引用同步使用 Pia，带日期的历史实现记录保留原始 literal 并明确标注迁移。
+- 2026-07-21：Lesson 10 开课先回顾 Provider Request Snapshot 与 compaction 的组成：stable system prompt（含 project instructions 与 Skill metadata）和 tool schemas 不被压缩，Working Context messages 被替换为 synthetic summary 与 retained suffix，完整 History 保持原始。学习者要求把重复 Skill activation dedupe 延后，同时保留有界 durable projection 与 token-budget 讨论义务，记录为 D66。
+- 2026-07-21：进一步确认 protected Skill instructions 会成为普通 compaction 无法回收的固定 request 成本后，学习者撤回 dedupe 延后方案。Lesson 10 恢复 stable identity、重复 activation 不复制正文及每个 identity 最多一份 durable projection 的完整闭环；D67 supersedes D66，但第二次调用结果、refresh 与文件变化语义仍留待课程讨论。
+- 2026-07-21：学习者继续指出“曾激活”不等于“当前相关”，多个完整 Skill block 永久投影会让 compaction 无法回收 token。课程撤回永久正文 pinning 候选，改为区分 activation snapshot、Working Context residency 与 current relevance；rehydratable snapshot 是当前推荐方向，具体 receipt 表达仍待确认。
+- 2026-07-21：横向核对冻结 Pi、OpenCode、Codex open source 与 Grok Build 后，学习者要求选择一个成熟实现而不是自行创新。D68 采用 Grok Build 风格的无状态 `skill(name)` invocation：每次读取当前正文、result 按普通历史参与 compaction，不维护 snapshot、receipt、active set 或跨调用 dedupe；Lesson 10 因此从 Large 收敛为 Medium，D62 的 durable projection 条款和 D67 被 supersede。
+- 2026-07-21：学习者确认 oversized Skill 首版采用 50 KiB final-result ceiling、full-or-error 和可恢复 call-local failure；D69 保留普通 `read` 分页降级，不增加 blacklist、failure cache、临时副本或 paged activation，并要求后续按真实效果复评阈值。
+- 2026-07-22：横向实现与 Agent Skills client guide 复核后，撤回 current-frontmatter-name equality check。D70 冻结 Conversation catalog lookup，但每次 activation 重读当前位置正文；metadata 与 topology 由新 Conversation 刷新，当前调用不做第二次 discovery 或 stale-body fallback。
+- 2026-07-22：学习者确认无状态方案足够简单且便于维护。D71 明确区分 discovery duplicate-name winner 与 activation dedupe：后者当前不支持，重复调用每次重读并产生普通 result；只有真实 trace 证明重复成本成为实际问题时才重新评估。
+- 2026-07-22：实现前最后确认把单次 50 KiB 与 mid-Run aggregate context 分开。D72 不在 Skill 层增加计数器、半批跳过或特殊 compaction，把 aggregate overflow recovery 保留为通用 Runtime 韧性责任。
+- 2026-07-22：Lesson 10 按 D68–D72 完成实现与主线程审查：coding-owned `skills` package、dedicated `skill(name)` tool、catalog-selected lookup、current-file reread、full-or-error ceiling、普通 compaction 和无 dedupe/protected state 均有确定性测试；`make check` 与 `go test -race ./...` 全部通过。课程进入待理解确认且尚未提交。
+- 2026-07-22：学习者确认理解 Lesson 10，并明确要求使用 feature branch commit、push 和创建 PR；课程教学至此完成，真实效果评测义务继续保留。

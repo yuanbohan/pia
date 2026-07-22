@@ -2,6 +2,7 @@ package coding
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 	"github.com/yuanbohan/pia/internal/agent"
 	"github.com/yuanbohan/pia/internal/ai"
 	"github.com/yuanbohan/pia/internal/ai/provider/faux"
+	skilltool "github.com/yuanbohan/pia/internal/coding/tools/skill"
 )
 
 func TestNewConversationRequiresCoreAgent(t *testing.T) {
@@ -140,6 +142,109 @@ func TestConversationCompactsBetweenRunsAndUpdatesPreviousSummary(t *testing.T) 
 	}
 	if !reflect.DeepEqual(requests[5].Messages, wantSecondProjection) {
 		t.Fatalf("second compacted messages = %#v, want %#v", requests[5].Messages, wantSecondProjection)
+	}
+}
+
+func TestConversationCompactsSkillResultWithoutProtectedProjection(t *testing.T) {
+	directory := t.TempDir()
+	writePiaSkill(t, directory, "review-go", `name: review-go
+description: Review Go changes.
+`, "SKILL_BODY_MUST_NOT_BE_PROTECTED")
+	workspace := openPromptWorkspace(t, directory)
+	discovery, err := discoverPiaSkills(workspace)
+	if err != nil {
+		t.Fatalf("discover Pia skills: %v", err)
+	}
+	activation, err := skilltool.New(workspace.Root(), discovery.Entries)
+	if err != nil {
+		t.Fatalf("create skill tool: %v", err)
+	}
+	tools := []agent.Tool{activation}
+	schemas := toolSchemas(tools)
+	systemPrompt := "system\n" + discovery.Catalog
+	const (
+		firstInput  = "first task"
+		secondInput = "next task"
+	)
+	initialTokens := ai.EstimateRequestTokens(ai.Request{
+		SystemPrompt: systemPrompt,
+		Messages:     []ai.Message{ai.UserMessage{Content: firstInput}},
+		Tools:        schemas,
+	}).Tokens
+	threshold := initialTokens + 2_000
+	firstFinal := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{ai.TextContent{Text: "first run done"}},
+		Usage:      ai.Usage{InputTokens: threshold + 1},
+		StopReason: ai.StopReasonStop,
+	}
+	provider := newConversationFaux(t,
+		fauxToolStep(ai.ToolCall{ID: "load-skill", Name: "skill", Arguments: json.RawMessage(`{"name":"review-go"}`)}),
+		conversationAssistantStep(firstFinal),
+		conversationAssistantStep(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{ai.TextContent{Text: "The review Skill was used in the prior run."}},
+			StopReason: ai.StopReasonStop,
+		}),
+		conversationAssistantStep(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{ai.TextContent{Text: "continued"}},
+			StopReason: ai.StopReasonStop,
+		}),
+	)
+	limits := ai.RequestLimits{ContextCapacity: 100_000, ModelMaxOutput: 400, ContextSafety: 10}
+	core, err := agent.New(agent.Config{
+		Provider:      provider,
+		SystemPrompt:  systemPrompt,
+		Tools:         tools,
+		RequestLimits: limits,
+	})
+	if err != nil {
+		t.Fatalf("agent.New() error = %v", err)
+	}
+	conversation, err := newConversation(conversationConfig{
+		Core:          core,
+		Provider:      provider,
+		SystemPrompt:  systemPrompt,
+		Tools:         schemas,
+		RequestLimits: limits,
+		Compaction: compactionPolicy{
+			Threshold:                threshold,
+			SoftCeiling:              threshold - 100,
+			RetainedRawTarget:        1,
+			SummaryMaxOutput:         13,
+			SplitTurnPrefixMaxOutput: 8,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newConversation() error = %v", err)
+	}
+
+	if _, err := conversation.run(context.Background(), firstInput); err != nil {
+		t.Fatalf("first run error = %v", err)
+	}
+	history, err := conversation.run(context.Background(), secondInput)
+	if err != nil {
+		t.Fatalf("second run error = %v", err)
+	}
+	if !messagesContain(history, "SKILL_BODY_MUST_NOT_BE_PROTECTED") {
+		t.Fatal("complete Conversation History lost the original Skill result")
+	}
+
+	requests := provider.Requests()
+	if got, want := len(requests), 4; got != want {
+		t.Fatalf("Provider requests = %d, want coding, coding, summary, coding", got)
+	}
+	if !messagesContain(requests[2].Messages, "SKILL_BODY_MUST_NOT_BE_PROTECTED") {
+		t.Fatal("ordinary summary input did not receive the compacted Skill result")
+	}
+	if messagesContain(requests[3].Messages, "SKILL_BODY_MUST_NOT_BE_PROTECTED") {
+		t.Fatalf("compacted coding request retained a protected Skill body: %#v", requests[3].Messages)
+	}
+	if strings.Contains(requests[3].SystemPrompt, "SKILL_BODY_MUST_NOT_BE_PROTECTED") {
+		t.Fatal("stable system prompt gained a protected Skill body")
+	}
+	for _, forbidden := range []string{"dormant_skill", "active_skill", "activation receipt"} {
+		if messagesContain(requests[3].Messages, forbidden) {
+			t.Fatalf("compacted coding request contains Skill-specific projection %q", forbidden)
+		}
 	}
 }
 
@@ -459,6 +564,10 @@ func newCompactingTestConversationWithPolicy(
 func withoutUsage(message ai.AssistantMessage) ai.AssistantMessage {
 	message.Usage = ai.Usage{}
 	return message
+}
+
+func messagesContain(messages []ai.Message, fragment string) bool {
+	return strings.Contains(serializeConversation(messages), fragment)
 }
 
 func newConversationFaux(t *testing.T, steps ...faux.Step) *faux.Provider {

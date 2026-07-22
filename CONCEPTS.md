@@ -78,7 +78,7 @@ A Coding Agent is not another model and does not inherit from the Core Agent. It
 
 A reusable unit of task-specific coding instructions that Pia can disclose progressively instead of placing every instruction in every model request. Agent Skills is the long-term portability target for this concept, not a claim that the current Pia runtime implements its complete specification or resource model.
 
-Pia progressively discloses a Skill: bounded name and description metadata may be present in the initial model context, while full instructions enter context only after the model selects and reads the Skill. Skills are a core Pia capability, not synonymous with plugins, extensions, MCP servers, project instructions, arbitrary tool implementations, or ordinary project files that tools happen to access.
+Pia progressively discloses a Skill: bounded name and description metadata may be present in the initial model context, while full instructions enter context only after the model selects its catalog name through the dedicated `skill` tool. Each invocation rereads the current project-local file and produces one ordinary, bounded tool result; activation does not create an active set, body cache, dedupe record, or compaction-protected state. Skills are a core Pia capability, not synonymous with plugins, extensions, MCP servers, project instructions, arbitrary tool implementations, or ordinary project files that tools happen to access.
 
 ### Pia Skill v1
 

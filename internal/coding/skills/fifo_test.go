@@ -1,6 +1,6 @@
 //go:build darwin || linux
 
-package coding
+package skills
 
 import (
 	"os"
@@ -22,7 +22,7 @@ func TestDiscoverPiaSkillsRejectsFIFOWithoutWaitingForWriter(t *testing.T) {
 	workspace := openPromptWorkspace(t, directory)
 
 	type outcome struct {
-		discovery piaSkillDiscovery
+		discovery Discovery
 		err       error
 	}
 	finished := make(chan outcome, 1)
@@ -59,7 +59,7 @@ func TestDiscoverPiaSkillsRejectsFIFOSourceWithoutWaitingForWriter(t *testing.T)
 	workspace := openPromptWorkspace(t, directory)
 
 	type outcome struct {
-		discovery piaSkillDiscovery
+		discovery Discovery
 		err       error
 	}
 	finished := make(chan outcome, 1)

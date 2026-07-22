@@ -1,4 +1,4 @@
-package coding
+package skills
 
 import (
 	"fmt"
@@ -354,16 +354,16 @@ description: Would be valid below the source ceiling.
 }
 
 func TestBuildPiaSkillCatalogReportsOnlyAppliedBudgetActions(t *testing.T) {
-	skills := make([]piaSkill, maxPiaSkillCandidates)
+	skills := make([]Entry, maxPiaSkillCandidates)
 	for index := range skills {
-		skills[index] = piaSkill{
+		skills[index] = Entry{
 			Name:        fmt.Sprintf("%s-%02d", strings.Repeat("n", 220), index),
 			Description: "x",
 			Location:    fmt.Sprintf(".pia/skills/skill-%02d/SKILL.md", index),
 		}
 	}
 
-	catalog, diagnostics := buildPiaSkillCatalog(skills)
+	catalog, entries, diagnostics := buildPiaSkillCatalog(skills)
 	if got := ai.EstimateTextTokens(catalog); got > maxSkillCatalogTokens {
 		t.Fatalf("catalog estimate = %d tokens, want at most %d", got, maxSkillCatalogTokens)
 	}
@@ -373,19 +373,22 @@ func TestBuildPiaSkillCatalogReportsOnlyAppliedBudgetActions(t *testing.T) {
 	if skillDiagnosticsContain(diagnostics, "descriptions were shortened") {
 		t.Fatalf("diagnostics falsely claim short descriptions were shortened: %#v", diagnostics)
 	}
+	if len(entries) >= len(skills) {
+		t.Fatalf("catalog entries = %d, want omitted lexical tail from %d candidates", len(entries), len(skills))
+	}
 }
 
 func TestBuildPiaSkillCatalogShortensDescriptionsBeforeOmittingEntries(t *testing.T) {
-	skills := make([]piaSkill, maxPiaSkillCandidates)
+	skills := make([]Entry, maxPiaSkillCandidates)
 	for index := range skills {
-		skills[index] = piaSkill{
+		skills[index] = Entry{
 			Name:        fmt.Sprintf("skill-%02d", index),
 			Description: strings.Repeat("d", maxSkillDescriptionCharacters),
 			Location:    fmt.Sprintf(".pia/skills/skill-%02d/SKILL.md", index),
 		}
 	}
 
-	catalog, diagnostics := buildPiaSkillCatalog(skills)
+	catalog, entries, diagnostics := buildPiaSkillCatalog(skills)
 	if got := ai.EstimateTextTokens(catalog); got > maxSkillCatalogTokens {
 		t.Fatalf("catalog estimate = %d tokens, want at most %d", got, maxSkillCatalogTokens)
 	}
@@ -397,6 +400,9 @@ func TestBuildPiaSkillCatalogShortensDescriptionsBeforeOmittingEntries(t *testin
 	}
 	if skillDiagnosticsContain(diagnostics, "entries") {
 		t.Fatalf("diagnostics unexpectedly omitted entries: %#v", diagnostics)
+	}
+	if len(entries) != len(skills) {
+		t.Fatalf("catalog entries = %d, want all %d candidates", len(entries), len(skills))
 	}
 }
 
@@ -430,11 +436,37 @@ func writeOtherSkillRoot(t *testing.T, workspace, root, directory, body string) 
 	}
 }
 
-func skillDiagnosticsContain(diagnostics []SkillDiagnostic, fragment string) bool {
+func skillDiagnosticsContain(diagnostics []Diagnostic, fragment string) bool {
 	for _, diagnostic := range diagnostics {
 		if strings.Contains(diagnostic.Path+" "+diagnostic.Message, fragment) {
 			return true
 		}
 	}
 	return false
+}
+
+type testWorkspace struct {
+	root *os.Root
+}
+
+func openPromptWorkspace(t *testing.T, directory string) *testWorkspace {
+	t.Helper()
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		t.Fatalf("open test workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close test workspace: %v", err)
+		}
+	})
+	return &testWorkspace{root: root}
+}
+
+func (w *testWorkspace) Root() *os.Root {
+	return w.root
+}
+
+func discoverPiaSkills(workspace *testWorkspace) (Discovery, error) {
+	return Discover(workspace.Root())
 }
