@@ -86,10 +86,16 @@ description: Review Go changes.
 		"<location>.pia/skills/review-go/SKILL.md</location>",
 		"- skill: Load complete project Skill instructions by catalog name",
 		"use the skill tool",
+		"- Use read to examine files instead of cat or sed.",
+		"Supporting files named by loaded Skill instructions remain ordinary project files",
+		"These Skill-specific guidelines do not restrict read during ordinary coding work.",
 	} {
 		if !strings.Contains(prompt, fragment) {
 			t.Errorf("prompt does not contain %q\n%s", fragment, prompt)
 		}
+	}
+	if strings.Contains(prompt, "Use read only for explicitly referenced project files") {
+		t.Fatalf("Skill catalog restricts ordinary read usage\n%s", prompt)
 	}
 	if strings.Contains(prompt, "SKILL_BODY_SENTINEL") {
 		t.Fatalf("prompt contains undisclosed Skill body\n%s", prompt)

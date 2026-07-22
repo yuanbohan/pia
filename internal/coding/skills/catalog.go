@@ -89,7 +89,7 @@ func renderPiaSkillCatalog(skills []Entry, descriptionCap int) string {
 
 	var catalog strings.Builder
 	catalog.WriteString("Project skills:\n")
-	catalog.WriteString("These Pia Skill v1 entries are available in the selected workspace. When one matches the task, use the skill tool with its exact catalog name to load the complete current instructions before applying them. Use read only for explicitly referenced project files or the documented oversized-Skill fallback; no supporting-resource behavior is implied.\n")
+	catalog.WriteString("These Pia Skill v1 entries are available in the selected workspace. When one matches the task, use the skill tool with its exact catalog name to load the complete current instructions before applying them. Supporting files named by loaded Skill instructions remain ordinary project files and may be inspected with read; the catalog does not discover or preload them. If skill reports an oversized SKILL.md, use read with offsets as the fallback. These Skill-specific notes do not restrict read during ordinary coding work.\n")
 	catalog.WriteString("<available_skills>\n")
 	for _, skill := range skills {
 		catalog.WriteString("<skill>\n")
