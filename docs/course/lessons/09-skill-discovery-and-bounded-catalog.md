@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-本课已完成并提交。冻结 Pi 与 Agent Skills 规范的源码/文档校准、Pia 产品命名和 absolute-read 前置改造均已完成。Pia Skill v1 discovery、bounded catalog、普通 `read` 使用路径、operator diagnostics、最终审查与全仓检查均已完成；学习者于 2026-07-21 确认理解。Lesson 10 仍未开始，只有学习者明确要求后才进入。
+本课已完成并提交。冻结 Pi 与 Agent Skills 规范的源码/文档校准、Pia 产品命名和 absolute-read 前置改造均已完成。Pia Skill v1 discovery、bounded catalog、普通 `read` 使用路径、operator diagnostics、最终审查与全仓检查均已完成；学习者于 2026-07-21 确认理解。Lesson 10 已在随后明确开始，本课状态不因此改变。
 
-开课讨论先后暴露了两个过大的候选范围：一是把 discovery、activation、resources 与 compaction continuity 合为一课，二是同时兼容 Pia、Claude Code、Codex 以及 project/global 多种来源。学习者最终把首版收紧为 Pia 自己的 project-local Skills 和最小可用格式。Lesson 09 只建立这个基础闭环；managed activation 与 compaction continuity 留给尚未开始的 Lesson 10，跨生态与全局兼容留给后续未编号方向。
+开课讨论先后暴露了两个过大的候选范围：一是把 discovery、activation、resources 与 compaction continuity 合为一课，二是同时兼容 Pia、Claude Code、Codex 以及 project/global 多种来源。学习者最终把首版收紧为 Pia 自己的 project-local Skills 和最小可用格式。Lesson 09 只建立这个基础闭环；dedicated activation tool 留给 Lesson 10，跨生态与全局兼容留给后续未编号方向。Lesson 10 开课后的横向源码校准已进一步推翻 Skill-specific compaction continuity 候选，见 D68。
 
 固定基线：Pi commit `dcfe36c79702ec240b146c45f167ab75ecddd205`，Pi Agent package version `0.80.7`。
 
@@ -12,7 +12,7 @@
 
 Pia 在 Conversation 启动前只检查 selected workspace 根目录下的 `.pia/skills/`，从每个直接子目录的 `SKILL.md` 读取有界 metadata，并把有独立预算的 catalog 放入稳定 model input。完整 Markdown instructions 不进入 initial request。
 
-本课推荐同时沿用冻结 Pi 的最小使用路径：catalog 暴露 workspace-relative `SKILL.md` location，模型在任务匹配时用现有 `read` 按需读取正文。这样 Lesson 09 结束时 Skill 已经实际可用，但普通 tool result 没有 Skill identity、去重或 compaction protection；Lesson 10 再把它升级为受管理的 activation lifecycle。
+本课推荐同时沿用冻结 Pi 的最小使用路径：catalog 暴露 workspace-relative `SKILL.md` location，模型在任务匹配时用现有 `read` 按需读取正文。这样 Lesson 09 结束时 Skill 已经实际可用；Lesson 10 再用 dedicated `skill(name)` tool 提供按 catalog name 选择、当前文件读取和结构化结果。Lesson 10 开课证据已推翻 activation registry、去重和 Skill-specific compaction protection 候选。
 
 ## Pia Skill v1 最小格式
 
@@ -80,12 +80,12 @@ Read the changed Go code and report concrete findings.
 
 ## 当前 Pia 路径
 
-- `internal/coding/skills.go` 在 `internal/coding` composition boundary 内完成 project-local discovery、frontmatter validation、catalog budgeting 和 bounded diagnostics；没有为首版创建独立 Skill engine package。
+- Lesson 09 完成时，`internal/coding/skills.go` 在 composition boundary 内承担 discovery。Lesson 10 为加入 dedicated tool 而把这组 coding-owned 责任迁到 `internal/coding/skills/`，原文件现在只保留 application facade 与 `SkillDiagnostic` alias；这不改变本课的 discovery contract。
 - `internal/coding/runtime.go` 在创建 Core Agent 前取得一次 Skill snapshot，把 diagnostics 保存到 `RunResult`，并把 catalog 交给 stable system prompt。
 - `internal/coding/prompt.go` 从真实 tools、canonical workspace、project instructions 与可选 Skill catalog 构建一次稳定 prompt；没有有效 Skill 时整个 catalog section 省略。
 - `internal/coding/tools/read/tool.go` 已支持 workspace-relative 与 absolute host paths。Pia Skill v1 location 使用 workspace-relative path，不需要为本课暴露 host absolute path。
 - `internal/ai/estimate.go` 的 `EstimateTextTokens` 为 catalog 复用 D58 的 `ceil(characters / 4)` 近似；精度仍受 D58 限制。
-- `internal/coding/runtime_test.go` 用 Faux Provider 锁定 initial request 只有 catalog metadata，并验证后续普通 `read` 才获得完整 instructions；`internal/coding/trace.go` 与 `cmd/pia` 分别投影 trace diagnostics 和 success-time stderr warnings。
+- Lesson 09 的 discovery/catalog tests 已随实现迁入 `internal/coding/skills/`。当时的 Faux Provider test 锁定 initial request 只有 catalog metadata、后续普通 `read` 才获得正文；Lesson 10 后续把 model-facing 选择动作升级为 dedicated `skill`，trace diagnostics 和 success-time stderr warnings 保持不变。
 
 ## 已确定的本课边界
 
@@ -100,7 +100,7 @@ Read the changed Go code and report concrete findings.
 
 ### 基础使用路径与 snapshot
 
-catalog 明确告诉模型：任务匹配时，用普通 `read` 读取 workspace-relative location 中的完整 `SKILL.md`，然后应用其中 instructions。这个路径不增加新 tool，能形成可用闭环；普通 tool result 仍没有稳定 Skill identity、去重和 compaction protection，这些保持为 Lesson 10 的责任。
+catalog 明确告诉模型：任务匹配时，用普通 `read` 读取 workspace-relative location 中的完整 `SKILL.md`，然后应用其中 instructions。这个路径不增加新 tool，能形成可用闭环；Lesson 10 后续只把它升级为 dedicated `skill(name)` tool，不再把去重或 Skill-specific compaction protection 视为缺失责任。
 
 discovery 只在 Conversation 创建 Core Agent 前执行一次。后续 Provider turns 共享同一个 system prompt；文件变化不会触发 watcher 或 Run 中途 reload。
 
@@ -119,7 +119,7 @@ discovery 只在 Conversation 创建 Core Agent 前执行一次。后续 Provide
 - 完整 catalog ceiling 为 4096 estimated tokens。先通过统一 character cap 尽量保留所有 descriptions；即使 description 为空仍超限时，再省略确定性 lexical tail entries，并只为真实发生的 shortening/omission 产生 warning。
 - 最多返回 64 条有界 `SkillDiagnostic`，额外 warning 聚合为 omission summary。单个 Skill 或可选 `.pia/skills` source 的错误不阻塞普通 coding task；diagnostics 保存到内部 `RunResult` 与可选 trace，`cmd/pia` 只在 Run/trace 成功时写到 stderr，并在输出边界同时引用 path 与 message 以转义 untrusted control characters。
 
-4096、64、16 KiB、256 与 1024 都是首版可测试 ceiling，不是长期最优值。大型真实项目、Skills 数量增长、模型变化或 Lesson 10 managed activation 都必须重新触发 D55/D57 的 context 分桶复评。
+4096、64、16 KiB、256 与 1024 都是首版可测试 ceiling，不是长期最优值。大型真实项目、Skills 数量增长、模型变化或 Lesson 10 dedicated activation tool 都必须重新触发 D55/D57 的 context 分桶复评。
 
 ### Trust 边界
 
@@ -143,7 +143,7 @@ discovery 只在 Conversation 创建 Core Agent 前执行一次。后续 Provide
 - `$skill`、slash command、TUI selector 或其他 explicit invocation；
 - 对 supporting files 的专门扫描、验证、执行或权限模型。
 
-managed activation 与 compaction continuity 属于尚未开始的 Lesson 10。跨生态、global scopes 与更完整 resources 属于 Lesson 10 之后重新校准、拆分和编号的能力方向。
+Dedicated activation tool 属于 Lesson 10；旧的 Skill-specific compaction continuity 候选已被 D68 推翻。跨生态、global scopes 与更完整 resources 属于 Lesson 10 之后重新校准、拆分和编号的能力方向。
 
 ## 完成信号
 

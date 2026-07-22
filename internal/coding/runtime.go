@@ -10,9 +10,11 @@ import (
 	"github.com/yuanbohan/pia/internal/agent"
 	"github.com/yuanbohan/pia/internal/ai"
 	"github.com/yuanbohan/pia/internal/ai/provider/deepseek"
+	skillcatalog "github.com/yuanbohan/pia/internal/coding/skills"
 	bashtool "github.com/yuanbohan/pia/internal/coding/tools/bash"
 	edittool "github.com/yuanbohan/pia/internal/coding/tools/edit"
 	readtool "github.com/yuanbohan/pia/internal/coding/tools/read"
+	skilltool "github.com/yuanbohan/pia/internal/coding/tools/skill"
 	writetool "github.com/yuanbohan/pia/internal/coding/tools/write"
 )
 
@@ -113,16 +115,16 @@ func runWithWorkspaceOperations(
 	}()
 	result.WorkspacePath = workspace.Path()
 
-	tools, err := newCodingTools(workspace)
-	if err != nil {
-		return result, err
-	}
-	result.Tools = toolSchemas(tools)
 	skillDiscovery, err := discoverPiaSkills(workspace)
 	if err != nil {
 		return result, err
 	}
 	result.SkillDiagnostics = append([]SkillDiagnostic(nil), skillDiscovery.Diagnostics...)
+	tools, err := newCodingTools(workspace, skillDiscovery.Entries)
+	if err != nil {
+		return result, err
+	}
+	result.Tools = toolSchemas(tools)
 	prompt, err := buildSystemPrompt(workspace, tools, skillDiscovery.Catalog)
 	if err != nil {
 		return result, err
@@ -176,7 +178,7 @@ func productCompactionPolicy() compactionPolicy {
 	}
 }
 
-func newCodingTools(workspace *Workspace) ([]agent.Tool, error) {
+func newCodingTools(workspace *Workspace, skillEntries []skillcatalog.Entry) ([]agent.Tool, error) {
 	read, err := readtool.New(workspace.Root())
 	if err != nil {
 		return nil, fmt.Errorf("coding: create read tool: %w", err)
@@ -193,9 +195,17 @@ func newCodingTools(workspace *Workspace) ([]agent.Tool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("coding: create write tool: %w", err)
 	}
-	// Keep the frozen Pi default ordering while allowing Agent to apply Pia's
-	// explicit parallel-safe scheduling policy.
-	return []agent.Tool{read, bash, edit, write}, nil
+	// Preserve the frozen Pi tools' relative order. A project-local activation
+	// tool is appended only when the same snapshot disclosed at least one Skill.
+	tools := []agent.Tool{read, bash, edit, write}
+	if len(skillEntries) == 0 {
+		return tools, nil
+	}
+	skill, err := skilltool.New(workspace.Root(), skillEntries)
+	if err != nil {
+		return nil, fmt.Errorf("coding: create skill tool: %w", err)
+	}
+	return append(tools, skill), nil
 }
 
 func toolSchemas(tools []agent.Tool) []ai.ToolSchema {

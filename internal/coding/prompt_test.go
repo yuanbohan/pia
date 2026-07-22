@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/yuanbohan/pia/internal/agent"
+	skillcatalog "github.com/yuanbohan/pia/internal/coding/skills"
 )
 
 func TestBuildSystemPromptUsesCanonicalWorkspaceAndRealTools(t *testing.T) {
@@ -75,7 +76,7 @@ description: Review Go changes.
 		t.Fatalf("discover Pia skills: %v", err)
 	}
 
-	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace), discovery.Catalog)
+	prompt, err := buildSystemPrompt(workspace, promptTools(t, workspace, discovery.Entries...), discovery.Catalog)
 	if err != nil {
 		t.Fatalf("build system prompt: %v", err)
 	}
@@ -83,11 +84,18 @@ description: Review Go changes.
 		"Project skills:",
 		"<name>review-go</name>",
 		"<location>.pia/skills/review-go/SKILL.md</location>",
-		"use the read tool",
+		"- skill: Load complete project Skill instructions by catalog name",
+		"use the skill tool",
+		"- Use read to examine files instead of cat or sed.",
+		"Supporting files named by loaded Skill instructions remain ordinary project files",
+		"These Skill-specific guidelines do not restrict read during ordinary coding work.",
 	} {
 		if !strings.Contains(prompt, fragment) {
 			t.Errorf("prompt does not contain %q\n%s", fragment, prompt)
 		}
+	}
+	if strings.Contains(prompt, "Use read only for explicitly referenced project files") {
+		t.Fatalf("Skill catalog restricts ordinary read usage\n%s", prompt)
 	}
 	if strings.Contains(prompt, "SKILL_BODY_SENTINEL") {
 		t.Fatalf("prompt contains undisclosed Skill body\n%s", prompt)
@@ -328,9 +336,9 @@ func openPromptWorkspace(t *testing.T, path string) *Workspace {
 	return workspace
 }
 
-func promptTools(t *testing.T, workspace *Workspace) []agent.Tool {
+func promptTools(t *testing.T, workspace *Workspace, entries ...skillcatalog.Entry) []agent.Tool {
 	t.Helper()
-	tools, err := newCodingTools(workspace)
+	tools, err := newCodingTools(workspace, entries)
 	if err != nil {
 		t.Fatalf("create coding tools: %v", err)
 	}

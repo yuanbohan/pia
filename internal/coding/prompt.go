@@ -53,6 +53,16 @@ func codingToolPromptMetadata(name string) (toolPromptMetadata, bool) {
 			snippet:    "Create or overwrite files",
 			guidelines: []string{"Use write only for new files or complete rewrites."},
 		}, true
+	case "skill":
+		return toolPromptMetadata{
+			snippet: "Load complete project Skill instructions by catalog name",
+			guidelines: []string{
+				"When a listed project Skill matches the task, use skill with its exact catalog name before applying the instructions.",
+				"Skill supporting files are ordinary project files; use read when the loaded instructions explicitly reference them.",
+				"After an oversized SKILL.md error, use read with offsets as the fallback.",
+				"These Skill-specific guidelines do not restrict read during ordinary coding work.",
+			},
+		}, true
 	default:
 		return toolPromptMetadata{}, false
 	}

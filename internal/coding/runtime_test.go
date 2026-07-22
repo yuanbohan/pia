@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -138,12 +139,12 @@ func TestRunWithProviderDoesNotSendUnselectedFileOrEnvironmentContent(t *testing
 	}
 }
 
-func TestRunWithProviderDisclosesThenReadsPiaSkill(t *testing.T) {
+func TestRunWithProviderDisclosesThenActivatesPiaSkill(t *testing.T) {
 	directory := t.TempDir()
 	writePiaSkill(t, directory, "review-go", `name: review-go
 description: Review Go changes.
 `, "SKILL_INSTRUCTIONS_SENTINEL")
-	referencePath := filepath.Join(directory, piaSkillsDirectory, "review-go", "references")
+	referencePath := filepath.Join(directory, testPiaSkillsDirectory, "review-go", "references")
 	if err := os.MkdirAll(referencePath, 0o755); err != nil {
 		t.Fatalf("create unsupported reference directory: %v", err)
 	}
@@ -153,9 +154,9 @@ description: Review Go changes.
 
 	provider := newRuntimeFaux(t,
 		fauxToolStep(ai.ToolCall{
-			ID:        "read-skill",
-			Name:      "read",
-			Arguments: json.RawMessage(`{"path":".pia/skills/review-go/SKILL.md"}`),
+			ID:        "activate-skill",
+			Name:      "skill",
+			Arguments: json.RawMessage(`{"name":"review-go"}`),
 		}),
 		fauxFinalStep("", "used the project skill"),
 	)
@@ -189,12 +190,133 @@ description: Review Go changes.
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("provider request count = %d, want %d", got, want)
 	}
+	if got, want := toolSchemaNames(requests[0].Tools), []string{"read", "bash", "edit", "write", "skill"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("initial tool schemas = %v, want %v", got, want)
+	}
 	toolResult, ok := requests[1].Messages[len(requests[1].Messages)-1].(ai.ToolResultMessage)
-	if !ok || !strings.Contains(toolResult.Content, "SKILL_INSTRUCTIONS_SENTINEL") {
-		t.Fatalf("second request last message = %#v, want on-demand SKILL.md read", requests[1].Messages[len(requests[1].Messages)-1])
+	if !ok || toolResult.IsError || toolResult.ToolName != "skill" || !strings.Contains(toolResult.Content, "SKILL_INSTRUCTIONS_SENTINEL") {
+		t.Fatalf("second request last message = %#v, want successful structured Skill activation", requests[1].Messages[len(requests[1].Messages)-1])
+	}
+	if strings.Contains(toolResult.Content, "description: Review Go changes.") {
+		t.Fatalf("Skill result retained frontmatter: %q", toolResult.Content)
 	}
 	if strings.Contains(toolResult.Content, "REFERENCE_SENTINEL") {
 		t.Fatalf("Skill read implicitly included an unsupported reference: %q", toolResult.Content)
+	}
+}
+
+func TestRunWithProviderReloadsPiaSkillWithoutActivationDedupe(t *testing.T) {
+	directory := t.TempDir()
+	writePiaSkill(t, directory, "review-go", `name: review-go
+description: Review Go changes.
+`, "SKILL_BODY_V1")
+	inner := newRuntimeFaux(t,
+		fauxToolStep(ai.ToolCall{ID: "skill-v1", Name: "skill", Arguments: json.RawMessage(`{"name":"review-go"}`)}),
+		fauxToolStep(ai.ToolCall{ID: "skill-v2", Name: "skill", Arguments: json.RawMessage(`{"name":"review-go"}`)}),
+		fauxFinalStep("", "used latest instructions"),
+	)
+	provider := &hookedProvider{
+		inner: inner,
+		beforeStream: func(index int) {
+			if index != 1 {
+				return
+			}
+			writePiaSkill(t, directory, "review-go", `name: temporarily-renamed
+description: Current metadata is not revalidated during activation.
+`, "SKILL_BODY_V2")
+		},
+	}
+
+	result, err := runWithProvider(
+		context.Background(),
+		RunInput{WorkspacePath: directory, Task: "review this Go change"},
+		provider,
+	)
+	if err != nil {
+		t.Fatalf("run with provider: %v", err)
+	}
+	if got, want := result.FinalText(), "used latest instructions"; got != want {
+		t.Fatalf("FinalText() = %q, want %q", got, want)
+	}
+
+	requests := inner.Requests()
+	if got, want := len(requests), 3; got != want {
+		t.Fatalf("Provider requests = %d, want %d", got, want)
+	}
+	firstResult := requests[1].Messages[len(requests[1].Messages)-1].(ai.ToolResultMessage)
+	secondResult := requests[2].Messages[len(requests[2].Messages)-1].(ai.ToolResultMessage)
+	if !strings.Contains(firstResult.Content, "SKILL_BODY_V1") || strings.Contains(firstResult.Content, "SKILL_BODY_V2") {
+		t.Fatalf("first Skill result = %q, want V1", firstResult.Content)
+	}
+	if !strings.Contains(secondResult.Content, "SKILL_BODY_V2") || strings.Contains(secondResult.Content, "SKILL_BODY_V1") {
+		t.Fatalf("second Skill result = %q, want V2 without dedupe", secondResult.Content)
+	}
+}
+
+func TestRunWithProviderKeepsOversizedSkillFailureCallLocal(t *testing.T) {
+	directory := t.TempDir()
+	writePiaSkill(t, directory, "oversized", `name: oversized
+description: Deliberately exceeds the activation result ceiling.
+`, strings.Repeat("x", 51<<10))
+	provider := newRuntimeFaux(t,
+		fauxToolStep(ai.ToolCall{ID: "oversized-skill", Name: "skill", Arguments: json.RawMessage(`{"name":"oversized"}`)}),
+		fauxFinalStep("", "continued after the Skill error"),
+	)
+
+	result, err := runWithProvider(
+		context.Background(),
+		RunInput{WorkspacePath: directory, Task: "use the oversized Skill if possible"},
+		provider,
+	)
+	if err != nil {
+		t.Fatalf("run with provider: %v", err)
+	}
+	if got, want := result.FinalText(), "continued after the Skill error"; got != want {
+		t.Fatalf("FinalText() = %q, want %q", got, want)
+	}
+	requests := provider.Requests()
+	toolResult := requests[1].Messages[len(requests[1].Messages)-1].(ai.ToolResultMessage)
+	if !toolResult.IsError || toolResult.ToolName != "skill" || !strings.Contains(toolResult.Content, "not activated") {
+		t.Fatalf("oversized Skill result = %#v, want call-local error", toolResult)
+	}
+	if strings.Contains(toolResult.Content, strings.Repeat("x", 32)) {
+		t.Fatalf("oversized Skill error exposed partial body: %q", toolResult.Content)
+	}
+}
+
+func TestRunWithProviderCannotActivateCatalogOmittedSkill(t *testing.T) {
+	directory := t.TempDir()
+	const candidates = 64
+	var omittedName string
+	for index := 0; index < candidates; index++ {
+		name := strings.Repeat("n", 220) + "-" + fmt.Sprintf("%02d", index)
+		writePiaSkill(t, directory, fmt.Sprintf("skill-%02d", index), "name: "+name+"\ndescription: x\n", "BODY")
+		omittedName = name
+	}
+	provider := newRuntimeFaux(t,
+		fauxToolStep(ai.ToolCall{
+			ID:        "omitted-skill",
+			Name:      "skill",
+			Arguments: json.RawMessage(fmt.Sprintf(`{"name":%q}`, omittedName)),
+		}),
+		fauxFinalStep("", "recovered from omitted lookup"),
+	)
+
+	result, err := runWithProvider(
+		context.Background(),
+		RunInput{WorkspacePath: directory, Task: "try an undisclosed Skill"},
+		provider,
+	)
+	if err != nil {
+		t.Fatalf("run with provider: %v", err)
+	}
+	if strings.Contains(result.SystemPrompt, "<name>"+omittedName+"</name>") {
+		t.Fatalf("omitted Skill entered catalog\n%s", result.SystemPrompt)
+	}
+	requests := provider.Requests()
+	toolResult := requests[1].Messages[len(requests[1].Messages)-1].(ai.ToolResultMessage)
+	if !toolResult.IsError || !strings.Contains(toolResult.Content, "not present in the Conversation Skill catalog") {
+		t.Fatalf("omitted Skill result = %#v, want unknown catalog-name error", toolResult)
 	}
 }
 
@@ -217,6 +339,9 @@ func TestRunWithProviderReturnsSkillDiagnosticsWithoutBlockingTask(t *testing.T)
 	}
 	if !skillDiagnosticsContain(result.SkillDiagnostics, "required name") {
 		t.Fatalf("Skill diagnostics = %#v, want missing-name warning", result.SkillDiagnostics)
+	}
+	if got, want := toolSchemaNames(result.Tools), []string{"read", "bash", "edit", "write"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tools with no catalog-visible Skills = %v, want %v", got, want)
 	}
 	if strings.Contains(result.SystemPrompt, "BROKEN_BODY_SENTINEL") || strings.Contains(result.SystemPrompt, "<available_skills>") {
 		t.Fatalf("invalid Skill entered system prompt\n%s", result.SystemPrompt)
@@ -470,6 +595,25 @@ func fauxFinalStep(thinking string, texts ...string) faux.Step {
 	}
 	events = append(events, ai.DoneEvent{Message: message})
 	return faux.Step{Events: events}
+}
+
+type hookedProvider struct {
+	inner        *faux.Provider
+	beforeStream func(index int)
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *hookedProvider) Stream(ctx context.Context, request ai.Request) ai.Stream {
+	p.mu.Lock()
+	index := p.calls
+	p.calls++
+	p.mu.Unlock()
+	if p.beforeStream != nil {
+		p.beforeStream(index)
+	}
+	return p.inner.Stream(ctx, request)
 }
 
 func toolSchemaNames(schemas []ai.ToolSchema) []string {
