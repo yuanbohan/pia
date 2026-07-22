@@ -618,3 +618,4 @@
 - 2026-07-22：实现前最后确认把单次 50 KiB 与 mid-Run aggregate context 分开。D72 不在 Skill 层增加计数器、半批跳过或特殊 compaction，把 aggregate overflow recovery 保留为通用 Runtime 韧性责任。
 - 2026-07-22：Lesson 10 按 D68–D72 完成实现与主线程审查：coding-owned `skills` package、dedicated `skill(name)` tool、catalog-selected lookup、current-file reread、full-or-error ceiling、普通 compaction 和无 dedupe/protected state 均有确定性测试；`make check` 与 `go test -race ./...` 全部通过。课程进入待理解确认且尚未提交。
 - 2026-07-22：学习者确认理解 Lesson 10，并明确要求使用 feature branch commit、push 和创建 PR；课程教学至此完成，真实效果评测义务继续保留。
+- 2026-07-22：PR #5 合入 `main` 后，以调用前冻结的协议、固定 `deepseek-v4-pro` 产品配置和 fresh workspaces 完成 Skill v1 真实模型产品路径 checkpoint。连续 `2/2` 相关任务都只选择 `go-regression`、通过 tool result 获得未预载正文、遵守私有测试与 final-marker 要求，并产生在原错误实现上失败、修复后通过的回归测试；连续 `2/2` 无关任务均零 Skill 调用、零 workspace 改动且回答正确。该证据确认当前 one-shot 闭环符合 D68 的预期组合行为，没有暴露需要阻塞后续课程的实现缺陷；它不替代 dedicated-tool baseline 对照或真实 between-Runs compaction 实验，后者仍需未来 multi-Run surface。

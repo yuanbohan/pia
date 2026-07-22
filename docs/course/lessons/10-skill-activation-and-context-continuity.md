@@ -2,7 +2,7 @@
 
 ## 状态
 
-本课已完成，正在通过 feature branch/PR 交付。2026-07-21 完成开课源码校准、横向实现比较和 oversized Skill 校准，并按 D68 选定 Grok Build 风格的无状态按需 activation；D69 固定首版 50 KiB final-result、full-or-error 与可恢复 call-local failure，阈值保留后续证据驱动调整。2026-07-22 继续确认 catalog lookup 在 Conversation 内冻结、正文每次调用读取当前位置的最新版本、不做 per-call frontmatter-name equality check，也不支持 activation dedupe。package split、catalog-selected entries、plain-string schema、parallel-safe tool、structured result envelope 与 D72 的 mid-Run aggregate context 归类均已落地；`make check` 与 `go test -race ./...` 全部通过。学习者随后确认理解并明确要求 commit、push 和创建 PR。真实模型效果验证仍是后续证据义务，不被离线契约测试替代。
+本课已完成并通过 PR #5 合入 `main`。2026-07-21 完成开课源码校准、横向实现比较和 oversized Skill 校准，并按 D68 选定 Grok Build 风格的无状态按需 activation；D69 固定首版 50 KiB final-result、full-or-error 与可恢复 call-local failure，阈值保留后续证据驱动调整。2026-07-22 继续确认 catalog lookup 在 Conversation 内冻结、正文每次调用读取当前位置的最新版本、不做 per-call frontmatter-name equality check，也不支持 activation dedupe。package split、catalog-selected entries、plain-string schema、parallel-safe tool、structured result envelope 与 D72 的 mid-Run aggregate context 归类均已落地；`make check` 与 `go test -race ./...` 全部通过。学习者随后确认理解并明确要求 commit、push 和创建 PR。同日完成的真实 DeepSeek 产品路径验收以连续 `2/2` 相关任务和 `2/2` 无关任务确认当前 one-shot Skill 闭环符合预期；baseline 对照与跨 Run compaction 的真实模型效果仍是后续证据义务。
 
 ## 解锁的能力
 
@@ -314,6 +314,23 @@ D72 确认不在 Lesson 10 增加 Skill-specific aggregate counter、调用数�
 2. **真实效果验证：** 实现稳定后，使用固定 workspace、任务、Skill 与模型配置，对比没有 dedicated activation tool 的基础路径和启用后的路径。相关任务、无关任务和跨 compaction 后再次需要同一 Skill 的任务都要覆盖；每组需要多次运行，不能从一次 fixture 或主观阅读宣称效果更好。
 
 真实验证至少记录：相关 Skill 是否被正确选择、无关 Skill 是否被误用、关键 instructions 是否在可观察结果中得到遵守、任务是否完成、`skill` 调用次数、近似输入成本，以及正文被 compaction 后再次需要时模型是否会重新调用。若证据暴露问题，先定位是 catalog 描述、tool contract、compaction summary 还是模型选择问题；只有重复调用的实际成本成为主要问题时才重新评估 dedupe，不能倒推回永久 protected body。
+
+### 2026-07-22 真实模型产品路径验收
+
+这次 checkpoint 使用 `main` 的 `cf39aed` 构建一个固定二进制，并沿用产品配置 `deepseek-v4-pro`、thinking 与 high reasoning effort。验收协议在任何模型调用前冻结；每次 attempt 使用 fresh workspace，trace 写入 ignored `tmp/pia-skill-acceptance/`，不把敏感 prompt、源码和 tool result 提交进仓库。先各运行一次相关与无关场景，两者通过后才运行第二组；没有失败运行被丢弃或用后续成功替换。
+
+相关场景给 workspace 同时放置一个描述匹配 Go bug-fix 的 `go-regression` Skill 和一个只适用于 release notes 的干扰 Skill，task 不出现 Skill name、私有文件名、测试名或 evidence marker。两次 fresh Run 都只调用 `go-regression` 一次，完整正文未进入 stable system prompt，而是通过成功的 structured `skill` result 进入 Working Context；随后模型按私有要求创建 `regression_contract_test.go` / `TestProjectRegressionContract`、修复 Fibonacci base case、通过 `gofmt` 与 `go test ./...`、使 `go run .` 输出 `55`，并用规定 marker 结束 final response。每次新增测试复制回 untouched buggy baseline 后都失败，证明测试能够区分原错误与修复，而不是只在修改后自洽。
+
+无关场景保留同一两项 Skill catalog，但 task 只要求只读解释一个正确的 greeting 程序。两次 fresh Run 的 `skill` 调用均为零，workspace 与模板 byte-for-byte 相同，final response 都正确说明输出 `Hello, Pia!`。本 checkpoint 的 pass gate 检查语义正确、Skill abstention 与 workspace immutability，不把 response layout 当作 Skill contract；其中 unrelated-001 虽语义正确但使用了两个短段落，而 task 要求一个简短段落，因此不能把结果扩张为完整 prompt-format adherence。四次 Run 均无 Run error 或 Skill diagnostic；逐次观测如下：
+
+| attempt | 预期选择 | 实际 `skill` 调用 | input tokens | output tokens | 结果 |
+|---|---|---:|---:|---:|---|
+| related-001 | 仅 `go-regression` | 1 | 31,351 | 2,186 | 通过 |
+| related-002 | 仅 `go-regression` | 1 | 35,490 | 2,457 | 通过 |
+| unrelated-001 | 不调用 | 0 | 5,730 | 292 | 通过 |
+| unrelated-002 | 不调用 | 0 | 5,566 | 222 | 通过 |
+
+该结果确认当前产品入口中的 discovery、bounded catalog、模型选择、按需完整正文读取、普通 tool settlement、instruction adherence 与无关任务 abstention 能按设计组合工作，因此 Lesson 10 不需要为了继续课程而补加 activation registry、dedupe、protected body 或其他隐藏状态。它不是与 Lesson 09 普通 `read` 路径的效果对照，也不能证明优于其他实现；当前 one-shot CLI 每次新建一个 Conversation 并只接受一个 Run，无法真实触发 between-Runs compaction，因此跨 compaction reactivation 仍由现有 Faux tests 证明契约，真实模型实验要等独立 opt-in multi-Run harness 或后续产品入口，不在本次 checkpoint 中伪造替代证据。
 
 ## 当前边界与非目标
 

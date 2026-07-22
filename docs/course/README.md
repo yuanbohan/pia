@@ -30,7 +30,7 @@
 | 阶段 | 课程范围 | 阶段目标 | 实施与课程文档 | 当前状态 |
 |---|---|---|---|---|
 | 第一阶段 | Lessons 00–06 | 建立最小 headless coding loop，并用本地 `pia` 命令完成真实 one-shot coding task | [基础实施计划](../plans/2026-07-15-001-pi-core-go-learning-port-plan.md)、[Lesson 06 one-shot 实施计划](../plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md)、[第一阶段课程表](#phase-1-courses) | 全部已提交 |
-| 第二阶段 | Lessons 07–10 | 扩展 Conversation/Working Context、compaction 与 project-local Skills，保持完整 History 和模型工作视图可独立演进 | [第二阶段滚动课程实施计划](#第二阶段滚动课程实施计划)、[第二阶段课程表](#phase-2-courses) | Lessons 07–09 已提交；Lesson 10 已完成，feature branch/PR 交付中 |
+| 第二阶段 | Lessons 07–10 | 扩展 Conversation/Working Context、compaction 与 project-local Skills，保持完整 History 和模型工作视图可独立演进 | [第二阶段滚动课程实施计划](#第二阶段滚动课程实施计划)、[第二阶段课程表](#phase-2-courses) | 全部已提交；Skill v1 真实模型产品路径验收通过 |
 | 未编号后续 | Lesson 10 之后 | 根据已完成课程和真实使用证据，再拆分 Runtime 韧性、Session、Orchestration、评测等方向 | [尚未编号的后续方向](#尚未编号的后续方向) | 尚未进入实施 |
 
 根 README 只保留本页入口；阶段实施文档、逐课链接和状态以这里为准。第一阶段有稳定的基础计划与 Lesson 06 专项计划；第二阶段采用滚动计划，由本页课程表和对应 lesson 文档共同承载，不再创建一份重复的阶段计划文件。新增课程时，只需在所属阶段的课程表增加一行并链接 lesson 文档；边界尚未明确的能力先放入“尚未编号的后续方向”。
@@ -154,7 +154,7 @@ flowchart LR
 | 二期 01 | 07 | [Conversation History、Working Context 与 Request Snapshot](lessons/07-conversation-history-and-active-context.md) | `SessionManager` 保存完整 session entries 并构造上下文，core `Agent` 持有 working messages，每次模型调用再生成 request-local view | 只建立三种角色的内存所有权边界；不做 compaction、持久化或 Skills | history 与 working context 的所有权独立，Provider 不能反向修改任何 owner | 06 | Large | 已提交 |
 | 二期 02 | 08 | [Context budget 与 compaction 核心](lessons/08-context-budget-and-compaction.md) | `AgentSession` 在 `agent_end` 后和新 prompt 前检查阈值；compaction core 摘要旧内容并保留 protocol-valid 近期后缀，`SessionManager` 重建 model context | 只完成 settled Run 后、下一次 Provider call 前的 threshold compaction 闭环；不含 context-overflow retry、branch summary 或持久化 | 人为缩小 budget 后，两次顺序 Run 之间可触发压缩；下一次 request 使用 summary 加保留后缀，完整 History 仍保留原始消息 | 07 | Large | 已提交 |
 | 二期 03 | 09 | [Pia Project Skills v1 的发现与基础披露](lessons/09-skill-discovery-and-bounded-catalog.md) | `skills.ts` 先暴露 bounded metadata，并让模型用普通 `read` 按需读取正文 | 只发现 selected workspace 的 `.pia/skills/<direct-child>/SKILL.md`，解析最小 name/description catalog，并复用普通 `read` 建立基础使用闭环；不做 community/global sources 或 dedicated activation tool | initial request 只有 bounded metadata；匹配后普通 `read` 才得到 instructions，其他 roots 和正文均不自动进入 context | 07、08 | Medium | 已提交 |
-| 二期 04 | 10 | [按需 Skill Activation Tool](lessons/10-skill-activation-and-context-continuity.md) | Pi 使用普通 `read`；Grok Build 用 dedicated `skill` tool 按 name 读取当前正文，旧 result 按普通历史参与 compaction | 把 Lesson 09 的普通 read 使用升级为 project-local `skill(name)` tool 和有界结构化 instructions；不建立 activation registry、dedupe、receipt 或 Skill-specific compaction | initial request 只有 catalog；调用后才出现完整 instructions，重复调用重新读取，旧 result 可被普通 compaction 回收且没有 protected Skill projection | 08、09 | Medium | 已完成（feature branch/PR 交付中） |
+| 二期 04 | 10 | [按需 Skill Activation Tool](lessons/10-skill-activation-and-context-continuity.md) | Pi 使用普通 `read`；Grok Build 用 dedicated `skill` tool 按 name 读取当前正文，旧 result 按普通历史参与 compaction | 把 Lesson 09 的普通 read 使用升级为 project-local `skill(name)` tool 和有界结构化 instructions；不建立 activation registry、dedupe、receipt 或 Skill-specific compaction | initial request 只有 catalog；调用后才出现完整 instructions，重复调用重新读取，旧 result 可被普通 compaction 回收且没有 protected Skill projection | 08、09 | Medium | 已提交；真实模型产品路径验收通过 |
 
 这些行有意不回答具体 Go 类型、package 布局、token estimator、摘要 prompt、Skills 搜索优先级或全部 corner cases。真正进入某课时，先把那一行扩展为本课文档；如果扩展后估算变成 XLarge，就在实现前重新拆课和编号。
 
