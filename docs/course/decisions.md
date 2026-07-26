@@ -519,8 +519,96 @@
 - 日期：2026-07-22
 - 决定：D69 的 `50 * 1024` bytes 只约束一次最终 model-visible `skill` result，不承诺同一 assistant batch 或 Run 内全部 Skill/tool results 的总和永不超过 Provider context。Lesson 10 不增加 Skill-specific aggregate counter、每批调用数量限制、半批跳过、hidden reservation 或特殊 compaction trigger。
 - 所有权边界：当前 compaction 只在下一次 accepted Run 开始前由 Conversation Owner 执行；Core Agent 在同一 Run 的 tool result 后直接继续下一次 Provider turn。要在这条路径增加 aggregate overflow prevention、mid-Run compaction 或 context-overflow retry，会改变通用 Agent Loop、tool settlement、Working Context replacement 与 Provider error recovery，而问题同样适用于多个有界 `read`、`bash` 和其他 tool results，不属于 Skill tool 的独立责任。
-- 当前保证：每个 `skill` result full-or-error 且有界，所有成功/失败结果都进入现有 request estimation、Working Context 和普通 compaction 语义。Runtime 必须继续把单调用 ceiling 与完整 projected request capacity 分开；真实 trace 若出现 aggregate overflow，应在未编号 Runtime 韧性方向统一设计和验证，不能只在 Skill 层静默丢调用或正文。
+- 当前保证：每个 `skill` result full-or-error 且有界，所有成功/失败结果都进入现有 request estimation、Working Context 和普通 compaction 语义。Runtime 必须继续把单调用 ceiling 与完整 projected request capacity 分开；真实 trace 若出现 aggregate overflow，应在当时尚未编号、现已进入 Lesson 11 的通用 Runtime recovery 路径统一设计和验证，不能只在 Skill 层静默丢调用或正文。
 - 学习者确认：在该边界被明确提出后，学习者于 2026-07-22 要求继续实现；Lesson 10 按此范围完成。
+
+### D73. Lesson 11 收尾第二阶段，第三阶段按 Session Runtime 系列滚动展开
+
+- 日期：2026-07-22
+- 第二阶段边界：学习者明确要求开始 Lesson 11，并决定其实现完成后进入第三阶段。Lesson 11 只完成 explicit context-overflow recovery 的 closed loop：保留失败的 complete History，构造不含 eligible overflow error assistant 的可继续 Working Context，forced compact 后做一次 input-free Core continuation。它不吸收 generic Provider retry、semantic events、steering/follow-up、Session persistence 或 Orchestration；具体 projection representation、classifier placement 与 Run terminology 仍需按 Lesson 11 文档在实现前讨论确认。Recovery eligibility 由 D74 进一步收窄。
+- 第三阶段主题：以“可观察、可控制、可持久化、可恢复、实例间隔离的 Session Runtime”为阶段目标，预先分为 semantic events、单 Session lifecycle、Provider retry、steering、follow-up、durable journal、clean restore、interrupted recovery 与 concurrent-instance isolation 九个阶段内 capability slots。Session Runtime 是未来 Orchestrator/Gateway/IM 的前置层，不在本阶段提前建设这些外层系统。
+- 编号规则：只给当前最近且依赖边界已足够清楚的 semantic-events 课程分配全局 Lesson 12；后续 slots 暂不分配全局编号。每一课开课仍必须重新核对冻结 Pi 与当时 Pia 路径，并允许证据推翻、拆分、合并或换序；任何校准后成为 XLarge 的行都不能直接进入实现。
+- 明确延后：Goal Runtime、公共 SDK、Gateway、gRPC、IM、Agent Manager/scheduler、TUI、worktree/GitHub、多用户/多仓库、完整 Agent Skills/community compatibility 与正式 Pi 对照 benchmark 都不因第三阶段大纲存在而视为已设计或已开始。
+- 原因：Lesson 11 先补齐第二阶段内存 Conversation/Working Context/compaction 面对真实 overflow 时的恢复缺口，第三阶段再从 events 到 persistence/recovery 逐层建立长期 Session owner。这样既让每课有独立完成信号，也避免从 one-shot command 直接跳到网络 Orchestrator，或用一个 XLarge “Session 课”混合观察、控制、队列、存储、恢复和并发。
+
+### D74. Lesson 11 只自动恢复不含 completed tool calls 的明确 overflow error
+
+- 日期：2026-07-24
+- 校准纠正：开课首轮把 Lesson 03 已建立的通用失败结算形状——error/aborted assistant 加 same-ID not-executed tool results——与 context-overflow 主路径合并，进而把 `E2 + N2` 描述成 Lesson 11 必须恢复的 failed terminal settlement group。源码复核与课堂追问确认，这不是当前 DeepSeek overflow 的常态，也没有真实 Provider 证据证明两者会相交。
+- 决定：Lesson 11 的自动 recovery eligibility 除了要求有充分的 explicit context-overflow error evidence，还要求 terminal assistant 不含 completed tool calls。符合条件时，complete History 原样保留该 error assistant，retry projection 只排除该 assistant，再 forced compact 并 input-free continue 一次。如果一条 error terminal 一边命中 overflow 文本、一边含 completed tool calls 及其 not-executed settlements，本课不猜测性删除或重试，而是保留完整失败并返回错误。
+- 既有契约：D33 的通用 tool-call settlement 不变。Provider 已完成 tool-call formation 后发生 transport failure、cancellation 或其他 terminal error 时，Agent 仍不执行这些 calls，并追加 same-ID not-executed results，使 Working Context 与 History 可直接复用。该能力解决 orphaned tool calls，不是 Lesson 11 的 overflow recovery 能力。
+- 证据：当前 OpenAI-compatible Provider 在请求建立或 HTTP status error 时还没有 finish reason，因此形成不带 tool calls 的 error assistant；只有已经收到 finish reason 后的失败才可能保留完整 calls。冻结 Pi 的 overflow recovery 同样从 active state 移除单个尾部 error assistant。对当前产品路径，优先保留可证明的窄恢复边界，而不是为未观察到的 Provider 交集扩建 projection group 语义。
+- 后续扩展：若真实 DeepSeek 或新增 Provider trace 证明明确 overflow terminal 可以合法携带 completed tool calls，再以该 wire evidence 重新讨论 recovery eligibility 与原子排除范围；不得只凭通用类型上“可能出现”提前扩大本课。
+
+### D75. 正式 Session owner 必须重新分配而不是叠加 lifecycle 职责
+
+- 日期：2026-07-26
+- 当前边界：Lesson 11 的 Conversation guard 以 fail-fast 方式覆盖同一个 accepted user advance 的 Core Run、overflow recovery、History commit 与最终 snapshot；Core Agent guard 只覆盖一次 `Run`/`Continue` execution，并禁止 active 时替换 Working Context。两者保护同一 Conversation/Core 实例，不是同一台机器的全局 Session 锁，也不负责不同 Session 共享 workspace 时的文件副作用冲突。
+- 第三阶段约束：进入单 Session lifecycle 课程时，必须重新阅读当时源码并追踪所有入口。如果 Session 独占 Conversation 与 Core Agent，且所有 user advance 都只能经过 Session，Session 应成为唯一外层 lifecycle authority，并优先评估吸收 Conversation 的 `active` 职责。Conversation 默认只保留 complete History/projection 所有权；Core Agent 默认只保留 Working Context 与一次模型/工具 execution。Core 本地 guard 是否继续存在，必须由独立 package contract 或具体并发 invariant 证明。
+- 禁止事项：不得仅为了“多一层保险”让 Session、Conversation 与 Core 同时维护语义重叠的 `active`、`busy`、queue、wait、cancel 或 close 状态。保留多个局部 guard 时，每个 guard 必须有不同的 owner、acceptance point、release point 和失败语义，并用对应并发测试证明不会形成状态分歧或嵌套锁。
+- 并发语义：对同一个逻辑 Session 的第二次推进应由该 Session 的 policy 拒绝或排队；不同 Session instances 应能隔离并发。若两个 Session 操作同一 workspace，所需的 worktree、文件冲突或外部副作用协调属于未来 Orchestrator/workspace owner，不应回填给 Conversation 或 Core Agent。
+- 当前非目标：本决定不在 Lesson 11 引入 Session 类型、持久化 identity、queue、wait/close API、跨进程 lease、全局锁或 workspace manager。它只要求第三阶段不要把当前 guard 位置误当成不可改变的长期架构。
+
+### D76. Recovery projection 以 absolute History exclusions 保留失败事实并过滤模型视图
+
+- 日期：2026-07-26
+- 决定：Lesson 11 继续以 append-only complete Conversation History 作为唯一完整事实源，并在 coding-owned compaction projection 中记录 eligible overflow error assistant 的 absolute History position。`projectedMessages()`、token estimation、compaction summary input、retained suffix planning、Working Context replacement 和 Provider request snapshot 必须消费同一过滤后的 model source；不得只在 Core Agent state 临时删尾部，也不得按错误文本或“当前最后一条”在以后重建时重新猜测。
+- 生命周期边界：第一次 failed Core Run 的 delta 先原样提交 History，随后才按该 assistant 的 absolute position 构造 candidate exclusion。D76 只要求已发布的 projection metadata 与 Core Working Context 始终表达同一个过滤结果；forced compaction 失败时是完全保留旧 model view，还是先提交独立有效的 exclusion 再保留未压缩 filtered context，留在后续失败语义讨论中确认。后续 continuation delta 使用新的 absolute History positions 正常追加；新的 cut 已越过旧 exclusion 后可丢弃对应 metadata。
+- 验证义务：至少覆盖两个不同 accepted user advances 的 overflow，并在其间执行普通 threshold compaction，证明旧 error assistant 不会重新进入 summary 或 Provider request。只验证当次 `slice(0, -1)` 不足以证明该 representation 正确。
+- 范围：本决定固定可重建性与原子发布语义，不固定 Go field、slice/map representation 或 package split；实现前仍按当前文件 cohesion 决定最小清晰结构。
+
+### D77. Lesson 11 只限制自动 recovery，未来用户显式 retry 是新的控制操作
+
+- 日期：2026-07-26
+- 校准纠正：冻结 Pi 的 `_overflowRecoveryAttempted` 在新 user message 或 non-error assistant 后重置，因此它限制的是未取得中间进展的连续 overflow recovery chain，不是严格的“每个 user prompt 一次”。OpenCode 与当前 Codex 同样允许成功 compaction 后返回执行循环，并各自提供独立的手动 compact surface。
+- 当前决定：Pia Lesson 11 采用更严格且易于验证的 one-shot policy：每个 accepted user advance 最多自动发起一个 forced-compaction-plus-input-free-continuation cycle。Compaction 失败、continuation 再次 overflow 或遇到其他失败后，本次调用 settled 并返回错误，不进行第二个隐藏的 recovery cycle；新的 user advance 重新获得自己的 automatic budget。
+- 未来交互：交互式 Session/TUI 可以在失败 settled、阶段和原因已经展示后，让用户显式发起新的 compact/retry control operation。该操作具有独立的用户来源和 attempt lifecycle，不追加假的 Conversation user message，也不通过偷偷重置当前自动 attempt flag 实现。具体 retry、换模型、减少 context 或新 Session 选项必须在对应课程基于当时产品证据设计。
+- 原因与范围：自动上限解决当前无 UI、无 Session、无 generic retry 和无 cost/turn budget 时的终止性、隐藏成本与可解释性，不是死锁机制，也不是永久禁止再次 compaction。Lesson 11 不增加手动命令、事件、pending-task 状态或恢复 UI。
+
+### D78. Forced compaction 普通失败保留已提交 History，但不发布 recovery model view
+
+- 日期：2026-07-26
+- 两段提交：第一次 Core Run settled 后，Conversation 先把原 user、已经完成的 Provider/tool turns 与 eligible overflow error assistant 原样提交 complete History；该事实提交和已经发生的工具副作用不因后续恢复失败回滚。Exclusion、summary、cut、usage boundary 与 replacement Working Context 则共同组成第二个 candidate model-view commit。
+- 失败语义：compaction planning、summary Provider、空/无效 summary、unexpected tool call、candidate capacity/protocol validation 或 atomic `ReplaceWorkingContext` 任一普通失败时，complete History 保留第一次 failed Run 的完整 delta，Core Working Context 与旧 projection 保持 recovery 前状态，不发布 exclusion 或任何半成品 compaction metadata，不调用 `Continue`。外层返回当前 History snapshot，以及带 recovery/compaction operation context并保留最终 compaction cause 的 error。
+- 非对话副作用：Summary request 不经过 Core Agent loop、不提供 coding tools，其 request、terminal、局部 summary 与 usage 不进入 complete History。已经发生的 Provider 数据外发、计费或某个 split-summary 子请求无法回滚；后续子步骤失败时只丢弃本次局部 candidate，不能用已发生成本作为发布不完整 Agent state 的理由。
+- Pi 分歧与未来 retry：冻结 Pi 在 auto-compaction 前先从 mutable agent messages 删除 overflow error，compaction 失败后不恢复，而完整 Session entries 仍保留错误。Pia 需要显式、可重建 projection，当前选择沿用 Lesson 08 的 candidate-then-commit model-view 原子语义。未来用户显式 retry 按 D77 作为新控制操作，从已提交 History 和失败事实重新构造 candidate，不依赖上一次失败留下半发布 projection。
+- 范围：本决定只覆盖非 cancellation 的 forced-compaction failure；取消发生在 model-view commit 前后时的语义单独确认。
+
+### D79. Recovery model-view commit section 之后的取消不回滚已发布 projection
+
+- 日期：2026-07-26
+- 当前取消来源：Lesson 11 继续使用调用方传入的 Go `context.Context`；当前 one-shot CLI 由 `signal.NotifyContext` 把 `SIGINT`/`SIGTERM` 转成取消。这里没有新增 TUI cancel command、Session control state 或 event protocol。
+- Commit 前：summary、planning、candidate validation 或最后一次 cancellation check 观察到取消时，返回 `context.Cause(ctx)`；第一次 failed Core Run 已提交的 complete History 不回滚，未发布的 recovery candidate 被丢弃，旧 Working Context 与旧 projection 保持不变，也不调用 `Continue`。
+- Commit section：最后一次 cancellation check 通过后，idle-only Working Context replacement 与 projection metadata publish 构成一个短小、同步、无异步等待的 commit section。进入该 section 后新到达的取消不触发回滚；即使随后 `Continue` 因预取消而未被接受，已合法发布的 projection 仍保留，且没有新的 continuation delta。
+- Continue 边界：若取消发生在 `Continue` acceptance 之后，Core Agent 按既有 cancellation/terminal/tool-call settlement 契约收敛，Conversation 再提交其 ownership-independent delta。Lesson 11 不为 recovery 另建第二套取消状态机。
+- 原因：外部取消可以阻止尚未提交的工作，却不能安全地追溯撤销已经同步发布且内部一致的 model view。把可取消的 summary 阶段与短 commit section 分开，也避免在锁内等待 Provider 或把“取消到达时刻”误当成跨多个字段的回滚协议。
+
+### D80. Compaction 使用独立的 settled Session journal record 持久化
+
+- 日期：2026-07-26
+- 阶段归属：Lesson 12 是第三阶段第一课，不是第二阶段补课。它可以为 compaction/recovery 定义实时 semantic events，但 events 只服务观察者；Session persistence 已确定属于第三阶段的 durable journal 与 restore 能力，当前只有阶段内 slot，尚未获得稳定全局课号。
+- 持久化位置：未来每次已经结算的 compaction attempt 都在 versioned append-only Session journal 中追加一条独立 typed record，与 message/history entries 并列。它不是 `ai.Message`，不进入 complete Conversation History，也不进入 Working Context；trace 可以投影或展示它，但 trace 与 live event stream 都不是恢复的权威数据源。
+- 最小事实：一条 settled record 保存 attempt 的开始和结算时间、trigger/reason，以及 committed、failed 或 canceled 的结果语义。Committed record 还保存重建 recovery projection 所需的 summary、retained/cut boundary、exclusions 与 usage-validity facts；failed/canceled record 只保存有界、脱敏的原因，不发布或替换 projection。确切字段名、wire schema、文件名、Go package 与 durable-write/in-memory-publish 顺序留到 journal 课程按当时源码确定。
+- 不保存的内容：内部 summary Provider request、原始 API/HTTP payload、完整失败响应、局部 summary candidate 与逐 token/delta 不默认进入 Session journal。成功 summary 已由 committed projection 保存；诊断若以后需要更多细节，应通过有界 trace policy 单独设计，不能把 Conversation History 变成内部调用日志。
+- 中途进程崩溃：这里指 compaction 尚未 settled 时，Pia 进程因 `SIGKILL`、未恢复的 panic、OOM、机器断电或同类原因突然终止；普通 Provider error、可处理的 `SIGINT`/`SIGTERM` cancellation 或 summary validation failure 只要代码能够正常返回并结算，就不是这个特例。首版只追加 settled record，因此突然终止的 attempt 不留下新 CompactionRecord；恢复时继续以更早的 latest committed projection 为准，不自动重放 continuation。Summary call 不拥有 coding tools，所以这不会制造未知 workspace tool 副作用，但已经发生的 Provider 数据外发和计费仍不可撤销。
+- 简化边界：若真实审计或 crash-recovery 证据以后要求识别“开始过但没有结算”的 compaction，可把 journal 扩展为 durable Started + Settled entries，并把 unmatched Started 解释为 interrupted attempt。当前不为纯诊断需求提前引入配对 ID、未完成状态与清理规则。
+- 对照证据：冻结 Pi `dcfe36c` 把成功结果保存为特殊 [`CompactionEntry`](https://github.com/badlogic/pi-mono/blob/dcfe36c79702ec240b146c45f167ab75ecddd205/packages/coding-agent/src/core/session-manager.ts#L69-L78)，失败主要停留在运行事件；Codex `61a4488` 以独立 [`CompactedItem`](https://github.com/openai/codex/blob/61a44880a85d2fd0d8770908dea5733495e571c8/codex-rs/protocol/src/protocol.rs#L3184-L3249) 保存恢复检查点，并把 trigger/status 放在事件或 analytics；OpenCode V2 `7534d23` 使用 durable [compaction lifecycle events](https://github.com/anomalyco/opencode/blob/7534d23551f665e65080809975b4ca5c7d63807b/packages/schema/src/session-event.ts#L398-L431)，并只让已完成 compaction 进入历史投影。Pia 采用三者共有的“特殊 control/checkpoint record 不等于普通对话”边界，同时补足最小 settled failure/cancellation 可追溯性。
+- 当前课程影响：Lesson 11 仍只实现内存 candidate-then-commit 与 D79 的同步 commit section，不增加 Session journal、持久化 CompactionRecord 或 event API。第三阶段 journal 课程引入 durability 时，必须重新检查 crash-safe append 如何成为 model-view commit protocol 的一部分，不能机械照搬当前纯内存写入顺序。
+
+### D81. Overflow classifier 暂时属于 coding private policy
+
+- 日期：2026-07-26
+- 当前决定：Lesson 11 在 `internal/coding` 保留一个 private overflow predicate，只消费已经 bounded、credential-redacted 的 terminal `ai.AssistantMessage`。它只接受 `stopReason=error`、不含 completed tool calls 且错误文本明确表达 context length/window exceeded 的 terminal；rate limit、too many requests、throttling、server overload、普通 400/413/422、5xx、`length` 和 aborted 均不能单独触发 recovery。
+- 阶段性归属：这个位置只适用于当前“一个 coding recovery consumer、一个 DeepSeek/OpenAI-compatible 产品路径、没有稳定结构化 overflow code”的阶段，不是长期层级承诺。实现必须留下英文 `TODO` 并引用本决定的触发条件：Provider 提供稳定结构化 error code、第二个 Provider 需要相同分类，或 generic retry 成为第二个 consumer 时，重新评估把 evidence preservation/classification 下沉到 `internal/ai` 或具体 Provider profile；不得把当前文本 matcher 永久固化在 coding。
+- 协议边界：当前不向 `ai.AssistantMessage` 增加 failure kind，也不把启发式结果伪装成 Provider wire contract。Classifier 只回答是否进入当前 overflow path；一次性 recovery budget、compaction、backoff、continuation 与用户显式 retry 都不是它的责任。
+- 证据与验证：DeepSeek 官方只说明 context limit 和一般 400/422 语义，仓库尚无可证明稳定 code/message 的真实 overflow trace。首版 matcher 因而只覆盖窄的 context-length phrases，并用 negative cases 锁定误判边界；local HTTP fixture 只能证明现有 bounded/redacted terminal path 能把 error text 交给 classifier，不能宣称为 DeepSeek 官方 live contract。
+
+### D82. Core Run 表示一次 accepted Agent Loop execution
+
+- 日期：2026-07-26
+- 决定：Core Agent `Run(ctx, userInput)` 与 `Continue(ctx)` 是同一种 Agent Loop execution 的两个 acceptance surface。前者在 acceptance 时追加一条 user message；后者要求当前 Working Context 非空且以 user 或 paired tool result 结尾，不追加输入。两者共享 Provider/tool loop、active guard、cancellation 与 terminal/tool-call settlement。
+- Delta：两者都返回 ownership-independent run-local `NewMessages`。Input-started Run 的 delta 从本次 user message开始；continuation 的 delta 从 acceptance 时的 Working Context 尾部开始，只包含随后新产生的 assistant/tool-result messages。
+- 外层术语：一次 coding user advance 通常协调一个 Core Run；Lesson 11 overflow recovery 可以在同一个 Conversation guard 内顺序协调一个 input-started Core Run 和一个 input-free Core Continue。这里不引入 Session、queue 或第二套 outcome type。
 
 ## 变更记录
 
@@ -619,3 +707,14 @@
 - 2026-07-22：Lesson 10 按 D68–D72 完成实现与主线程审查：coding-owned `skills` package、dedicated `skill(name)` tool、catalog-selected lookup、current-file reread、full-or-error ceiling、普通 compaction 和无 dedupe/protected state 均有确定性测试；`make check` 与 `go test -race ./...` 全部通过。课程进入待理解确认且尚未提交。
 - 2026-07-22：学习者确认理解 Lesson 10，并明确要求使用 feature branch commit、push 和创建 PR；课程教学至此完成，真实效果评测义务继续保留。
 - 2026-07-22：PR #5 合入 `main` 后，以调用前冻结的协议、固定 `deepseek-v4-pro` 产品配置和 fresh workspaces 完成 Skill v1 真实模型产品路径 checkpoint。连续 `2/2` 相关任务都只选择 `go-regression`、通过 tool result 获得未预载正文、遵守私有测试与 final-marker 要求，并产生在原错误实现上失败、修复后通过的回归测试；连续 `2/2` 无关任务均零 Skill 调用、零 workspace 改动且回答正确。该证据确认当前 one-shot 闭环符合 D68 的预期组合行为，没有暴露需要阻塞后续课程的实现缺陷；它不替代 dedicated-tool baseline 对照或真实 between-Runs compaction 实验，后者仍需未来 multi-Run surface。
+- 2026-07-22：学习者明确开始 Lesson 11，并要求同时记录第三阶段系列大纲。开课校准确认 overflow recovery 必须把 failed terminal assistant 与 same-ID not-executed results 作为一个 projection exclusion group，而不能只删最后一条消息；课程按 D73 以 Lesson 11 收尾第二阶段，并把第三阶段组织成九个可重新校准的 Session Runtime capability slots，当前只固定 Lesson 12 全局编号。
+- 2026-07-24：课堂追问区分了正常 pre-generation context overflow 与 finish reason 后的通用 stream failure。D74 纠正首轮校准：Lesson 11 只自动恢复不含 completed tool calls 的明确 overflow error；`E2 + N2` 继续是 D33 的通用失败结算形状，不再作为 overflow 主路径或本课验收要求。
+- 2026-07-26：学习者确认当前 guard 只保护同一逻辑实例，并要求未来 Session 设计重新评估 Conversation/Core 职责。D75 要求 Session 成为候选唯一外层 lifecycle authority，吸收而不是叠加同义状态，同时把跨 Session workspace 冲突留给未来外层协调。
+- 2026-07-26：学习者确认 recovery projection 使用 append-only History 加 absolute exclusions，所有 model-view consumers 共享同一过滤结果；D76 禁止临时 tail deletion 或按错误文本重建。
+- 2026-07-26：学习者确认 Lesson 11 每个 accepted user advance 最多一次自动 recovery，同时要求未来 TUI 从用户角度允许失败 settled 后显式重试；D77 将自动 budget 与新的用户控制操作分开，并纠正此前对 Pi flag reset 边界的过度简化。
+- 2026-07-26：学习者确认 forced compaction 普通失败采用两段提交：第一次 failed Run 的完整 History 不回滚，recovery exclusion/summary/cut/Working Context candidate 则全有或全无；D78 不复制 Pi 先删 active error、失败后不恢复的部分提交。
+- 2026-07-26：学习者确认 cancellation 与 recovery model-view commit section 的边界；D79 在 commit 前丢弃 candidate，进入同步 replacement/publish section 后不回滚 projection，并让 accepted continuation 继续复用既有 Core cancellation settlement。
+- 2026-07-26：横向核对 Pi、Codex 与 OpenCode 后，学习者确认 compaction 不进入普通 Conversation History，但未来以独立的 settled typed record 进入 versioned Session journal。D80 固定 journal/event/trace 的责任分离、最小 audit facts 与中途进程崩溃的首版边界。
+- 2026-07-26：学习者确认 Lesson 11 先把 overflow classifier 放在 coding private policy，并要求明确标注这是当前阶段的位置。D81 固定窄 matcher、误判排除和代码 TODO 的复评触发条件；D82 同步收敛 Core Run/Continue 与 coding user advance 的术语。
+- 2026-07-26：Lesson 11 按 D73–D82 完成实现与主线程多视角审查：Core input-free continuation、tool-call-free explicit-overflow classification、absolute History exclusions、forced compaction、两段提交、同步 model-view commit section 与每次 accepted user advance 一次自动 recovery 均有确定性测试。审查补齐了 continuation Working Context 中间 `nil` message 的拒绝、带 overflow 文案的 5xx 负例，以及 negative evidence 与 positive evidence 共享 normalization 的回归测试；`make check` 与 `go test -race ./...` 全部通过，课程进入待理解确认且尚未提交。
+- 2026-07-26：学习者确认理解 Lesson 11，并明确要求直接提交到 `origin/main`。Lesson 11 与第二阶段至此完成；接下来先讨论和校准第三阶段课程系列，不因此自动开始 Lesson 12。

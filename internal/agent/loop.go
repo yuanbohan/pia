@@ -16,6 +16,20 @@ func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
 	if err != nil {
 		return RunResult{}, err
 	}
+	return a.executeRun(ctx, runStart)
+}
+
+// Continue resumes Provider turns from an existing user or paired tool-result
+// tail without appending another user message.
+func (a *Agent) Continue(ctx context.Context) (RunResult, error) {
+	runStart, err := a.beginContinue(ctx)
+	if err != nil {
+		return RunResult{}, err
+	}
+	return a.executeRun(ctx, runStart)
+}
+
+func (a *Agent) executeRun(ctx context.Context, runStart int) (RunResult, error) {
 	defer a.endRun()
 
 	continuingAfterTools := false
@@ -71,6 +85,24 @@ func (a *Agent) beginRun(ctx context.Context, userInput string) (int, error) {
 	runStart := len(a.workingContext)
 	a.workingContext = append(a.workingContext, ai.UserMessage{Content: userInput})
 	return runStart, nil
+}
+
+func (a *Agent) beginContinue(ctx context.Context) (int, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.active {
+		return 0, ErrRunActive
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		return 0, cause
+	}
+	if err := validateContinuationContext(a.workingContext); err != nil {
+		return 0, err
+	}
+
+	a.active = true
+	return len(a.workingContext), nil
 }
 
 func (a *Agent) endRun() {

@@ -2,13 +2,15 @@ package agent
 
 import "github.com/yuanbohan/pia/internal/ai"
 
-// ReplaceWorkingContext atomically installs the messages used by future Runs.
+// ReplaceWorkingContext atomically installs the messages used by the next Run
+// or Continue execution.
 func (a *Agent) ReplaceWorkingContext(messages []ai.Message) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Replacing context between Turns would make one Run observe two unrelated
-	// histories. The caller must coordinate replacement after Run settlement.
+	// Replacing context between Turns would make one execution observe two
+	// unrelated histories. The caller must coordinate replacement after the
+	// active Run or Continue settles.
 	if a.active {
 		return ErrRunActive
 	}

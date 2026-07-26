@@ -46,7 +46,7 @@ The Agent Loop defines ordering, settlement, cancellation, and tool-execution be
 
 ### Run
 
-One accepted Core Agent execution ending only after the Agent Loop stops producing messages and all work started by that execution has settled. In current Pia, a Run is initiated by one new user input; an input-free explicit continuation is deferred and is not part of the current Core Agent API.
+One accepted Core Agent execution ending only after the Agent Loop stops producing messages and all work started by that execution has settled. A Run can start through `Run(ctx, userInput)`, which appends one new user message at acceptance, or through `Continue(ctx)`, which resumes from an existing user or paired tool-result tail without appending input.
 
 A Run may contain multiple Turns. A non-nil Run error describes its outcome but does not erase Messages already accepted during the Run.
 
@@ -60,7 +60,7 @@ A Turn is smaller than a Run: tool results can require another Provider call, pr
 
 The complete ordered batch of Messages newly accepted during one Run, returned as an ownership-independent value at Run settlement for the Conversation Owner to append to Conversation History.
 
-It includes initiating input, terminal assistant Messages, and tool-result Messages when those entries occurred during the Run. A request rejected before Run acceptance has an empty delta; an accepted Run that ends in failure or cancellation still returns its error or aborted assistant and any required tool-call settlement results. The delta is transferred as an ownership-independent snapshot rather than through a channel or live event subscription.
+An input-started Run delta includes its initiating input. An input-free continuation delta starts after the pre-existing Working Context tail and therefore contains only new assistant and tool-result Messages. A request rejected before Run acceptance has an empty delta; an accepted Run that ends in failure or cancellation still returns its error or aborted assistant and any required tool-call settlement results. The delta is transferred as an ownership-independent snapshot rather than through a channel or live event subscription.
 
 ### Core Agent
 
@@ -96,7 +96,7 @@ Compaction does not create a new Conversation. Provider credentials, workspace f
 
 The runtime responsibility that owns a Conversation’s complete ordered history and coordinates it with the Core Agent’s replaceable Working Context.
 
-Conversation Owner names an ownership role, not a requirement for a type or package with that exact name. The current minimal owner accepts at most one active Run per Conversation and rejects concurrent attempts rather than silently queueing them; this does not prevent different Conversations or parallel-safe tools within one Run from executing concurrently. Its minimal in-memory form does not imply Session persistence, branches, event subscriptions, or a public API.
+Conversation Owner names an ownership role, not a requirement for a type or package with that exact name. The current minimal owner accepts at most one active coding user advance per Conversation and rejects concurrent attempts rather than silently queueing them. An overflow recovery may coordinate one input-started Core Run and one later input-free Core continuation while retaining that same outer guard; this does not prevent different Conversations or parallel-safe tools within one Run from executing concurrently. Its minimal in-memory form does not imply Session persistence, branches, event subscriptions, or a public API.
 
 ### Message
 
@@ -110,7 +110,7 @@ The authoritative, complete, ordered record of accepted Messages in a Conversati
 
 It retains successful, error, and aborted terminal assistant messages and the tool results that close accepted tool calls, including explicit not-executed results. It excludes partial stream formation, Provider Request Snapshots, system prompts, tool schemas, logs, and UI-only events.
 
-The minimal in-memory Conversation Owner commits each Run Message Delta after that Run settles. Until future persistence or live observation creates a stronger requirement, Conversation History represents settled Runs rather than partially formed active-Run state.
+The minimal in-memory Conversation Owner commits each Run Message Delta after that Core execution settles. One accepted coding user advance may commit an initial failed delta and a later continuation delta when bounded overflow recovery succeeds. Until future persistence or live observation creates a stronger requirement, Conversation History represents settled Core executions rather than partially formed active-Run state.
 
 *Avoid:* using “transcript” without qualification when it is unclear whether the complete Conversation History or the Core Agent’s current Working Context is meant.
 
@@ -118,7 +118,7 @@ The minimal in-memory Conversation Owner commits each Run Message Delta after th
 
 The ordered message view that the Core Agent can use to continue the Conversation on the next model call; it is replaceable while the Core Agent is idle and is not the authoritative historical record.
 
-Before compaction it may equal the complete Conversation History. After compaction it may contain a synthetic summary, a retained recent suffix, and messages added afterward while omitting older raw messages represented by the summary. It must preserve model protocol integrity, including valid assistant-tool-call and tool-result relationships. The stable system prompt, tool schemas, Provider options, Session metadata, and display-only entries are outside the Working Context.
+Before compaction it may equal the complete Conversation History. After compaction it may contain a synthetic summary, a retained recent suffix, and messages added afterward while omitting older raw messages represented by the summary. Overflow recovery may also omit an explicitly classified error assistant by its absolute Conversation History position while preserving that message as a historical fact. It must preserve model protocol integrity, including valid assistant-tool-call and tool-result relationships. The stable system prompt, tool schemas, Provider options, Session metadata, and display-only entries are outside the Working Context.
 
 ### Provider Request Snapshot
 
@@ -128,15 +128,17 @@ It is disposable after that call and never becomes an authoritative history sour
 
 ### Compaction
 
-The process of replacing older Working Context content with a summary plus a retained suffix so future model calls use less context without deleting the complete Conversation History.
+The process of replacing older Working Context content with a summary plus a retained suffix so future model calls use less context without deleting the complete Conversation History. It may run lazily before a new input-started Run crosses the configured threshold or be forced after an eligible context-overflow terminal before an input-free continuation.
 
-Compaction is not arbitrary truncation: the resulting Working Context must remain sufficient to continue the task and must preserve message and tool-call protocol integrity.
+Compaction is not arbitrary truncation: the resulting Working Context must remain sufficient to continue the task and must preserve message and tool-call protocol integrity. Internal summary requests and their terminals are not Conversation Messages.
 
 ### Session
 
 A lifecycle and persistence envelope around a Conversation that may add durable identity, stored entries, model settings, compaction records, branches, timestamps, and resume behavior.
 
 A Session is broader than Conversation History and is not synonymous with Working Context. Pia can establish the Conversation ownership boundary without implementing a persistent Session.
+
+A future durable compaction record belongs to the Session journal as control/checkpoint state, alongside but distinct from message entries. It is not a Conversation Message or a live event: the latest committed record can rebuild the Working Context projection, while failed or canceled settled records remain observable without changing that model view.
 
 ## Flagged Ambiguities
 

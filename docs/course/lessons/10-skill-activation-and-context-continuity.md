@@ -304,7 +304,7 @@ package split、catalog-selected entries、plain-string schema、parallel-safe d
 
 仍需明确归类的是 **mid-Run aggregate context**：现有 Conversation 只在一次 accepted Run 开始前调用 `compactBeforeRun`；Core Agent 在同一 Run 内执行 tools 后会直接发起下一次 Provider call，不在两个 Provider turns 之间触发 compaction。因而 D69 的 50 KiB 是单个最终 `skill` result ceiling，不是同一 batch 或 Run 内全部 Skill results 的 aggregate ceiling。多个不同或重复 Skill results 仍会在下一次 Provider input 中相加，正如多个有界 `read`/`bash` results 也会相加。
 
-D72 确认不在 Lesson 10 增加 Skill-specific aggregate counter、调用数量限制、半批跳过、mid-Run compaction 或 context-overflow retry：这些机制会改变通用 Agent loop、tool settlement 与 compaction ownership，而且问题并非 Skill 独有。集成测试证明每个 result 有界并正常进入 Provider request；aggregate overflow recovery 留给课程表中已有的 Runtime 韧性方向。这个非目标不影响本课正常单个/少量 Skill activation 的闭环，但必须避免把“单次 50 KiB”误述成“整个 Run 永不超 context”。
+D72 确认不在 Lesson 10 增加 Skill-specific aggregate counter、调用数量限制、半批跳过、mid-Run compaction 或 context-overflow retry：这些机制会改变通用 Agent loop、tool settlement 与 compaction ownership，而且问题并非 Skill 独有。集成测试证明每个 result 有界并正常进入 Provider request；aggregate overflow recovery 后来进入 [Lesson 11](11-context-overflow-recovery-and-input-free-continuation.md) 的通用 Runtime recovery 路径。这个非目标不影响本课正常单个/少量 Skill activation 的闭环，但必须避免把“单次 50 KiB”误述成“整个 Run 永不超 context”。
 
 ## 效果验证义务
 

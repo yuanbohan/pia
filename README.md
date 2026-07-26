@@ -4,7 +4,7 @@ Pia 是面向学习、验证和长期演进的 Go coding agent。仓库为 [`yua
 
 项目以课程驱动：先阅读冻结的 Pi 源码并提炼可观察契约，再完成对应 Go 实现、测试、讨论记录和一次由学习者批准的提交。
 
-课程按阶段推进。第一阶段包含 Lessons 00–06，交付最小 headless coding loop 和本地 `pia` one-shot coding agent；第二阶段从 Lesson 07 开始扩展 Conversation/Working Context、compaction 与 Skills 等 coding-relevant 能力。目前 Lessons 00–10 已完成。每个阶段的目标、实施文档、课程表和当前状态统一记录在[课程阶段与实施计划](docs/course/README.md)。
+课程按阶段推进；阶段目标、逐课规划、实施文档和当前进度统一记录在[课程阶段与实施计划](docs/course/README.md)。根 README 只保留产品概览、当前运行方式和文档入口。
 
 当前实现仍是单 workspace、单 active Run、进程内状态的本地入口，尚未进入 Goal Runtime、Session 持久化、TUI、公共 SDK、RPC/IM、多用户、多仓库或 worktree/GitHub 管理。bash 不是 sandbox；具体安全边界和验收约束记录在课程与实施文档中。
 

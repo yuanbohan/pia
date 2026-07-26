@@ -49,6 +49,7 @@ type compactionProjection struct {
 	Summary        string
 	FirstKept      int
 	UsageValidFrom int
+	Excluded       []int
 }
 
 type compactionPlan struct {
@@ -58,48 +59,120 @@ type compactionPlan struct {
 	SplitTurn           bool
 }
 
+type compactionModelSource struct {
+	Messages        []ai.Message
+	Positions       []int
+	PreviousSummary string
+	HasSummary      bool
+	Excluded        []int
+}
+
 func (c *conversation) compactBeforeRun(ctx context.Context, userInput string) error {
 	if !c.compaction.enabled() {
 		return nil
 	}
 
 	history, previousProjection := c.compactionSnapshot()
-	currentMessages, err := projectedMessages(history, previousProjection)
+	return c.compactContext(
+		ctx,
+		history,
+		previousProjection,
+		nil,
+		[]ai.Message{ai.UserMessage{Content: userInput}},
+		false,
+	)
+}
+
+func (c *conversation) compactAfterOverflow(ctx context.Context, excludedPosition int) error {
+	history, previousProjection := c.compactionSnapshot()
+	if excludedPosition < 0 || excludedPosition >= len(history) {
+		return fmt.Errorf(
+			"overflow terminal position %d is outside History length %d",
+			excludedPosition,
+			len(history),
+		)
+	}
+	return c.compactContext(
+		ctx,
+		history,
+		previousProjection,
+		[]int{excludedPosition},
+		nil,
+		true,
+	)
+}
+
+func (c *conversation) compactContext(
+	ctx context.Context,
+	history []ai.Message,
+	previousProjection *compactionProjection,
+	additionalExclusions []int,
+	pendingMessages []ai.Message,
+	forced bool,
+) error {
+	source, err := buildCompactionModelSource(history, previousProjection, additionalExclusions)
 	if err != nil {
 		return fmt.Errorf("coding: build current context projection: %w", err)
 	}
-	projectedRequest := c.codingRequest(currentMessages, userInput)
-	if ai.EstimateRequestTokens(projectedRequest).Tokens < c.compaction.Threshold {
+	currentMessages := source.currentMessages()
+	projectedRequest := c.modelRequest(currentMessages, pendingMessages)
+	if !forced && ai.EstimateRequestTokens(projectedRequest).Tokens < c.compaction.Threshold {
 		return nil
 	}
 
-	boundaryStart := 0
-	previousSummary := ""
-	if previousProjection != nil {
-		boundaryStart = previousProjection.FirstKept
-		previousSummary = previousProjection.Summary
-	}
-	plan, err := chooseCompactionPlan(
-		history,
-		boundaryStart,
-		userInput,
+	plan, err := chooseCompactionPlanWithPending(
+		source.Messages,
+		0,
+		pendingMessages,
 		c.systemPrompt,
 		c.tools,
 		c.compaction,
+		historyBeforeProjection(history, previousProjection),
 	)
 	if err != nil {
 		return fmt.Errorf("coding: prepare context compaction: %w", err)
 	}
+	if plan.FirstKept < 0 || plan.FirstKept >= len(source.Positions) {
+		return fmt.Errorf(
+			"coding: prepare context compaction: first-kept source index %d is outside %d usable messages",
+			plan.FirstKept,
+			len(source.Positions),
+		)
+	}
+	firstKept := source.Positions[plan.FirstKept]
+	// Recovery exclusions are tool-call-free error assistants, so scanning the
+	// raw prefix produces the same deterministic file-operation set without
+	// cloning every historical message.
+	fileOperationHistory := history[:firstKept]
 
-	summary, err := c.executeCompactionPlan(ctx, history, plan, previousSummary)
+	summary, err := c.executeCompactionPlan(
+		ctx,
+		plan,
+		source.PreviousSummary,
+		fileOperationHistory,
+	)
 	if err != nil {
 		return fmt.Errorf("coding: compact context: %w", err)
 	}
-	candidate := compactedMessages(summary, history, plan.FirstKept)
+	projection := compactionProjection{
+		Summary:        summary,
+		FirstKept:      firstKept,
+		UsageValidFrom: len(history),
+		Excluded:       exclusionsAtOrAfter(source.Excluded, firstKept),
+	}
+	candidate, err := projectedMessages(history, &projection)
+	if err != nil {
+		return fmt.Errorf("coding: build compacted context projection: %w", err)
+	}
 	if err := validateWorkingContext(candidate); err != nil {
 		return fmt.Errorf("coding: validate compacted context: %w", err)
 	}
-	candidateRequest := c.codingRequest(candidate, userInput)
+	if len(pendingMessages) == 0 {
+		if err := validateContinuationTail(candidate); err != nil {
+			return fmt.Errorf("coding: validate compacted continuation context: %w", err)
+		}
+	}
+	candidateRequest := c.modelRequest(candidate, pendingMessages)
 	candidateTokens := ai.EstimateRequestTokens(candidateRequest).Tokens
 	if candidateTokens >= c.compaction.Threshold {
 		return fmt.Errorf(
@@ -118,47 +191,193 @@ func (c *conversation) compactBeforeRun(ctx context.Context, userInput string) e
 	if err := c.core.ReplaceWorkingContext(candidate); err != nil {
 		return fmt.Errorf("coding: replace compacted Working Context: %w", err)
 	}
-	c.publishProjection(compactionProjection{
-		Summary:        summary,
-		FirstKept:      plan.FirstKept,
-		UsageValidFrom: len(history),
-	})
+	c.publishProjection(projection)
 	return nil
 }
 
-func (c *conversation) codingRequest(messages []ai.Message, userInput string) ai.Request {
-	withInput := make([]ai.Message, 0, len(messages)+1)
-	withInput = append(withInput, messages...)
-	withInput = append(withInput, ai.UserMessage{Content: userInput})
+func (c *conversation) modelRequest(messages, pendingMessages []ai.Message) ai.Request {
+	withPending := make([]ai.Message, 0, len(messages)+len(pendingMessages))
+	withPending = append(withPending, messages...)
+	withPending = append(withPending, pendingMessages...)
 	return ai.Request{
 		SystemPrompt: c.systemPrompt,
-		Messages:     withInput,
+		Messages:     withPending,
 		Tools:        c.tools,
 	}
 }
 
 func projectedMessages(history []ai.Message, projection *compactionProjection) ([]ai.Message, error) {
 	if projection == nil {
-		return history, nil
+		return ai.CloneMessages(history), nil
 	}
+	if err := validateCompactionProjection(history, projection); err != nil {
+		return nil, err
+	}
+	retained, _ := visibleHistoryRange(
+		history,
+		projection.FirstKept,
+		len(history),
+		projection.UsageValidFrom,
+		projection.Excluded,
+	)
+	projected := make([]ai.Message, 0, 1+len(retained))
+	projected = append(projected, syntheticSummaryMessage(projection.Summary))
+	projected = append(projected, retained...)
+	return projected, nil
+}
+
+func buildCompactionModelSource(
+	history []ai.Message,
+	projection *compactionProjection,
+	additionalExclusions []int,
+) (compactionModelSource, error) {
+	source := compactionModelSource{}
+	firstKept := 0
+	usageValidFrom := 0
+	if projection != nil {
+		if err := validateCompactionProjection(history, projection); err != nil {
+			return compactionModelSource{}, err
+		}
+		firstKept = projection.FirstKept
+		usageValidFrom = projection.UsageValidFrom
+		source.PreviousSummary = projection.Summary
+		source.HasSummary = true
+	}
+
+	exclusions, err := mergeExclusions(history, firstKept, projection, additionalExclusions)
+	if err != nil {
+		return compactionModelSource{}, err
+	}
+	source.Messages, source.Positions = visibleHistoryRange(
+		history,
+		firstKept,
+		len(history),
+		usageValidFrom,
+		exclusions,
+	)
+	source.Excluded = exclusions
+	return source, nil
+}
+
+func (source compactionModelSource) currentMessages() []ai.Message {
+	projected := make([]ai.Message, 0, len(source.Messages)+1)
+	if source.HasSummary {
+		projected = append(projected, syntheticSummaryMessage(source.PreviousSummary))
+	}
+	projected = append(projected, source.Messages...)
+	return projected
+}
+
+func validateCompactionProjection(history []ai.Message, projection *compactionProjection) error {
 	if projection.FirstKept < 0 || projection.FirstKept > len(history) {
-		return nil, fmt.Errorf("first-kept index %d is outside History length %d", projection.FirstKept, len(history))
+		return fmt.Errorf("first-kept index %d is outside History length %d", projection.FirstKept, len(history))
 	}
 	if projection.UsageValidFrom < projection.FirstKept || projection.UsageValidFrom > len(history) {
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"usage-valid index %d is outside retained History range [%d,%d]",
 			projection.UsageValidFrom,
 			projection.FirstKept,
 			len(history),
 		)
 	}
+	previous := -1
+	for _, position := range projection.Excluded {
+		if position < projection.FirstKept || position >= len(history) {
+			return fmt.Errorf(
+				"excluded History position %d is outside retained range [%d,%d)",
+				position,
+				projection.FirstKept,
+				len(history),
+			)
+		}
+		if position <= previous {
+			return fmt.Errorf("excluded History positions are not strictly increasing")
+		}
+		previous = position
+	}
+	return nil
+}
 
-	projected := make([]ai.Message, 0, 1+len(history)-projection.FirstKept)
-	projected = append(projected, syntheticSummaryMessage(projection.Summary))
-	retained := ai.CloneMessages(history[projection.FirstKept:])
-	clearAssistantUsage(retained[:projection.UsageValidFrom-projection.FirstKept])
-	projected = append(projected, retained...)
-	return projected, nil
+func mergeExclusions(
+	history []ai.Message,
+	firstKept int,
+	projection *compactionProjection,
+	additional []int,
+) ([]int, error) {
+	var exclusions []int
+	if projection != nil {
+		exclusions = append(exclusions, projection.Excluded...)
+	}
+	exclusions = append(exclusions, additional...)
+	sort.Ints(exclusions)
+
+	merged := exclusions[:0]
+	for _, position := range exclusions {
+		if position < firstKept || position >= len(history) {
+			return nil, fmt.Errorf(
+				"excluded History position %d is outside retained range [%d,%d)",
+				position,
+				firstKept,
+				len(history),
+			)
+		}
+		if len(merged) == 0 || merged[len(merged)-1] != position {
+			merged = append(merged, position)
+		}
+	}
+	return merged, nil
+}
+
+func visibleHistoryRange(
+	history []ai.Message,
+	start, end, usageValidFrom int,
+	exclusions []int,
+) ([]ai.Message, []int) {
+	excluded := make(map[int]struct{}, len(exclusions))
+	for _, position := range exclusions {
+		excluded[position] = struct{}{}
+	}
+
+	messages := make([]ai.Message, 0, end-start)
+	positions := make([]int, 0, end-start)
+	for position := start; position < end; position++ {
+		if _, skip := excluded[position]; skip {
+			continue
+		}
+		message := ai.CloneMessage(history[position])
+		if position < usageValidFrom {
+			message = clearMessageUsage(message)
+		}
+		messages = append(messages, message)
+		positions = append(positions, position)
+	}
+	return messages, positions
+}
+
+func clearMessageUsage(message ai.Message) ai.Message {
+	assistant, ok := message.(ai.AssistantMessage)
+	if !ok {
+		return message
+	}
+	assistant.Usage = ai.Usage{}
+	return assistant
+}
+
+func exclusionsAtOrAfter(exclusions []int, firstKept int) []int {
+	index := sort.SearchInts(exclusions, firstKept)
+	return append([]int(nil), exclusions[index:]...)
+}
+
+func validateContinuationTail(messages []ai.Message) error {
+	if len(messages) == 0 {
+		return errors.New("working context is empty")
+	}
+	switch messages[len(messages)-1].(type) {
+	case ai.UserMessage, ai.ToolResultMessage:
+		return nil
+	default:
+		return fmt.Errorf("working context ends with %T instead of user or tool result", messages[len(messages)-1])
+	}
 }
 
 func chooseCompactionPlan(
@@ -168,6 +387,30 @@ func chooseCompactionPlan(
 	systemPrompt string,
 	tools []ai.ToolSchema,
 	policy compactionPolicy,
+) (compactionPlan, error) {
+	var priorFileOperationHistory []ai.Message
+	if boundaryStart >= 0 && boundaryStart <= len(history) {
+		priorFileOperationHistory = history[:boundaryStart]
+	}
+	return chooseCompactionPlanWithPending(
+		history,
+		boundaryStart,
+		[]ai.Message{ai.UserMessage{Content: userInput}},
+		systemPrompt,
+		tools,
+		policy,
+		priorFileOperationHistory,
+	)
+}
+
+func chooseCompactionPlanWithPending(
+	history []ai.Message,
+	boundaryStart int,
+	pendingMessages []ai.Message,
+	systemPrompt string,
+	tools []ai.ToolSchema,
+	policy compactionPolicy,
+	priorFileOperationHistory []ai.Message,
 ) (compactionPlan, error) {
 	if boundaryStart < 0 || boundaryStart >= len(history) {
 		return compactionPlan{}, fmt.Errorf("no retained History is available to compact")
@@ -181,12 +424,13 @@ func chooseCompactionPlan(
 	}
 
 	firstKept := targetCutPoint(history, boundaryStart, cutPoints, policy.RetainedRawTarget)
-	operations := extractFileOperations(history[:firstKept])
+	operations := extractFileOperations(priorFileOperationHistory)
+	operations.add(history[boundaryStart:firstKept])
 	retainedTokens := estimateMessagesTokens(history[firstKept:])
 	fixedTokens := ai.EstimateRequestTokens(ai.Request{
 		SystemPrompt: systemPrompt,
 		Tools:        tools,
-	}).Tokens + ai.EstimateMessageTokens(ai.UserMessage{Content: userInput})
+	}).Tokens + estimateMessagesTokens(pendingMessages)
 	advance := func(next int) {
 		operations.add(history[firstKept:next])
 		retainedTokens -= estimateMessagesTokens(history[firstKept:next])
@@ -219,6 +463,16 @@ func chooseCompactionPlan(
 		}
 		advance(next)
 	}
+}
+
+func historyBeforeProjection(
+	history []ai.Message,
+	projection *compactionProjection,
+) []ai.Message {
+	if projection == nil {
+		return nil
+	}
+	return history[:projection.FirstKept]
 }
 
 func validCutPoints(history []ai.Message, start int) []int {
@@ -334,9 +588,9 @@ func estimateMessagesTokens(messages []ai.Message) int64 {
 
 func (c *conversation) executeCompactionPlan(
 	ctx context.Context,
-	history []ai.Message,
 	plan compactionPlan,
 	previousSummary string,
+	fileOperationHistory []ai.Message,
 ) (string, error) {
 	var historySummary string
 	if len(plan.MessagesToSummarize) > 0 {
@@ -361,7 +615,7 @@ func (c *conversation) executeCompactionPlan(
 		}
 		summary = historySummary + "\n\n---\n\n**Turn Context (split turn):**\n\n" + prefixSummary
 	}
-	summary += formatFileOperations(extractFileOperations(history[:plan.FirstKept]))
+	summary += formatFileOperations(extractFileOperations(fileOperationHistory))
 	return summary, nil
 }
 

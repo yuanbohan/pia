@@ -9,7 +9,8 @@ import (
 	"github.com/yuanbohan/pia/internal/ai"
 )
 
-// ErrRunActive means another Run already owns this Agent's Working Context.
+// ErrRunActive means another Agent Loop execution already owns this Agent's
+// Working Context.
 var ErrRunActive = errors.New("agent: run already active")
 
 // Config contains the stable dependencies of one Agent loop.
@@ -20,7 +21,8 @@ type Config struct {
 	RequestLimits ai.RequestLimits
 }
 
-// RunResult contains the ownership-independent messages accepted by one Run.
+// RunResult contains the ownership-independent messages accepted by one Agent
+// Loop execution.
 type RunResult struct {
 	NewMessages []ai.Message
 }

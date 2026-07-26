@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/yuanbohan/pia/internal/agent"
@@ -65,17 +66,41 @@ func newConversation(config conversationConfig) (*conversation, error) {
 	}, nil
 }
 
-func (c *conversation) run(ctx context.Context, userInput string) ([]ai.Message, error) {
+func (c *conversation) run(ctx context.Context, userInput string) (history []ai.Message, err error) {
 	if history, err := c.beginRun(ctx); err != nil {
 		return history, err
 	}
+	defer func() {
+		history = c.finishRun()
+	}()
 
 	if err := c.compactBeforeRun(ctx, userInput); err != nil {
-		return c.rejectRun(), err
+		return nil, err
 	}
 
 	result, runErr := c.core.Run(ctx, userInput)
-	return c.commitRun(result.NewMessages), runErr
+	historyStart := c.appendRun(result.NewMessages)
+	if runErr == nil || !c.compaction.enabled() {
+		return nil, runErr
+	}
+
+	terminalOffset, ok := recoverableOverflowTerminal(result.NewMessages)
+	if !ok {
+		return nil, runErr
+	}
+	if err := c.compactAfterOverflow(ctx, historyStart+terminalOffset); err != nil {
+		return nil, fmt.Errorf("coding: recover context overflow: %w", err)
+	}
+
+	continuation, continueErr := c.core.Continue(ctx)
+	c.appendRun(continuation.NewMessages)
+	if continueErr != nil {
+		if _, overflowedAgain := recoverableOverflowTerminal(continuation.NewMessages); overflowedAgain {
+			return nil, fmt.Errorf("coding: context overflow recovery exhausted: %w", continueErr)
+		}
+		return nil, fmt.Errorf("coding: continue after context overflow: %w", continueErr)
+	}
+	return nil, nil
 }
 
 func (c *conversation) beginRun(ctx context.Context) ([]ai.Message, error) {
@@ -92,25 +117,24 @@ func (c *conversation) beginRun(ctx context.Context) ([]ai.Message, error) {
 	return nil, nil
 }
 
-func (c *conversation) rejectRun() []ai.Message {
+func (c *conversation) appendRun(newMessages []ai.Message) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	history := ai.CloneMessages(c.history)
-	c.active = false
-	return history
-}
-
-func (c *conversation) commitRun(newMessages []ai.Message) []ai.Message {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	start := len(c.history)
 	// Core Agent already returned an ownership-independent delta, and this
 	// owner never exposes it directly. Append without a redundant second clone.
 	c.history = append(c.history, newMessages...)
+	return start
+}
+
+func (c *conversation) finishRun() []ai.Message {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	history := ai.CloneMessages(c.history)
-	// Keep the guard active through both commit and snapshot so another Run
-	// cannot overtake this settlement in the complete history.
+	// Keep the guard active through every intermediate commit and this final
+	// snapshot so another user advance cannot overtake recovery settlement.
 	c.active = false
 	return history
 }
@@ -122,6 +146,7 @@ func (c *conversation) compactionSnapshot() ([]ai.Message, *compactionProjection
 	var projection *compactionProjection
 	if c.projection != nil {
 		copy := *c.projection
+		copy.Excluded = slices.Clone(c.projection.Excluded)
 		projection = &copy
 	}
 	return ai.CloneMessages(c.history), projection
@@ -131,5 +156,6 @@ func (c *conversation) publishProjection(projection compactionProjection) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	copy := projection
+	copy.Excluded = slices.Clone(projection.Excluded)
 	c.projection = &copy
 }

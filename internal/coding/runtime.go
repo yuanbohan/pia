@@ -106,8 +106,9 @@ func runWithWorkspaceOperations(
 		return result, fmt.Errorf("coding: open workspace: %w", err)
 	}
 	// The workspace root is borrowed by every file tool. Close it only after
-	// Agent.Run has settled all Provider and tool work, and preserve both the
-	// primary failure and any descriptor-cleanup failure for diagnosis.
+	// the Conversation advance has settled all Provider and tool work, and
+	// preserve both the primary failure and any descriptor-cleanup failure for
+	// diagnosis.
 	defer func() {
 		if closeErr := closeWorkspace(workspace); closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("coding: close workspace: %w", closeErr))
