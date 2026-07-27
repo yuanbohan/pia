@@ -4,25 +4,38 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 ## Relationships
 
+The main runtime terms are different kinds of things rather than peer controllers:
+
+- **Session** is the long-lived lifecycle object.
+- **Conversation** is the interaction state owned inside a Session.
+- **Core Agent** is the execution engine a Session calls.
+- **User advance** is one transient operation performed by a Session, not another long-lived object.
+
 ```text
 Pia                 ── product-assembles ──> Coding Agent
 Pia                 ── owns as a core capability ──> Skills
-Coding Agent
-├── configures and hosts the Core Agent
-├── provides coding-specific workspace, prompt, tools, and model choices
-└── coordinates a Conversation Owner
+Coding Agent        ── hosts ──> Session
 
-Conversation Owner ── owns ──> Conversation History
-Core Agent          ── owns ──> Working Context
-Core Agent          ── runs ──> Agent Loop
-Run                 ── contains ──> one or more Turns
-Run                 ── settles with ──> Run Message Delta
-Conversation Owner  ── commits ──> Run Message Delta
-Working Context     ── copied into ──> Provider Request Snapshot
-Session             ── may persist and extend ──> Conversation
+Session                         long-lived lifecycle authority
+├── owns ─────────────────────> Conversation state
+├── calls ────────────────────> Core Agent
+├── performs ─────────────────> one user advance at a time
+└── records committed facts ──> Session Journal
+
+Conversation state
+├── contains ─────────────────> Conversation History
+└── determines ───────────────> current model-view projection
+
+Core Agent          ── owns today ──> Working Context
+Core Agent          ── runs ────────> Agent Loop
+Run                 ── contains ────> one or more Turns
+Run                 ── settles with ─> Run Message Delta
+Current Conversation role,
+later Session       ── commits ─────> Run Message Delta
+Working Context     ── copied into ─> Provider Request Snapshot
 ```
 
-The ownership arrows describe semantic authority, not a required Go struct layout. A later implementation may compose these responsibilities without giving every concept its own package or exported type.
+The ownership arrows describe semantic authority, not a required Go struct layout. In particular, a user advance does not require a durable struct or package, Conversation state need not become an independent active object, and “Conversation Owner” remains a role. Before formal Session support exists, the current coding-owned role temporarily coordinates complete History, projection, compaction, recovery, and the outer active guard. A formal Session must absorb overlapping outer lifecycle responsibility rather than wrap that role with a second `busy` state.
 
 ## Agent System
 
@@ -66,7 +79,9 @@ An input-started Run delta includes its initiating input. An input-free continua
 
 The reusable runtime component that executes the Agent Loop, owns the replaceable Working Context for one Conversation, and allows at most one active run to mutate that context at a time.
 
-The Core Agent receives a Provider, system prompt, and tool definitions as dependencies, but it does not construct coding-specific prompts, choose workspace policy, persist Sessions, own the complete Conversation History, or implement a TUI. “Core” describes this lower-level responsibility boundary; it does not mean a second agent process or model.
+The simplest mental model is an execution engine: a Session invokes it one or more times while handling a user advance. The Core Agent receives a Provider, system prompt, and tool definitions as dependencies, but it does not construct coding-specific prompts, choose workspace policy, persist Sessions, own the complete Conversation History, or implement a TUI. “Core” describes this lower-level responsibility boundary; it does not mean a second agent process, model, or user-visible lifecycle controller.
+
+The current stateful Core owns Working Context and its narrow active-execution guard. When formal Session lifecycle is designed, this boundary must be re-evaluated against real restore and safe-point requirements: either the narrow invariant remains independently justified, or Session assumes more persistent context ownership. A new Session-level `busy` flag alone is not evidence for retaining duplicate lifecycle state.
 
 ### Coding Agent
 
@@ -90,13 +105,15 @@ The current minimal project-local Skill subset: one direct child directory under
 
 One logical, continuable interaction lineage between a user and the Coding Agent, spanning sequential user inputs and all accepted assistant and tool-result messages produced from them.
 
-Compaction does not create a new Conversation. Provider credentials, workspace file contents, tool implementations, request-local copies, traces, and UI rendering state are not Conversation contents merely because they participate in running it.
+Conversation is primarily a state/data concept inside a Session, not a peer lifecycle controller. Compaction does not create a new Conversation. Provider credentials, workspace file contents, tool implementations, request-local copies, traces, queues, cancellation controls, and UI rendering state are not Conversation contents merely because they participate in running it.
 
 ### Conversation Owner
 
 The runtime responsibility that owns a Conversation’s complete ordered history and coordinates it with the Core Agent’s replaceable Working Context.
 
-Conversation Owner names an ownership role, not a requirement for a type or package with that exact name. The current minimal owner accepts at most one active coding user advance per Conversation and rejects concurrent attempts rather than silently queueing them. An overflow recovery may coordinate one input-started Core Run and one later input-free Core continuation while retaining that same outer guard; this does not prevent different Conversations or parallel-safe tools within one Run from executing concurrently. Its minimal in-memory form does not imply Session persistence, branches, event subscriptions, or a public API.
+Conversation Owner names an ownership role, not a requirement for a type or package with that exact name and not a permanent controller beside Session. The current minimal owner accepts at most one active user advance per Conversation and rejects concurrent attempts rather than silently queueing them. An overflow recovery may coordinate one input-started Core Run and one later input-free Core continuation while retaining that same outer guard; this does not prevent different Conversations or parallel-safe tools within one Run from executing concurrently.
+
+Once a formal Session exclusively owns one Conversation and all user inputs enter through that Session, Session is the intended outer lifecycle authority. It should absorb the current owner’s overlapping active/busy responsibility; Conversation state should not independently acquire queue, cancel, close, or persistence lifecycle. The minimal in-memory owner does not itself imply Session identity, branches, event subscriptions, or a public API.
 
 ### Message
 
@@ -132,16 +149,53 @@ The process of replacing older Working Context content with a summary plus a ret
 
 Compaction is not arbitrary truncation: the resulting Working Context must remain sufficient to continue the task and must preserve message and tool-call protocol integrity. Internal summary requests and their terminals are not Conversation Messages.
 
+### Semantic Event
+
+An ordered, ephemeral observation that a meaningful runtime fact occurred, such as Run acceptance, a terminal assistant message, tool execution, compaction, or final settlement. Cancellation-specific request and settlement observations are deferred until Session control and an `Esc` interaction exist.
+
+Semantic Events let a terminal host or another observer follow work while it is happening. They are not authoritative Conversation Messages or durable Session records, and an observer does not gain ownership of Agent Loop, Conversation History, Working Context, or lifecycle state by consuming them.
+
+The current internal event payload carries only bounded semantic state such as fixed modes/outcomes, message role, and a tool call's turn-local source index plus a tool-owned bounded safe summary. That summary may identify the operator-visible target action, such as a path or bounded command, but the event does not copy message text, raw tool arguments/results, raw errors, model-generated call IDs, or mutable authoritative objects. A future consumer may justify an additional bounded projection, but live events are not a second History or trace.
+
+### User Advance
+
+One transient Session operation that accepts a user input and coordinates everything required to settle that submission: optional pre-Run compaction, one input-started Core Run, bounded overflow recovery with an optional input-free continuation, Conversation History commits, and the final result snapshot.
+
+“Advance” is a precise operation boundary used to distinguish the complete user request from an internal Core Run. It is not a fourth long-lived runtime object, does not require its own owner or package, and does not by itself add another lock or persisted state machine. Before formal Session support exists, the coding-owned Conversation role performs this operation; afterward it belongs to Session.
+
+### Steering
+
+User input accepted while a Session execution is active and intended to join that same ongoing advance at a defined safe boundary after current tool work settles.
+
+Steering does not start a concurrent Core Run, preempt an in-flight Provider or tool call, or mean cancellation. Its exact safe-boundary behavior remains subject to source calibration when the corresponding course starts.
+
+### Follow-up
+
+User input accepted while a Session execution is active but reserved for a later sequential user advance after the current execution reaches an eligible settlement boundary.
+
+A pending Follow-up is distinct from Steering and keeps the Session from reporting true idle until it is either consumed or explicitly discarded by a closing control operation.
+
+### Session Journal
+
+A versioned durable record of committed Session facts used to validate and rebuild supported Session state across process restarts.
+
+The Session Journal may contain Session identity and workspace metadata, settled Conversation changes, lifecycle facts, and committed compaction records. It is not the live Semantic Event stream, a copy of internal Provider exchanges, or ordinary Conversation History with control records disguised as Messages.
+
 ### Session
 
-A lifecycle and persistence envelope around a Conversation that may add durable identity, stored entries, model settings, compaction records, branches, timestamps, and resume behavior.
+A lifecycle and persistence envelope around a Conversation, and the intended single outer controller for user operations on that Conversation. It may add durable identity, workspace binding, stored entries, model settings, compaction records, branches, timestamps, queue/cancel/close controls, and resume behavior.
 
-A Session is broader than Conversation History and is not synonymous with Working Context. Pia can establish the Conversation ownership boundary without implementing a persistent Session.
+A Session is broader than Conversation History and is not synonymous with Working Context. It owns Conversation state, invokes the Core execution engine, and performs user advances; those three terms are not peer lifecycle controllers. Pia can establish the Conversation ownership boundary without implementing a persistent Session.
 
-A future durable compaction record belongs to the Session journal as control/checkpoint state, alongside but distinct from message entries. It is not a Conversation Message or a live event: the latest committed record can rebuild the Working Context projection, while failed or canceled settled records remain observable without changing that model view.
+When Session becomes the exclusive entrypoint for one Conversation, it must become the only outer `busy`/queue/cancel/close authority. It must not merely wrap a Conversation owner and Core Agent while all three retain semantically overlapping lifecycle state. A narrow Core execution invariant may remain only when its separate owner, acceptance/release points, and failure semantics are independently justified.
+
+A workspace binding, when owned by a Session, is durable Session metadata rather than a Conversation Message or Working Context content. The host process's launch directory is not implicitly part of the Conversation and must not silently replace that binding during resume.
+
+A future durable compaction record belongs to the Session Journal as control/checkpoint state, alongside but distinct from message entries. It is not a Conversation Message or a live event: the latest committed record can rebuild the Working Context projection, while failed or canceled settled records remain observable without changing that model view.
 
 ## Flagged Ambiguities
 
 - “Agent” had been used for both the generic execution runtime and the complete coding application; use Core Agent and Coding Agent when the distinction matters.
 - “Transcript” had been used for both complete history and current model-visible messages; use Conversation History and Working Context for those distinct responsibilities.
 - “Session” had been used as shorthand for a message list; a Session is the broader lifecycle and persistence envelope, not the list sent to a model.
+- Session, Conversation, Core Agent, and User Advance had been presented as if they were peer components. Treat them respectively as the long-lived lifecycle object, its interaction data, its execution engine, and one transient operation.

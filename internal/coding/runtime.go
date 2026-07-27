@@ -16,6 +16,7 @@ import (
 	readtool "github.com/yuanbohan/pia/internal/coding/tools/read"
 	skilltool "github.com/yuanbohan/pia/internal/coding/tools/skill"
 	writetool "github.com/yuanbohan/pia/internal/coding/tools/write"
+	"github.com/yuanbohan/pia/internal/observation"
 )
 
 const (
@@ -41,6 +42,7 @@ type RunInput struct {
 	WorkspacePath string
 	Task          string
 	APIKey        string
+	Observer      observation.Observer
 }
 
 // ModelInfo is the non-credential product profile used for one coding Run.
@@ -138,6 +140,7 @@ func runWithWorkspaceOperations(
 		SystemPrompt:  prompt,
 		Tools:         tools,
 		RequestLimits: requestLimits,
+		Observer:      input.Observer,
 	})
 	if err != nil {
 		return result, fmt.Errorf("coding: create Agent: %w", err)
@@ -149,6 +152,7 @@ func runWithWorkspaceOperations(
 		Tools:         result.Tools,
 		RequestLimits: requestLimits,
 		Compaction:    productCompactionPolicy(),
+		Observer:      input.Observer,
 	})
 	if err != nil {
 		return result, err

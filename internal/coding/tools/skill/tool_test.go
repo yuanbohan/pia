@@ -48,6 +48,16 @@ func TestDefinitionExposesBoundedNameLookupAndParallelSafety(t *testing.T) {
 	var _ agent.Tool = tool
 }
 
+func TestDescribeInvocationReportsOnlySkillName(t *testing.T) {
+	tool := newTestTool(t, t.TempDir(), testEntry("review-go"))
+
+	if got, want := tool.DescribeInvocation(json.RawMessage(
+		`{"name":"review-go"}`,
+	)), "Skill review-go"; got != want {
+		t.Fatalf("DescribeInvocation() = %q, want %q", got, want)
+	}
+}
+
 func TestExecuteReturnsStructuredCurrentInstructionsWithoutDedupe(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSkill(t, directory, "review-go", "name: review-go\ndescription: Review.\n", "BODY_V1")

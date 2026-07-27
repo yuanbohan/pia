@@ -610,6 +610,117 @@
 - Delta：两者都返回 ownership-independent run-local `NewMessages`。Input-started Run 的 delta 从本次 user message开始；continuation 的 delta 从 acceptance 时的 Working Context 尾部开始，只包含随后新产生的 assistant/tool-result messages。
 - 外层术语：一次 coding user advance 通常协调一个 Core Run；Lesson 11 overflow recovery 可以在同一个 Conversation guard 内顺序协调一个 input-started Core Run 和一个 input-free Core Continue。这里不引入 Session、queue 或第二套 outcome type。
 
+### D83. 第三阶段首版 Session 固定绑定创建时的 workspace
+
+- 日期：2026-07-26
+- 当前判断：一个 Session 在创建时绑定一个 workspace root，并把该 binding 作为 durable Session metadata 保存。第三阶段的 `resume` 只表示重新加载已经 clean settled 的 Session：它从任何调用者 cwd 都重新打开记录的 workspace，再重建 History、compaction projection、Working Context 与可继续状态。调用者的进程 cwd 不是 Conversation 内容，也不能静默覆盖 Session workspace。
+- 不可用与改绑：记录的 workspace 不存在或不可访问时，resume 明确失败，不在当前目录或另一个项目中猜测性继续。首版不提供 relocate/rebind；未来本地 TUI 可以展示选择或说明，但 Session Runtime 不负责交互。仓库搬迁若成为真实需求，应先讨论显式 relocation、fork/new Session、journal transition 与安全校验，不能把“从另一个目录启动”偷偷解释为改绑。
+- 判断依据：workspace 决定 `read`/`write`/`edit` containment、bash 起始目录、相对路径解释、稳定 system prompt、project instructions、project-local Skills 和 Provider 数据外发边界。同一 History 若在另一个 workspace 静默恢复，可能读取或修改错误项目，并让 journal 无法唯一重建当时的运行环境。Pia 的长期入口是 Orchestrator/Gateway/IM，远程调用不存在可作为权威 Session binding 的本地启动 cwd；固定 binding 也符合当前 `internal/coding/runtime.go` 先打开一个 workspace，再组装 tools、prompt、Core Agent 与 Conversation 的所有权路径。
+- 对照证据：冻结 Pi 的 [`SessionHeader`](https://github.com/badlogic/pi-mono/blob/dcfe36c79702ec240b146c45f167ab75ecddd205/packages/coding-agent/src/core/session-manager.ts#L32-L39) 保存 `cwd`，其默认 Session storage 也由 cwd 派生。当前本机 Codex CLI `0.145.0` 采用更偏交互产品的策略：默认 picker 按当前 cwd [过滤](https://github.com/openai/codex/blob/25af12f7e61572b0bc18ddb1008be543b91519b0/codex-rs/tui/src/resume_picker.rs#L538-L550)，选中异目录 Session 且未配置偏好时再让用户在 recorded Session cwd 与 current cwd 之间[选择](https://github.com/openai/codex/blob/25af12f7e61572b0bc18ddb1008be543b91519b0/codex-rs/tui/src/session_resume.rs#L107-L165)。Pia 当前吸收“Session 必须记录 workspace、差异不能静默处理”的共同约束，但不把 Codex 的 TUI 选择策略下沉为 headless Session Runtime 契约。
+- 明确非目标：journal 不保存 Provider credentials，也不快照整个 workspace 内容；fixed binding 不承诺恢复时文件内容、Git branch 或未提交改动保持不变。本决定不设计 path wire schema、symlink normalization、repository fingerprint、worktree manager、跨主机映射、公共 resume API 或 UI。它是第三阶段规划期的可修订判断：durable journal/restore 开课时仍需重新核对冻结 Pi、当时 Codex/Pia 路径和真实 consumer；repo relocation、worktree、container/remote workspace 或 Orchestrator mapping 证据可以触发调整。
+
+### D84. 第三阶段优先完成单 Session 日常使用与 clean resume 主路径
+
+- 日期：2026-07-26
+- 路线纠正：D73 的九个 Session Runtime capability slots 是 Lesson 11 开始时的早期滚动假设。学习者随后明确要求先覆盖日常大部分工作，不让低概率边缘场景阻塞 Pia 进入真实 coding 使用。当前第三阶段因此收敛为七个阶段内 slots：semantic events、单 Session lifecycle、follow-up、steering、最小交互终端、durable journal、clean resume；只有最近的 semantic-events 课程继续固定为全局 Lesson 12，其余只固定阶段顺序，开课后再编号。
+- 教学顺序：Follow-up 当前排在 steering 前，先用 Session settlement boundary 建立 queue、pending 与 quiescence，再修改 active Core loop 的 post-tool safe boundary。这个顺序是可校准假设，不是要求实现提前共享 queue API；对应课程开课的冻结 Pi 与当前 Pia 路径若证明依赖相反或不可分割，必须在写代码前修订课程表。
+- 最小交互终端：第三阶段增加一个 non-full-screen local terminal host，消费 semantic events 并调用 Session controls，不把 UI 状态下沉给 Core Agent、Conversation 或 journal。Idle input 启动普通 user advance；active `Enter` 表示 steering，`Tab` 表示当前 execution 结束后的 follow-up，`Esc` 取消当前 execution 但保留 Session，`/exit` 在 active 时请求取消、等待既有 settlement 与 commit section 收敛、丢弃未消费的 steering/follow-up，再关闭 Session。Ctrl-C/Ctrl-D 不作为首版主产品控制；操作系统 signal/caller cancellation 仍可作为外部执行边界。
+- 可用性里程碑：完成最小交互终端后，Pia 应已经可以在一个进程中的一个 Session 内承担日常交互式 coding；durable journal 与 clean resume 再补上正常关闭后的跨进程连续性。完整 TUI 的主题、复杂布局、picker/history browser、完整 slash commands 与 polish 继续延后。
+- 持久化与恢复边界：Session journal 只保存 committed Session facts，并继续遵守 D80 的 event/history/compaction-record 分离和 D83 的 fixed workspace binding。第三阶段 resume 只接受 journal 能正面证明已 clean settled/closed 且没有 pending input 的 Session；没有这种证据、记录尾部损坏或 workspace 不可用时明确失败，不自动重放、不按当前 cwd rebind，也不声称已经恢复 interrupted work。
+- 明确延后：automatic Provider retry 等真实 Provider/transport failure distribution 出现后再单独设计；interrupted execution recovery、multi-Session instance isolation 与阶段并发验收移出第三阶段主路径。它们仍是长期产品所需候选能力，但不再是单 Session 日常使用和 clean resume 的前置条件。Goal Runtime、Orchestrator/Gateway/IM、公共 SDK、worktree/GitHub 与完整 TUI 继续保持外层后续方向。
+- 既有决定关系：本决定取代 D73 当前路线中的 Provider retry、interrupted recovery 与 concurrent-instance isolation 阶段归属，并把 D6/D73 的“完整 TUI 延后”细化为“第三阶段先做最小交互 host，完整 TUI 继续延后”。D6 的 UI 只做外层投影、D75 的 Session 候选唯一 lifecycle authority、D80 的 journal 归属和 D83 的 workspace binding 均保持不变。
+
+### D85. Lesson 12 使用单个同步只读 observer
+
+- 日期：2026-07-26
+- 决定：Lesson 12 由 composition 为当前 coding execution 安装至多一个同步只读 observer，不建设通用多订阅者 event bus、后台 event goroutine 或异步 queue。产生事实的 Core/coding owner 交付 ownership-independent、bounded semantic event；observer 只做 line projection，不拥有或修改 Agent Loop、Conversation History、Working Context、compaction、recovery 或 lifecycle state。
+- Settlement：事件交付按定义顺序发生，最后一条 event 的 observer 调用返回后，对应 Core Run 或 outer coding advance 才向调用方返回。这个边界只防止 return 之后出现 late events，不把 observer 变成 authoritative commit participant；具体 line-write failure 如何在 execution settle 后由 host 报告，继续在 Lesson 12 单独确认。
+- 并行与锁：observer 只从 coordinator 路径顺序调用，parallel tool workers 不并发进入 observer。Tool-settled events 可以按 coordinator 观察到的实际完成顺序交付，而 tool-result Messages 继续按模型 source order 提交。调用 observer 时不得持有 Agent/Conversation state mutex，也不向 observer 暴露 reentrant Run、wait、cancel 或 state mutation surface；首版因此不增加新的业务锁或 lifecycle state machine。
+- 取舍：同步 observer 若很慢或永不返回，会延迟 settlement。当前唯一真实 consumer 是进程内、有界输出的 line observer，这项已知限制比提前设计 queue capacity、backpressure/drop、close/drain、writer failure propagation 和 goroutine settlement 更小。未来出现网络 consumer、多个独立 subscribers、明确不可阻塞 producer 的 telemetry 或真实吞吐证据时，再重新评估异步 fan-out；不得仅因“事件通常是异步的”预建它。
+
+### D86. Observer 输出失败不改变 coding execution settlement
+
+- 日期：2026-07-26
+- 决定：首个 line-observer write failure 由 observer 本地记录，随后停止向同一失败 writer 渲染；已经接受的 Core Run 与 outer coding advance 继续按既有 Provider、tool、cancellation、History commit 和 final snapshot 契约完整结算。Observer failure 不回滚已发生事实、不删除 History、不把已执行 tool 伪装成失败，也不自动发起 cancellation。
+- Host 结果：execution settlement 后，host 单独报告 observer projection error；若 coding execution 同时失败，两项错误都必须保留而不是互相覆盖。Observer 的 first-write-error 只是 output adapter 的有界诊断状态，不是 Agent/Conversation lifecycle state，也不授权 observer 决定 recovery、retry 或下一步工作。默认 one-shot 的具体输出归属与 final rendering 顺序由 D87 补充。
+- 阻塞与 panic：同步 writer 永不返回仍按 D85 作为首版已知限制，不为它增加 timeout、后台 goroutine 或异步 queue。Observer 是仓库内已知实现；其 panic 视为程序错误，本课不增加通用 `recover` 层或把 panic 静默转换成普通 event failure。未来真实 plugin/extension boundary 若允许不可信 observer，再在该边界单独设计隔离。
+
+### D87. 默认 one-shot 将实时投影与最终结果分流
+
+- 日期：2026-07-26
+- 决定：Lesson 12 的默认 human-readable one-shot line observer 只向 `stderr` 写实时 semantic-event 状态；`stdout` 继续只承载成功 coding advance 的最终 assistant 文本。Observer 可以报告 terminal/advance 已 settled，但不得复制完整 final text。最终文本只能在 advance 与同步 observer 都 settlement 后由 `cmd/pia` 输出一次。
+- 失败顺序：observer 的 `stderr` writer 失败不阻止成功 advance 的 final text 继续尝试写入 `stdout`，随后 host 按 D86 报告 projection error；final-output write failure 也是独立 host output error，不能覆盖已有 coding 或 observer error。Coding advance 自身失败时保持当前命令语义：错误写入 `stderr`、退出非零，不把 error terminal 伪装成成功 stdout result。两个 OS streams 合并后的跨流相对顺序不作契约承诺。
+- 模式边界：该选择属于最外层 renderer，不改变 Core Agent、Conversation History、Working Context 或 semantic-event ownership。未来真实机器消费者可以引入显式 JSONL event mode，TUI 可以直接消费同一语义事件并自行管理终端；它们不与当前 human-readable stdout 契约混用。本课不增加 JSONL/TUI renderer，也不复制 Pi 的 process-wide stdout takeover；出现真实输出污染证据后再评估那层防护。
+- 依据：Codex `exec` 默认把 progress 写入 `stderr`、只把 final message 写入 `stdout`，`--json` 则把 `stdout` 切换为 JSONL events；冻结 Pi 的 text/json print modes 采用同样的 result/event 分离并额外接管意外 stdout；OpenCode `run` 的默认 projection 也把 UI/tool 状态写入 `stderr`、在 non-TTY 下把 final text 写入 `stdout`，显式 JSON format 则输出 raw events。Pia 采用该共同主路径，但不复制 OpenCode `--thinking` 可混入 stdout 的例外。
+
+### D88. 事实由对应责任产生并通过同一 observer 串行交付
+
+- 日期：2026-07-27
+- 概念边界：Session、Conversation、Core 与 user advance 不再表述为四个并列控制器。Session 是长期 outer lifecycle object，Conversation 是其交互数据，Core Agent 是执行引擎，user advance 是 Session 处理一次用户提交的短期操作。当前 coding-owned `conversation` 同时持有 History/projection 并临时协调 user advance；它是正式 Session 出现前的过渡性 owner，不成为事件 API 中的永久层级。D75 对未来 Session 吸收重叠 outer `active` 职责的要求保持不变。
+- 事实 owner：Core execution engine 在事实成立处产生 Core Run、Turn、terminal Message 与 tool execution observations；outer user-operation coordinator 产生 compaction、overflow recovery 与 user-advance settlement observations，并且是任何 History-commit observation 的唯一合法事实源。当前 outer producer 是 coding-owned `conversation`，未来换成 Session 时保留这些语义。外层不得在 Core 返回后从 `NewMessages`、History 或 trace 猜测并重建实时 Core 过程；D89 进一步决定当前不暴露独立 History-commit event。
+- 串行交付：两个 producer 使用 composition 安装的同一个 D85 同步 observer。Outer coordinator 同步调用 Core 的当前路径自然形成嵌套顺序，不增加中央 event controller、后台 serializer goroutine、跨运行 queue 或第二套 lifecycle。Observer 调用不得持有 owner state mutex，也不能 re-enter control APIs。
+- Parallel tools：parallel workers 不直接调用 observer。每个 worker 只向当前 stage 的 Core coordinator 交回一次 outcome；coordinator 按实际观察到的完成顺序交付 tool-settled observation，同时按模型 source order 保存并提交 tool-result Messages。该 completion handoff 有界于当前 stage、在 stage 返回前完全消费，没有独立 drop/backpressure/close policy、长期 goroutine 或 return 后的 late events，因此不构成 D85 所拒绝的异步 observer queue。
+- 结构复评：Lesson 12 不借事件实现重命名或重构当前 Go ownership。正式 Session lifecycle 开课时必须在增加 queue/cancel/close 前重新审查当前 `conversation` 与 Core guards；不得在两者外面机械叠加第三层同义 `busy`。Semantic event names 按稳定责任命名，使这次未来吸收不要求改写事件含义。
+
+### D89. 不暴露独立的 Conversation History commit event
+
+- 日期：2026-07-27
+- 内部语义：Core terminal Message settlement 与 Conversation History commit 仍是两个事实。前者在 Core 接受 terminal assistant 或 ordered tool-result Message 并更新 Working Context 时成立；后者只在 Core execution 返回后，由 outer user-operation coordinator 接管并追加完整 Run Message Delta 时成立。Terminal observation 不得声称 Message 已持久化或已经进入 complete History。
+- Live event 边界：Lesson 12 不为每次 Run delta 增加独立 History-commit event。Observer 可以看到 terminal Message、Core Run settlement、compaction/recovery 与最终 user-advance settlement；最终 advance-settled observation 保证本次操作需要的所有 History commits 和 final snapshot 已经完成。Overflow recovery 中，初次失败 Run 的 delta 必须先提交，随后才能观察到其 recovery compaction start，但中间不额外渲染 commit line。
+- 理由：当前 line observer、未来最小交互终端和本课测试都不需要在每个中间 Core execution commit 后启动外部动作。增加 commit event 会把内部 ownership handoff 提升成用户必须理解的 lifecycle，并与未来 durable journal append 容易混淆，却不增加当前控制能力。若以后出现明确需要逐 Run commit notification 的 plugin、replication 或 diagnostics consumer，再由 outer owner 增加有界 observation。
+- Durability：live terminal、Run 或 advance events 都不是 Session Journal 的恢复证据。未来 journal 课程必须以 crash-safe committed record 定义 durability，不能把已发出的 ephemeral event 当作 durable commit；该持久化事实也不要求回填为普通 Conversation Message。
+
+### D90. Core semantic events 收敛为 Run、Turn、Message 与 Tool 四族
+
+- 日期：2026-07-27
+- 事件集合：Lesson 12 的 Core execution engine 只产生 `run_started/run_settled`、`turn_started/turn_settled`、`message_accepted` 与 `tool_started/tool_settled` 四个 semantic families。这里的名称先固定业务语义；具体 Go representation 可以用一个 closed event union 或等价窄类型实现，不因此为每个名称建立 controller、package 或状态机。
+- Run 与 Turn：`run_started` 表示 input-started Run 或 input-free continuation 已通过 Core acceptance；input-started acceptance 同时已经接纳 user Message，随后可按逻辑顺序观察相应 `message_accepted`。`run_settled` 只在该 execution 启动的 Provider/tool work 和 terminal settlement 全部结束后交付。每次 Provider terminal assistant 及其引发的 tool executions/ordered results 构成一个 Turn；`turn_started` 位于 Provider request 前，`turn_settled` 位于该 terminal 与所有本 Turn tool-result Messages 接受后。一条 Run 可以包含多个 Turns。
+- Message：`message_accepted` 只报告完整 user、terminal assistant 或 tool-result Message 已进入 Core Working Context，不暴露 token/thinking/tool-call formation delta，也不声称 complete History 或 durable journal 已提交。Assistant observation 发生在 tools 启动前；parallel tool-result Message observations 在 stage outcomes 全部收集后继续按模型 source order 交付。
+- Tool：`tool_started` 与 `tool_settled` 观察一次模型请求的工具执行；不增加 partial-progress/tool-update event。Parallel completion 继续遵守 D88：settled observations 反映 coordinator 实际观察到的完成顺序，随后 tool-result Messages 恢复 source order。
+- 删减：不增加独立 Provider-call、message-start/update、tool-update、History-commit 或 generic error event。Provider request boundary由 Turn 表达；本课所有非成功 settlement 统一使用 `error` outcome，cancellation-specific observation 按 D94 延后。Semantic event 是否投影成 stderr line 与 event 是否存在分开决定，避免为了人类输出删掉后续真实 observer 需要的顺序事实，也避免 line renderer 重复 final text。
+
+### D91. Outer semantic events 只保留 Advance 与 Compaction 两族
+
+- 日期：2026-07-27
+- 事件集合：Lesson 12 的 outer user-operation coordinator 只产生 `advance_started/advance_settled` 与 `compaction_started/compaction_settled` 两个 semantic families。结合 D90，当前完整集合是 Advance、Compaction、Run、Turn、Message 与 Tool 六族；不再为 overflow recovery 建立第七个事件族或独立状态机。
+- Advance acceptance 与 settlement：concurrent-advance rejection 发生在 acceptance point 之前，因此不产生 `advance_started`。每个已接受 advance 在所有 Core executions、必要的 History commits、compaction/recovery work 与 final History snapshot 完成后恰好产生一次 `advance_settled`；其 `success/error` outcome 表示整个 user operation 的最终结论，不等同于其中任一 Core Run 的结论。既有 caller-context cancellation 若发生，在本课观察面暂时归入 generic `error`，不增加第三种 outcome。
+- Compaction：只有真正开始一次 compaction attempt 才产生 `compaction_started`，因此不增加 `compaction_skipped`。Start payload 以 `threshold` 或 `overflow` reason 区分正常阈值整理与错误后的恢复整理。`compaction_settled(success)` 只在新的 model-view projection 已通过既有 commit section 发布后成立；commit 前的任何非成功结算统一为 `error` 并保留旧 projection。本课不为取消到达 commit 前后的差异增加专用 event 状态；D79 的底层原子语义保持不变。
+- Recovery 表达：threshold 路径是 `advance_started -> compaction_started(reason=threshold) -> compaction_settled -> Core Run -> advance_settled`。Overflow recovery 路径是初次 Core `run_settled(error)`、随后 `compaction_started(reason=overflow)`、成功后 input-free continuation `run_started`，最后才 `advance_settled`。Core 不拥有 context-overflow classifier，因此不把 `context_overflow` 作为 Core Run outcome；outer compaction reason 与后续 continuation Run 的组合已经完整表达 recovery。第二次 overflow、recovery exhaustion 或 continuation failure 继续由该 Run 与最终 advance outcomes 表达。
+- 失败边界：observer write failure 继续遵守 D86，只影响 projection error 报告，不改变 advance、compaction 或 recovery 的业务结论。Bounded payload 与 error-text 边界由 D92 补充；具体 Go representation 与 line rendering 在本课后续讨论中确定。
+
+### D92. Semantic event payload 只携带有界状态与 tool-owned safe summary
+
+- 日期：2026-07-27
+- 最小字段：`advance_started` 与 `turn_started` 不需要 payload；对应 settled events 只携带 `success/error` outcome。`compaction_started/settled` 携带 `threshold/overflow` reason，settled 再携带 outcome。`run_started` 携带 `input/continuation` mode，`run_settled` 携带 outcome。`message_accepted` 只携带 role，以及 assistant 的固定 stop reason 或 tool result 的 `is_error` 等有界 role-specific state。`tool_started/settled` 携带本 Turn 内的 source-order index、复制且有界的 tool display name、tool-owned bounded safe summary，settled 再携带 outcome。既有 assistant `aborted` stop reason 仍可作为 Message 已接受的协议事实出现，但它不是本课新增的 settlement outcome。
+- Tool safe summary：当前 line observer 是已经成立的真实 consumer，因此不再把所有 tool detail 延后。每个 tool 只投影完成 operator progress line 所需的安全摘要：`read` 显示 path，`write`/`edit` 显示 path，`bash` 显示有界 command，`skill` 显示 skill name；不得把 write content、edit replacement、read result、bash output 或整份 raw JSON arguments 交给 observer。具体 Go hook 仍需在实现前的 package/structure review 中选择，但 summary ownership 必须留在理解该 tool schema 的责任一侧，不能让 generic line renderer 按 tool name 猜测并解码 raw arguments。
+- 不进入 event 的内容：不携带 user/assistant 正文、compaction summary、raw tool arguments/output、原始 model-generated ToolCall ID、原始 error text/chain、workspace identity、Provider/model identity、token usage，也不暴露 `ai.Message`、`json.RawMessage`、slice、map、`context.Context` 或其他权威/可变对象。Tool summary 中有意显示的相对/绝对 target path 或 bounded bash command 属于当前 operator-visible action，不因此授权 event 暴露文件内容、环境值或 Provider credentials。Observer 不能把 event 当成第二份 History、trace、Provider log 或 state handle。
+- 关联与 bounds：同一 terminal assistant 中的 tool calls 以小整数 source-order index 区分，因此两个同名 parallel tools 仍可配对 start/settled，而无需传播不可信且可能很长的 model call ID。Tool name 与 safe summary 都必须在 event construction 时独立复制并应用固定上限；renderer 还要转义换行、ANSI/control characters，保证一个 event 最多形成有界的一行。
+- 错误可见性：省略 raw error 不会删除权威错误。Run/advance error 仍通过原调用结果交给 host；Provider terminal error 仍保存在 assistant Message；tool call-local error 仍保存在 ToolResult Message；事后 trace 继续按自身策略投影诊断。默认 live line 只需报告哪项操作以 `error` 结算，不重复可能包含正文、主机细节或敏感数据的 error 内容。
+- 未来边界：Lesson 12 的 line observer 负责实时进度，one-shot final assistant 正文仍来自 settled advance result。若未来交互 TUI、JSONL 或外部 consumer 证明需要 terminal content、tool result previews、timestamps、durations、usage 或 stable cross-Session IDs，应在该真实 consumer 课程中增加相应有界 projection；不得预先把当前 internal event 变成公共或 durable wire schema。
+
+### D93. 默认 line observer 显示动作开始，只为异常追加 settlement line
+
+- 日期：2026-07-27
+- 源码校准：本地 Codex `0fb559f0` 的 TUI 把相邻 read-shaped commands 合并、去重为一个可更新的 `Exploring/Explored` cell，不为每个 read 追加 completed；其非交互 `codex exec` 则是另一套 append-only start/completion renderer。本地 OpenCode `cb562b2c` TUI 为每个 read 保留一项 spinner/完成态而不写 completed，`run` 对普通 read 主要在完成时输出单行。本课冻结 Pi `dcfe36c7` 也以每个 tool-call component 的 pending/success/error visual state 表达结算，成功 read 默认不展开结果；text print mode 只输出 final response。这些证据共同表明 semantic start/end events 不应机械变成两条永久文本。
+- 默认 projection：Lesson 12 的 human-readable append-only observer 在 `tool_started` 时输出一条 `pia: <safe summary>`，成功 `tool_settled` 不再输出；tool error 输出一条同 summary 的 `failed` line。Compaction 同样只在 start 时报告 threshold/overflow action，成功 settlement 保持安静，error 则追加 failed line。本课不增加 cancellation-specific line。Run、Turn、Message 与正常 Advance events 仍交付 observer，但默认不渲染；coding advance 自身 error 继续由 settled host error path 报告。
+- 噪声边界：不输出通用 `pia: working` 或 `pia: completed`，不增加时间戳、duration、颜色、spinner、carriage-return overwrite 或其他 terminal control。没有 tool/compaction 的普通成功 one-shot 可以在 final stdout 前完全没有 progress stderr；这不是缺失 event，而是 renderer 选择。
+- 聚合边界：Lesson 12 不复制 Codex 的 read coalescing。Codex 的效果依赖可变 TUI cell 与 display-grouping state；在当前 append-only line renderer 中实现等价效果，需要等待一组 calls、识别 group boundary 或把 scheduler-stage metadata 提升进 payload。当前没有足够收益引入这些状态。未来最小交互终端可以直接消费既有 per-tool events，动态合并相邻 reads、更新 `Exploring/Explored` 状态，而不改变 Core tool settlement contract。
+
+### D94. Lesson 12 不新增 cancellation observation
+
+- 日期：2026-07-27
+- 当前收窄：Lesson 12 不增加 `cancel_requested` event、`aborted` settlement outcome、cancellation-specific line、监听 `ctx.Done()` 的 observer goroutine 或 cancellation-specific event tests。所有新 settled events 只有 `success/error`；既有 caller-context cancellation 若进入当前观察路径，临时按 generic `error` 投影。
+- 保留语义：这项删减不修改 D21、D30、D33 与 D79 已实现的 cancellation、tool-call closure 和 compaction commit semantics。Core 仍返回可识别的 context cause，accepted Run 仍保留既有 aborted assistant 与必要的 not-executed results，已启动工作仍必须收敛，commit 后已经发布的合法 projection 仍不回滚。`message_accepted` 可以报告既有 assistant `stop_reason=aborted`，因为这是 Message 协议事实；它不等同于为 Run、Turn、Tool、Compaction 或 Advance 新增 aborted outcome。
+- 延后理由：当前 one-shot caller cancellation 只有外部 context/signal，没有 Session-owned `Cancel()` 或 TUI `Esc` 这个真实控制面。现在区分“取消请求已接收”“正在收敛”“最终已取消”会迫使本课预建 request event、监听 lifecycle 与 UI 文案，却没有当前 consumer 使用。正式 Session 与最小交互终端出现后，再共同定义 `Esc` request、`Canceling` 与真正 `Canceled` settlement、follow-up/steering/close 交互及相应测试。
+
+### D95. Semantic events 使用 internal value union 与 tool-owned description hook
+
+- 日期：2026-07-27
+- Representation 与 package：Lesson 12 在 `internal/observation` 定义一个由 Advance、Compaction、Run、Turn、Message 和 Tool 六种 value types 组成的 closed event union，以及 nil-safe 同步 `Observer func(Event)`。该 package 是内部 execution observation vocabulary，不是公共 SDK、durable journal schema 或 network wire contract；它只依赖既有 `ai.StopReason` 这一项固定协议枚举，不拥有 Agent、Conversation 或 Session state。
+- Payload bounds：没有正文的事件只携带固定 enum、bool 和 source index。Tool display name 与 safe summary 在 event construction 时独立复制并分别限制为 64/512 UTF-8 bytes，截断带可见 marker；line renderer 继续转义控制字符。当前 `success/error` 映射由 observation package 统一提供，D94 延后的 cancellation distinction 不散落到 Core 和 coding producers。
+- Tool hook：`agent.Tool` 增加同步、无副作用的 `DescribeInvocation(json.RawMessage) string`。它由理解 schema 和敏感字段的 concrete tool 实现，只返回 operator-safe identity projection；generic Agent/renderer 不按 tool name 解码 raw JSON。没有 observer 时 Agent 不调用该 hook，parallel stage 的 descriptions 也由 coordinator 串行取得，workers 只执行 `Execute`。
+- Wiring 与 ownership：`agent.Config` 和 internal `coding.RunInput` 接受同一种 observer；composition 把同一实例交给 Core 与 outer coordinator。Core settlement 与 outer settlement 的 observer 调用都发生在各自 active guard 释放前且不持有 state mutex。`cmd/pia` 安装一个已知 line observer，observer error 留在 host output path，不进入 event、History、Working Context 或 trace。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -718,3 +829,17 @@
 - 2026-07-26：学习者确认 Lesson 11 先把 overflow classifier 放在 coding private policy，并要求明确标注这是当前阶段的位置。D81 固定窄 matcher、误判排除和代码 TODO 的复评触发条件；D82 同步收敛 Core Run/Continue 与 coding user advance 的术语。
 - 2026-07-26：Lesson 11 按 D73–D82 完成实现与主线程多视角审查：Core input-free continuation、tool-call-free explicit-overflow classification、absolute History exclusions、forced compaction、两段提交、同步 model-view commit section 与每次 accepted user advance 一次自动 recovery 均有确定性测试。审查补齐了 continuation Working Context 中间 `nil` message 的拒绝、带 overflow 文案的 5xx 负例，以及 negative evidence 与 positive evidence 共享 normalization 的回归测试；`make check` 与 `go test -race ./...` 全部通过，课程进入待理解确认且尚未提交。
 - 2026-07-26：学习者确认理解 Lesson 11，并明确要求直接提交到 `origin/main`。Lesson 11 与第二阶段至此完成；接下来先讨论和校准第三阶段课程系列，不因此自动开始 Lesson 12。
+- 2026-07-26：第三阶段规划讨论把 `resume` 收窄为 clean settled Session 的重新加载，并暂定一个 Session 固定绑定创建时的 workspace。D83 记录 durable workspace metadata、原路径不可用时失败、禁止按调用者 cwd 静默 rebind 的理由，以及 repo relocation、worktree、跨主机和真实 TUI/Orchestrator consumer 出现后的强制复评条件。
+- 2026-07-26：学习者确认第三阶段优先完成单 Session 日常使用主路径。D84 将课程重排为 events、lifecycle、follow-up、steering、最小交互终端、journal 与 clean resume，固定 `Enter`/`Tab`/`Esc`/`/exit` 产品语义，并把 Provider retry、interrupted recovery、multi-Session isolation 与完整 TUI 移到真实使用证据之后。
+- 2026-07-26：Lesson 12 开课校准确认 Pi core event、coding `agent_settled` 与 Pia outer advance 是不同边界。学习者接受 D85 的单个同步只读 observer：交付纳入 settlement，但 observer 不持有业务锁、不能 re-entry，也不提前建设 event bus 或异步 queue。
+- 2026-07-26：学习者确认 D86 的 observer failure 边界：首个 write error 停止后续渲染但不取消或回滚 coding work；execution 完整结算后由 host 报告 projection failure，内部 observer panic 不增加通用 recovery layer。
+- 2026-07-27：学习者将 Lesson 12 的 cancellation observation 延后到 Session/`Esc` 控制面；本课 settled outcome 收窄为 `success/error`，不增加取消请求事件、专用 line 或专用 event tests，既有底层 cancellation 语义保持不变。
+- 2026-07-26：对照 Codex `exec`、OpenCode `run` 与冻结 Pi print/json modes 后，学习者确认 D87：默认 one-shot events 写入 stderr、成功 final text 独占 stdout；显式 JSONL 与 TUI renderer 等待真实消费者。
+- 2026-07-27：学习者要求把 Session、Conversation、Core 与 advance 从四个并列大概念收敛为长期对象、交互数据、执行引擎与短期操作，并确认 D88：事实由对应 execution/outer-operation owner 产生，经同一个同步 observer 串行交付；当前 `conversation` 不被固化成永久事件层。
+- 2026-07-27：学习者确认 D89：Core terminal settlement 与 History commit 内部保持可区分，但 Lesson 12 不暴露独立 commit event；最终 user-advance settlement 对外保证本次所需 History commits 已完成，未来 journal durability 使用独立持久化协议。
+- 2026-07-27：学习者确认 D90 的 Core 最小事件集合：Run、Turn、complete Message 与 Tool 四族；formation/progress、Provider-call、generic error 和 History-commit 不独立成事件，parallel completion 与 source-ordered Message 接受继续分开。
+- 2026-07-27：学习者确认 D91 的 outer 最小事件集合：只增加 Advance 与 Compaction 两族；overflow recovery 由 `reason=overflow` 的 compaction 和 input-free continuation Run 组合表达，不建立 Recovery 事件族或 `compaction_skipped`。
+- 2026-07-27：学习者确认 D92 的最小 payload，并在核对 Codex/OpenCode/Pi renderer 后补充真实 line consumer 所需的 tool-owned bounded safe summary；events 仍不复制 Message 正文、raw tool arguments/results、原始 call ID 或 error chain。
+- 2026-07-27：学习者确认 D93：默认 append-only line observer 只在 tool/compaction 开始时输出 safe summary，成功 settlement 保持安静，error 才追加失败行；不输出通用 working/completed，也不在本课实现 Codex 式动态 read 聚合。
+- 2026-07-27：Lesson 12 按 D85–D95 完成测试先行实现、简化与主线程多视角审查：internal value events、同一个同步 observer、Core/outer ownership、tool-owned safe summary、parallel completion handoff、compaction publish boundary、append-only stderr projection 和 observer failure 均有确定性覆盖；`make check` 与 `go test -race ./...` 全部通过。课程进入待理解确认且尚未提交。
+- 2026-07-27：学习者明确要求把 Lesson 12 直接提交并推送到 `origin/main`。课程状态更新为已提交；下一课不会因此自动开始。

@@ -63,6 +63,18 @@ func (w *Tool) Definition() agent.ToolDefinition {
 	}
 }
 
+// DescribeInvocation reports only write's target path. It deliberately avoids
+// decoding or copying the model-provided file content.
+func (w *Tool) DescribeInvocation(rawArguments json.RawMessage) string {
+	var display struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rawArguments, &display); err != nil || display.Path == "" {
+		return "Write"
+	}
+	return "Write " + display.Path
+}
+
 // Execute validates one model invocation and commits complete content without
 // exposing a partially written target path.
 func (w *Tool) Execute(ctx context.Context, rawArguments json.RawMessage) (string, error) {

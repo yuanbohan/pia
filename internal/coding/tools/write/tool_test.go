@@ -59,6 +59,21 @@ func TestWriteDefinition(t *testing.T) {
 	var _ agent.Tool = write
 }
 
+func TestDescribeInvocationOmitsWriteContent(t *testing.T) {
+	t.Parallel()
+
+	tool := newTool(t, t.TempDir())
+	got := tool.DescribeInvocation(json.RawMessage(
+		`{"path":"notes.txt","content":"secret replacement body"}`,
+	))
+	if got != "Write notes.txt" {
+		t.Fatalf("DescribeInvocation() = %q, want target path", got)
+	}
+	if strings.Contains(got, "secret") {
+		t.Fatalf("DescribeInvocation() = %q, want no file content", got)
+	}
+}
+
 func TestNewWriteRejectsNilRoot(t *testing.T) {
 	t.Parallel()
 

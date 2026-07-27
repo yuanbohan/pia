@@ -43,6 +43,18 @@ func TestDefinitionExposesCommandAndTimeoutSchema(t *testing.T) {
 	}
 }
 
+func TestDescribeInvocationReportsCommandWithoutTimeoutMetadata(t *testing.T) {
+	t.Parallel()
+
+	tool := newTestTool(t, t.TempDir())
+	got := tool.DescribeInvocation(json.RawMessage(
+		`{"command":"go test ./...","timeout":12}`,
+	))
+	if got != "Bash go test ./..." {
+		t.Fatalf("DescribeInvocation() = %q, want command only", got)
+	}
+}
+
 func TestNewValidatesConfiguration(t *testing.T) {
 	t.Parallel()
 

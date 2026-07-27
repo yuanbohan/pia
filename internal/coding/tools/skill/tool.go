@@ -82,6 +82,15 @@ func (t *Tool) Definition() agent.ToolDefinition {
 	}
 }
 
+// DescribeInvocation reports only the catalog identity requested by the model.
+func (t *Tool) DescribeInvocation(rawArguments json.RawMessage) string {
+	input, err := decodeArguments(rawArguments)
+	if err != nil {
+		return "Skill"
+	}
+	return "Skill " + input.Name
+}
+
 // Execute returns one full structured result or one call-local error. It never
 // returns a truncated preview or consults activation/cache state.
 func (t *Tool) Execute(ctx context.Context, rawArguments json.RawMessage) (string, error) {

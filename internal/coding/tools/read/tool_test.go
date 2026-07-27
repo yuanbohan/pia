@@ -62,6 +62,20 @@ func TestReadDefinition(t *testing.T) {
 	var _ agent.Tool = read
 }
 
+func TestDescribeInvocationReportsOnlyReadTarget(t *testing.T) {
+	t.Parallel()
+
+	tool := newTool(t, t.TempDir())
+	if got, want := tool.DescribeInvocation(json.RawMessage(
+		`{"path":"internal/agent/loop.go","offset":20,"limit":5}`,
+	)), "Read internal/agent/loop.go"; got != want {
+		t.Fatalf("DescribeInvocation() = %q, want %q", got, want)
+	}
+	if got, want := tool.DescribeInvocation(json.RawMessage(`{"path":`)), "Read"; got != want {
+		t.Fatalf("invalid DescribeInvocation() = %q, want %q", got, want)
+	}
+}
+
 func TestNewReadRejectsNilRoot(t *testing.T) {
 	t.Parallel()
 

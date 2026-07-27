@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/observation"
 )
 
 // ErrRunActive means another Agent Loop execution already owns this Agent's
@@ -19,6 +20,7 @@ type Config struct {
 	SystemPrompt  string
 	Tools         []Tool
 	RequestLimits ai.RequestLimits
+	Observer      observation.Observer
 }
 
 // RunResult contains the ownership-independent messages accepted by one Agent
@@ -38,6 +40,7 @@ type Agent struct {
 	toolSchemas    []ai.ToolSchema
 	workingContext []ai.Message
 	requestLimits  ai.RequestLimits
+	observer       observation.Observer
 }
 
 // New constructs an Agent with an empty Working Context.
@@ -58,5 +61,6 @@ func New(config Config) (*Agent, error) {
 		tools:         tools,
 		toolSchemas:   toolSchemas,
 		requestLimits: config.RequestLimits,
+		observer:      config.Observer,
 	}, nil
 }

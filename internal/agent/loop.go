@@ -7,31 +7,55 @@ import (
 	"io"
 
 	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/observation"
 )
 
 // Run appends one user input and continues Provider turns until the model no
 // longer requests tools or the Run reaches a Provider/cancellation failure.
-func (a *Agent) Run(ctx context.Context, userInput string) (RunResult, error) {
+func (a *Agent) Run(ctx context.Context, userInput string) (result RunResult, err error) {
 	runStart, err := a.beginRun(ctx, userInput)
 	if err != nil {
 		return RunResult{}, err
 	}
+	defer a.endRun()
+
+	a.observer.Observe(observation.Run{
+		Phase: observation.PhaseStarted,
+		Mode:  observation.RunModeInput,
+	})
+	a.observer.Observe(observation.Message{Role: observation.MessageRoleUser})
+	defer func() {
+		a.observer.Observe(observation.Run{
+			Phase:   observation.PhaseSettled,
+			Outcome: observation.OutcomeFromError(err),
+		})
+	}()
 	return a.executeRun(ctx, runStart)
 }
 
 // Continue resumes Provider turns from an existing user or paired tool-result
 // tail without appending another user message.
-func (a *Agent) Continue(ctx context.Context) (RunResult, error) {
+func (a *Agent) Continue(ctx context.Context) (result RunResult, err error) {
 	runStart, err := a.beginContinue(ctx)
 	if err != nil {
 		return RunResult{}, err
 	}
+	defer a.endRun()
+
+	a.observer.Observe(observation.Run{
+		Phase: observation.PhaseStarted,
+		Mode:  observation.RunModeContinuation,
+	})
+	defer func() {
+		a.observer.Observe(observation.Run{
+			Phase:   observation.PhaseSettled,
+			Outcome: observation.OutcomeFromError(err),
+		})
+	}()
 	return a.executeRun(ctx, runStart)
 }
 
 func (a *Agent) executeRun(ctx context.Context, runStart int) (RunResult, error) {
-	defer a.endRun()
-
 	continuingAfterTools := false
 	for {
 		if continuingAfterTools {
@@ -40,18 +64,30 @@ func (a *Agent) executeRun(ctx context.Context, runStart int) (RunResult, error)
 			}
 		}
 
+		a.observer.Observe(observation.Turn{Phase: observation.PhaseStarted})
 		request := a.requestSnapshot()
 		message, turnErr := receiveAssistant(ctx, a.provider.Stream(ctx, request))
 		a.appendAssistant(message)
+		a.observeAssistant(message)
 		calls := toolCalls(message)
 		if turnErr != nil {
 			if len(calls) > 0 {
-				a.appendToolResults(failedTurnToolResults(calls, message.StopReason))
+				results := failedTurnToolResults(calls, message.StopReason)
+				a.appendToolResults(results)
+				a.observeToolResultMessages(results)
 			}
+			a.observer.Observe(observation.Turn{
+				Phase:   observation.PhaseSettled,
+				Outcome: observation.OutcomeError,
+			})
 			return a.snapshotRun(runStart), turnErr
 		}
 
 		if len(calls) == 0 {
+			a.observer.Observe(observation.Turn{
+				Phase:   observation.PhaseSettled,
+				Outcome: observation.OutcomeSuccess,
+			})
 			return a.snapshotRun(runStart), nil
 		}
 
@@ -63,10 +99,35 @@ func (a *Agent) executeRun(ctx context.Context, runStart int) (RunResult, error)
 			results, runErr = a.executeToolBatch(ctx, calls)
 		}
 		a.appendToolResults(results)
+		a.observeToolResultMessages(results)
 		if runErr != nil {
+			a.observer.Observe(observation.Turn{
+				Phase:   observation.PhaseSettled,
+				Outcome: observation.OutcomeError,
+			})
 			return a.snapshotRun(runStart), runErr
 		}
+		a.observer.Observe(observation.Turn{
+			Phase:   observation.PhaseSettled,
+			Outcome: observation.OutcomeSuccess,
+		})
 		continuingAfterTools = true
+	}
+}
+
+func (a *Agent) observeAssistant(message ai.AssistantMessage) {
+	a.observer.Observe(observation.Message{
+		Role:       observation.MessageRoleAssistant,
+		StopReason: message.StopReason,
+	})
+}
+
+func (a *Agent) observeToolResultMessages(results []ai.ToolResultMessage) {
+	for _, result := range results {
+		a.observer.Observe(observation.Message{
+			Role:    observation.MessageRoleToolResult,
+			IsError: result.IsError,
+		})
 	}
 }
 

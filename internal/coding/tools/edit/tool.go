@@ -82,6 +82,18 @@ func (e *Tool) Definition() agent.ToolDefinition {
 	}
 }
 
+// DescribeInvocation reports only edit's target path. Replacement text never
+// enters the observation stream.
+func (e *Tool) DescribeInvocation(rawArguments json.RawMessage) string {
+	var display struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rawArguments, &display); err != nil || display.Path == "" {
+		return "Edit"
+	}
+	return "Edit " + display.Path
+}
+
 // Execute validates all replacements against one opened file snapshot and then
 // publishes the complete result through the shared replacement commit.
 func (e *Tool) Execute(ctx context.Context, rawArguments json.RawMessage) (string, error) {

@@ -85,6 +85,21 @@ func TestEditDefinition(t *testing.T) {
 	var _ agent.Tool = tool
 }
 
+func TestDescribeInvocationOmitsEditReplacement(t *testing.T) {
+	t.Parallel()
+
+	tool := newTool(t, t.TempDir())
+	got := tool.DescribeInvocation(json.RawMessage(
+		`{"path":"main.go","edits":[{"oldText":"secret old","newText":"secret new"}]}`,
+	))
+	if got != "Edit main.go" {
+		t.Fatalf("DescribeInvocation() = %q, want target path", got)
+	}
+	if strings.Contains(got, "secret") {
+		t.Fatalf("DescribeInvocation() = %q, want no replacement text", got)
+	}
+}
+
 func TestNewEditRejectsNilRoot(t *testing.T) {
 	t.Parallel()
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/yuanbohan/pia/internal/ai"
 	"github.com/yuanbohan/pia/internal/coding"
+	"github.com/yuanbohan/pia/internal/observation"
 )
 
 func TestExecuteValidatesArgumentsBeforeReadingConfiguration(t *testing.T) {
@@ -80,7 +81,6 @@ func TestExecuteReturnsWorkingDirectoryFailureBeforeRun(t *testing.T) {
 
 func TestExecutePassesRawTaskAndPrintsOnlyFinalText(t *testing.T) {
 	const task = "-fix the project exactly"
-	wantInput := coding.RunInput{WorkspacePath: "/workspace", Task: task, APIKey: "key"}
 	var gotInput coding.RunInput
 	deps := successfulDependencies()
 	deps.run = func(_ context.Context, input coding.RunInput) (coding.RunResult, error) {
@@ -103,11 +103,89 @@ func TestExecutePassesRawTaskAndPrintsOnlyFinalText(t *testing.T) {
 	if err := execute(context.Background(), []string{task}, &stdout, io.Discard, deps); err != nil {
 		t.Fatalf("execute() error = %v", err)
 	}
-	if !reflect.DeepEqual(gotInput, wantInput) {
-		t.Fatalf("Run input = %#v, want %#v", gotInput, wantInput)
+	if gotInput.WorkspacePath != "/workspace" || gotInput.Task != task || gotInput.APIKey != "key" {
+		t.Fatalf("Run input = %#v, want workspace, task, and key", gotInput)
+	}
+	if gotInput.Observer == nil {
+		t.Fatal("Run input observer = nil, want live line observer")
 	}
 	if got, want := stdout.String(), "finished\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestExecuteProjectsLiveEventsToStderrAndFinalTextToStdout(t *testing.T) {
+	deps := successfulDependencies()
+	deps.run = func(_ context.Context, input coding.RunInput) (coding.RunResult, error) {
+		input.Observer.Observe(observation.NewToolStarted(0, "read", "Read main.go"))
+		input.Observer.Observe(observation.NewToolSettled(
+			0,
+			"read",
+			"Read main.go",
+			observation.OutcomeSuccess,
+		))
+		return coding.RunResult{Transcript: []ai.Message{
+			ai.AssistantMessage{
+				Content:    []ai.AssistantContent{ai.TextContent{Text: "finished"}},
+				StopReason: ai.StopReasonStop,
+			},
+		}}, nil
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := execute(context.Background(), []string{"task"}, &stdout, &stderr, deps); err != nil {
+		t.Fatalf("execute() error = %v", err)
+	}
+	if got, want := stderr.String(), "pia: Read main.go\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+	if got, want := stdout.String(), "finished\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestExecutePrintsSuccessfulFinalTextDespiteObserverFailure(t *testing.T) {
+	writeErr := errors.New("live stderr unavailable")
+	deps := successfulDependencies()
+	deps.run = func(_ context.Context, input coding.RunInput) (coding.RunResult, error) {
+		input.Observer.Observe(observation.NewToolStarted(0, "read", "Read main.go"))
+		return coding.RunResult{Transcript: []ai.Message{
+			ai.AssistantMessage{
+				Content:    []ai.AssistantContent{ai.TextContent{Text: "finished"}},
+				StopReason: ai.StopReasonStop,
+			},
+		}}, nil
+	}
+
+	var stdout bytes.Buffer
+	err := execute(context.Background(), []string{"task"}, &stdout, errorWriter{err: writeErr}, deps)
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("execute() error = %v, want observer write error", err)
+	}
+	if got, want := stdout.String(), "finished\n"; got != want {
+		t.Fatalf("stdout = %q, want successful final despite observer failure", got)
+	}
+}
+
+func TestExecuteJoinsRunAndObserverFailures(t *testing.T) {
+	runErr := errors.New("coding failed")
+	writeErr := errors.New("live stderr unavailable")
+	deps := successfulDependencies()
+	deps.run = func(_ context.Context, input coding.RunInput) (coding.RunResult, error) {
+		input.Observer.Observe(observation.NewToolStarted(0, "read", "Read main.go"))
+		return coding.RunResult{}, runErr
+	}
+
+	err := execute(
+		context.Background(),
+		[]string{"task"},
+		io.Discard,
+		errorWriter{err: writeErr},
+		deps,
+	)
+	if !errors.Is(err, runErr) || !errors.Is(err, writeErr) {
+		t.Fatalf("execute() error = %v, want joined Run and observer errors", err)
 	}
 }
 

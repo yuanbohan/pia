@@ -9,6 +9,7 @@ import (
 
 	"github.com/yuanbohan/pia/internal/agent"
 	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/observation"
 )
 
 type conversationConfig struct {
@@ -18,6 +19,7 @@ type conversationConfig struct {
 	Tools         []ai.ToolSchema
 	RequestLimits ai.RequestLimits
 	Compaction    compactionPolicy
+	Observer      observation.Observer
 }
 
 // conversation owns the complete settled history and the replaceable
@@ -32,6 +34,7 @@ type conversation struct {
 	tools         []ai.ToolSchema
 	requestLimits ai.RequestLimits
 	compaction    compactionPolicy
+	observer      observation.Observer
 
 	history    []ai.Message
 	projection *compactionProjection
@@ -63,6 +66,7 @@ func newConversation(config conversationConfig) (*conversation, error) {
 		tools:         tools,
 		requestLimits: config.RequestLimits,
 		compaction:    config.Compaction,
+		observer:      config.Observer,
 	}, nil
 }
 
@@ -70,8 +74,14 @@ func (c *conversation) run(ctx context.Context, userInput string) (history []ai.
 	if history, err := c.beginRun(ctx); err != nil {
 		return history, err
 	}
+	defer c.endRun()
+	c.observer.Observe(observation.Advance{Phase: observation.PhaseStarted})
 	defer func() {
-		history = c.finishRun()
+		history = c.historySnapshot()
+		c.observer.Observe(observation.Advance{
+			Phase:   observation.PhaseSettled,
+			Outcome: observation.OutcomeFromError(err),
+		})
 	}()
 
 	if err := c.compactBeforeRun(ctx, userInput); err != nil {
@@ -128,15 +138,17 @@ func (c *conversation) appendRun(newMessages []ai.Message) int {
 	return start
 }
 
-func (c *conversation) finishRun() []ai.Message {
+func (c *conversation) historySnapshot() []ai.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	history := ai.CloneMessages(c.history)
-	// Keep the guard active through every intermediate commit and this final
-	// snapshot so another user advance cannot overtake recovery settlement.
+	return ai.CloneMessages(c.history)
+}
+
+func (c *conversation) endRun() {
+	c.mu.Lock()
 	c.active = false
-	return history
+	c.mu.Unlock()
 }
 
 func (c *conversation) compactionSnapshot() ([]ai.Message, *compactionProjection) {

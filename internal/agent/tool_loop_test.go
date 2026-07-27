@@ -827,6 +827,7 @@ func TestProviderErrorTerminalWithDuplicateToolCallIDIsProtocolError(t *testing.
 type testTool struct {
 	definition      agent.ToolDefinition
 	definitionCalls *int
+	describe        func(json.RawMessage) string
 	execute         func(context.Context, json.RawMessage) (string, error)
 }
 
@@ -842,6 +843,13 @@ func (t *testTool) Execute(ctx context.Context, arguments json.RawMessage) (stri
 		return "", nil
 	}
 	return t.execute(ctx, arguments)
+}
+
+func (t *testTool) DescribeInvocation(arguments json.RawMessage) string {
+	if t.describe == nil {
+		return t.definition.Schema.Name
+	}
+	return t.describe(arguments)
 }
 
 func toolSchema(name string) ai.ToolSchema {

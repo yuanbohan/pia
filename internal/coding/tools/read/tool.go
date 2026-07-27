@@ -76,6 +76,16 @@ func (r *Tool) Definition() agent.ToolDefinition {
 	}
 }
 
+// DescribeInvocation returns a bounded-at-observation operator summary without
+// exposing raw arguments or file content.
+func (r *Tool) DescribeInvocation(rawArguments json.RawMessage) string {
+	input, err := decodeArguments(rawArguments)
+	if err != nil {
+		return "Read"
+	}
+	return "Read " + input.Path
+}
+
 // Execute decodes one model invocation and returns a stable, bounded text
 // result. Argument and file failures are call-local errors to the Agent.
 func (r *Tool) Execute(ctx context.Context, rawArguments json.RawMessage) (string, error) {

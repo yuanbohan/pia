@@ -1170,6 +1170,10 @@ func (tool *countingRecoveryTool) Execute(context.Context, json.RawMessage) (str
 	return "package main", nil
 }
 
+func (tool *countingRecoveryTool) DescribeInvocation(json.RawMessage) string {
+	return "Read"
+}
+
 var _ agent.Tool = (*countingRecoveryTool)(nil)
 
 type recoveryStreamFactory func(context.Context) ai.Stream

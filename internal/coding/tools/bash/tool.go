@@ -89,6 +89,18 @@ func (t *Tool) Definition() agent.ToolDefinition {
 	}
 }
 
+// DescribeInvocation reports the requested command without exposing timeout
+// metadata or any later command output.
+func (t *Tool) DescribeInvocation(rawArguments json.RawMessage) string {
+	var display struct {
+		Command *string `json:"command"`
+	}
+	if err := json.Unmarshal(rawArguments, &display); err != nil || display.Command == nil {
+		return "Bash"
+	}
+	return "Bash " + *display.Command
+}
+
 // Execute starts one fresh shell, incrementally drains its output, and waits
 // for the direct shell on every started path. Timeout and cancellation kill the
 // original process group; a normal shell exit intentionally leaves background

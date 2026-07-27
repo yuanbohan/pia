@@ -72,11 +72,14 @@ func execute(
 		tracePath = resolveTracePath(workspacePath, configured)
 	}
 
+	live := newLineObserver(stderr)
 	result, runErr := deps.run(ctx, coding.RunInput{
 		WorkspacePath: workspacePath,
 		Task:          task,
 		APIKey:        apiKey,
+		Observer:      live.Observe,
 	})
+	observerErr := live.Err()
 	var traceErr error
 	if tracePath != "" {
 		// Trace creation intentionally happens after Run settlement and does not
@@ -90,31 +93,36 @@ func execute(
 		}
 	}
 	if combined := errors.Join(runErr, traceErr); combined != nil {
-		return combined
+		return errors.Join(combined, observerErr)
 	}
-	for _, diagnostic := range result.SkillDiagnostics {
-		if diagnostic.Path == "" {
-			if _, err := fmt.Fprintf(stderr, "pia: warning: %q\n", diagnostic.Message); err != nil {
+
+	// A failed live writer has already proved stderr unavailable. Do not let a
+	// repeated warning write suppress a successful final response on stdout.
+	if observerErr == nil {
+		for _, diagnostic := range result.SkillDiagnostics {
+			if diagnostic.Path == "" {
+				if _, err := fmt.Fprintf(stderr, "pia: warning: %q\n", diagnostic.Message); err != nil {
+					return fmt.Errorf("write Skill diagnostic: %w", err)
+				}
+				continue
+			}
+			if _, err := fmt.Fprintf(stderr, "pia: warning: %q: %q\n", diagnostic.Path, diagnostic.Message); err != nil {
 				return fmt.Errorf("write Skill diagnostic: %w", err)
 			}
-			continue
-		}
-		if _, err := fmt.Fprintf(stderr, "pia: warning: %q: %q\n", diagnostic.Path, diagnostic.Message); err != nil {
-			return fmt.Errorf("write Skill diagnostic: %w", err)
 		}
 	}
 
 	final := result.FinalText()
 	if final == "" {
-		return nil
+		return observerErr
 	}
 	if !strings.HasSuffix(final, "\n") {
 		final += "\n"
 	}
 	if _, err := io.WriteString(stdout, final); err != nil {
-		return fmt.Errorf("write final response: %w", err)
+		return errors.Join(observerErr, fmt.Errorf("write final response: %w", err))
 	}
-	return nil
+	return observerErr
 }
 
 func resolveTracePath(workspacePath, configured string) string {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/observation"
 )
 
 type compactionPolicy struct {
@@ -109,7 +110,7 @@ func (c *conversation) compactContext(
 	additionalExclusions []int,
 	pendingMessages []ai.Message,
 	forced bool,
-) error {
+) (err error) {
 	source, err := buildCompactionModelSource(history, previousProjection, additionalExclusions)
 	if err != nil {
 		return fmt.Errorf("coding: build current context projection: %w", err)
@@ -119,6 +120,22 @@ func (c *conversation) compactContext(
 	if !forced && ai.EstimateRequestTokens(projectedRequest).Tokens < c.compaction.Threshold {
 		return nil
 	}
+
+	reason := observation.CompactionReasonThreshold
+	if forced {
+		reason = observation.CompactionReasonOverflow
+	}
+	c.observer.Observe(observation.Compaction{
+		Phase:  observation.PhaseStarted,
+		Reason: reason,
+	})
+	defer func() {
+		c.observer.Observe(observation.Compaction{
+			Phase:   observation.PhaseSettled,
+			Reason:  reason,
+			Outcome: observation.OutcomeFromError(err),
+		})
+	}()
 
 	plan, err := chooseCompactionPlanWithPending(
 		source.Messages,

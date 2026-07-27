@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/yuanbohan/pia/internal/ai"
+	"github.com/yuanbohan/pia/internal/observation"
 )
 
 // ToolDefinition is the stable model schema and scheduling capability exposed
@@ -21,12 +21,16 @@ type ToolDefinition struct {
 	CanRunParallel bool
 }
 
-// Tool decodes, validates, and executes one raw model-requested invocation.
-// Call-local failures are returned as errors and become model-visible tool
-// results; they do not fail the surrounding Run. Execute must honor ctx and,
-// when CanRunParallel is true, support concurrent calls on the same instance.
+// Tool describes, validates, and executes one raw model-requested invocation.
+// DescribeInvocation must be side-effect-free and return only a concise,
+// operator-safe summary; it runs synchronously on the coordinator before
+// Execute only when an observer is installed. Call-local Execute failures
+// become model-visible tool results and do not fail the surrounding Run.
+// Execute must honor ctx and, when CanRunParallel is true, support concurrent
+// calls on the same instance.
 type Tool interface {
 	Definition() ToolDefinition
+	DescribeInvocation(arguments json.RawMessage) string
 	Execute(ctx context.Context, arguments json.RawMessage) (string, error)
 }
 
@@ -93,9 +97,20 @@ type toolOutcome struct {
 	assigned bool
 }
 
+type toolDisplay struct {
+	name    string
+	summary string
+}
+
+type completedTool struct {
+	index  int
+	result ai.ToolResultMessage
+}
+
 func (a *Agent) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResultMessage, error) {
 	stages := a.toolStages(calls)
 	outcomes := make([]toolOutcome, len(calls))
+	displays := make([]toolDisplay, len(calls))
 
 	for _, stage := range stages {
 		if cause := context.Cause(ctx); cause != nil {
@@ -104,25 +119,37 @@ func (a *Agent) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai
 		}
 
 		if stage.parallel {
-			var workers sync.WaitGroup
-			workers.Add(stage.end - stage.start)
+			completed := make(chan completedTool, stage.end-stage.start)
 			for index := stage.start; index < stage.end; index++ {
+				displays[index] = a.observeToolStarted(index, calls[index])
 				index := index
 				go func() {
-					defer workers.Done()
-					outcomes[index] = toolOutcome{
-						result:   a.executeToolCall(ctx, calls[index]),
-						assigned: true,
+					completed <- completedTool{
+						index:  index,
+						result: a.executeToolCall(ctx, calls[index]),
 					}
 				}()
 			}
-			workers.Wait()
+			for range stage.end - stage.start {
+				settled := <-completed
+				outcomes[settled.index] = toolOutcome{
+					result:   settled.result,
+					assigned: true,
+				}
+				a.observeToolSettled(
+					settled.index,
+					displays[settled.index],
+					settled.result,
+				)
+			}
 		} else {
 			index := stage.start
+			displays[index] = a.observeToolStarted(index, calls[index])
 			outcomes[index] = toolOutcome{
 				result:   a.executeToolCall(ctx, calls[index]),
 				assigned: true,
 			}
+			a.observeToolSettled(index, displays[index], outcomes[index].result)
 		}
 
 		if cause := context.Cause(ctx); cause != nil {
@@ -132,6 +159,47 @@ func (a *Agent) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai
 	}
 
 	return orderedToolResults(outcomes), nil
+}
+
+func (a *Agent) observeToolStarted(index int, call ai.ToolCall) toolDisplay {
+	if a.observer == nil {
+		return toolDisplay{}
+	}
+
+	display := toolDisplay{name: call.Name, summary: call.Name}
+	registered, exists := a.tools[call.Name]
+	if exists {
+		if summary := registered.tool.DescribeInvocation(bytes.Clone(call.Arguments)); summary != "" {
+			display.summary = summary
+		}
+	}
+	a.observer.Observe(observation.NewToolStarted(
+		index,
+		display.name,
+		display.summary,
+	))
+	return display
+}
+
+func (a *Agent) observeToolSettled(
+	index int,
+	display toolDisplay,
+	result ai.ToolResultMessage,
+) {
+	if a.observer == nil {
+		return
+	}
+
+	outcome := observation.OutcomeSuccess
+	if result.IsError {
+		outcome = observation.OutcomeError
+	}
+	a.observer.Observe(observation.NewToolSettled(
+		index,
+		display.name,
+		display.summary,
+		outcome,
+	))
 }
 
 func (a *Agent) toolStages(calls []ai.ToolCall) []toolStage {
