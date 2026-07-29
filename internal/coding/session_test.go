@@ -310,6 +310,9 @@ func TestSessionCloseBusyCancelsAdmissionAndHonorsCallerDeadline(t *testing.T) {
 	if _, err := session.Advance(context.Background(), "must be rejected"); !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("Advance() while closing error = %v, want ErrSessionClosed", err)
 	}
+	if err := session.FollowUp("must also be rejected"); !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("FollowUp() while closing error = %v, want ErrSessionClosed", err)
+	}
 
 	close(provider.release)
 	_ = receiveError(t, advanceReturned)

@@ -440,13 +440,18 @@ func (s *Session) Wait(ctx context.Context) error
 func (s *Session) Close(ctx context.Context) error
 ```
 
+这段代码记录 Lesson 13 结束时的最小 surface。Lesson 14 的 D103–D104 后续增加
+`FollowUp(input string) error`、`ErrFollowUpUnavailable`，并给
+`AdvanceResult` 增加 `UnconsumedFollowUps []string`；它们扩展 active Advance
+的 queue/hand-back 契约，不恢复第二个 lifecycle owner。
+
 命名理由：
 
 - 使用 `Session`，不使用 `AgentSession`：`coding` package 已经给出 coding-agent 语境，后者还会与 run-local Agent Execution Engine 再制造一个“Agent”歧义。
 - 使用 `Advance`，不使用 `Prompt`：一次调用包含 preflight compaction、一个或多个 Runs、History/projection commit、observation 和 final snapshot，不只是把 prompt 发给 LLM。
 - 不使用 Codex 式 `Submit(Op)`：它适合 client/server protocol 和多种异步 command；当前 Pia 只有一个 text user input，generic union 会提前引入 queue/approval/review 等不存在的操作。
 - 直接接收 `input string`：只有一个 text 字段时，`AdvanceInput` 没有带来边界；真实 images、attachments 或其他输入出现后再引入结构体。
-- `SessionInfo` 保存构造后不变的 canonical workspace、prompt、model、tools 与 Skill diagnostics；`AdvanceResult` 只保存本次结算后的权威 complete `History`。旧 `RunResult` 把两类生命周期不同的数据混在一起，且 `Transcript` 是诊断投影词，不是 application state 的准确名字。
+- `SessionInfo` 保存构造后不变的 canonical workspace、prompt、model、tools 与 Skill diagnostics；Lesson 13 的 `AdvanceResult` 最小形状只保存本次结算后的权威 complete `History`，Lesson 14 再以 D104 增加异常时的 pending-input hand-back。旧 `RunResult` 把两类生命周期不同的数据混在一起，且 `Transcript` 是诊断投影词，不是 application state 的准确名字。
 - `DeepSeekAPIKey` 明示当前固定 Provider；不以通用 `APIKey` 暗示尚不存在的 Provider selection。Provider、Workspace opener 和 close seam 继续 package-private，只服务离线 Faux 与 ownership tests。
 - `Info()` 和 `AdvanceResult.History` 都返回 deep-cloned ownership-independent values，且不包含 credentials。`FinalText()` 继续只从最后一个 assistant 的 text blocks 投影。
 

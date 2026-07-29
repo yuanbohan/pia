@@ -786,6 +786,44 @@
 - 当前缺口：现有 Compaction event 已有 `started/settled`、`threshold/overflow` 与 `success/error`，但没有 timestamp、stable sequence、取消的独立 outcome、压缩前后 context estimate、threshold/profile、retained/cut 规模或 Provider/model 维度；当前 trace 也不保存 event stream。因此现状只能实时观察，不能在 Advance 后完整分析。未来进入该能力时必须先根据真实优化问题重新检查 event coverage，定义最小、安全、有界且不含 credential 的记录；本决定不提前冻结 JSONL schema、文件位置、保留策略或 lesson 课号。
 - 课程影响：这是一项独立的 observability/diagnostic consumer，不并入 Lesson 13 的 ownership/lifecycle capability，也不要求 Session API 预留 recorder。它加入第三阶段滚动方向，开课时再根据最小交互终端、Provider 对比与 journal 进度决定顺序和规模。
 
+### D102. Follow-up 使用新 Run、同一 Advance，并由 Session 排空到 quiescence
+
+- 日期：2026-07-29
+- 源码校准：冻结 Pi `dcfe36c79702ec240b146c45f167ab75ecddd205` 在 inner tool/steering loop 原本将停止后才从 outer loop 消费 Follow-up，并等 queued continuations 全部结束后只发布一次 session-level `agent_settled`。当前 OpenCode `cb562b2c6289c2eee707078f9ab644cbe1d3d8a9` 同样由一个 Session Runner 在 continuation 结束后 FIFO 提升 queued input，但其 `prompt` 是 durable admission API。当前 Codex CLI `0fb559f0f6e231a88ac02ea002d3ecd248e2b515` 把 TUI queued input 作为当前 Turn 完成后的下一个 Turn，证明 Follow-up 是新工作单元；该形状依赖已有 TUI coordinator，不能直接替代 Pia 当前同步 `Advance` 的 caller/result ownership。
+- Run 与 Advance：每条被消费的 Follow-up 都成为一条新的 Conversation user Message并启动新的 input-started `Engine.Run`，不加入已 settlement Run，也不使用 input-free `Continue`。这些 Runs 仍由最初的同一个 active `Advance` 顺序协调；每个 Run settlement 后先提交自己的 Message Delta，再决定是否消费下一条 Follow-up。队列排空、最终 History snapshot 与同步 observations 完成后，Advance 才 settlement。
+- Ownership 与 admission：pending Follow-up 由 Session 持有，Engine 继续只消费派生 Working Context snapshot 并返回 run-local delta。Follow-up 使用区别于普通 `Advance` 的显式 admission intent；并发 `Advance` 仍 fail fast 为 `ErrSessionBusy`，不能静默排队。专门 admission 的 API 与 rejection contract 由 D103 固定。
+- Quiescence：Session 在 active Advance 或 pending Follow-up 任一存在时都不 quiescent。`Wait(ctx)` 覆盖整个 queue drain，不在相邻 Runs 之间返回；`Close(ctx)` 不能利用 Run 间隙提前关闭 Workspace。dequeue-or-finish 必须在线性化边界上作出唯一决定，使并发 enqueue 要么进入当前 Advance，要么得到明确拒绝，不能落在最后一次空队列检查之后成为无人消费的 pending input。
+- 当前非目标：本课固定首版内存 FIFO one-at-a-time，不复制 Pi 的可配置 `all` mode，不持久化 pending input，不增加后台 scheduler、per-input result handle、Steering 注入或 terminal coordinator。Run error、caller cancellation、`Cancel`/`Close` 对未消费队列的处理由 D104 固定；queue Semantic Event 取舍由 D105 固定。
+- 对既有决定的影响：本决定落实 D99 留给 Follow-up 课程的 Wait/quiescence 校准，并细化 D100 的 `Advance` operation boundary；它不改变 D97 的 Session-only long-lived ownership或普通并发 Advance rejection。`CONCEPTS.md` 中 User Advance 与 Follow-up 的旧单输入/后续 Advance 表述同步修正。
+
+### D103. Follow-up admission 只转移 pending input ownership，不代表执行完成
+
+- 日期：2026-07-29
+- API：Session 增加非阻塞的 `FollowUp(input string) error`。它只表达“把这条输入交给当前 active Advance 稍后消费”的 admission intent，不调用 Provider/tool、不启动并发 Run、不等待消费、不返回答案，也不自动转换成新的 `Advance`。首版不增加 `context.Context`、per-input token 或 result handle。
+- Acceptance：方法先拒绝空白输入，再在 Session mutex 下同时检查 lifetime、active Advance 与该 Advance 的 Follow-up admission window。只有 Session open、存在 active Advance 且 admission window 尚未封口时才把输入追加到 Session-owned FIFO；锁竞争的取得顺序就是并发 admission 的权威顺序。返回 `nil` 是 ownership-transfer acknowledgement：调用方不再负责重试或保管该输入，Session 必须按本课最终确定的成功、失败与控制路径处理它，不能静默丢失。
+- Rejection：没有 active Advance，或 active Advance 已在最终 queue-empty settlement 前封口时，返回新的 sentinel `ErrFollowUpUnavailable`；closing/closed 返回既有 `ErrSessionClosed`。所有 rejection 都发生在 mutation 前，输入仍由调用方持有。普通并发 `Advance` 继续返回 `ErrSessionBusy`，不能借此 API 模糊两种 intent。
+- Message boundary：成功 admission 只创建 pending control state，不立即修改 History、Working Context 或 Semantic Events。只有队首输入被 dequeue 并作为新的 `Engine.Run` input 接受时，它才成为 Conversation user Message；因此 `FollowUp` 成功与该输入的执行/settlement 是两个不同事实。
+- Linearization：当前 Advance 在每个 Run commit 后，必须在同一 Session mutex 下原子执行 dequeue-or-seal。队列非空就取最老一条并保持 admission open；队列为空就永久封住该 Advance 的 Follow-up admission window。封口后 Session 仍保持 active，直到最终 History snapshot、同步 observation 与 settlement 完成，因而晚到输入会得到明确 rejection，`Wait`/`Close` 也不会看见虚假 quiescence。
+- 对既有决定的影响：本决定完成 D102 留下的 API、ownership transfer 与 queue-empty race 设计，不增加第二个生命周期 owner 或公开 state。已经 accepted 但尚未消费的 Follow-up 在 Run error、cancellation、`Cancel` 与 `Close` 下按 D104 显式交还给 Advance caller。
+
+### D104. 异常 Advance settlement 停止 queue drain，并显式交还未消费 Follow-up
+
+- 日期：2026-07-29
+- 源码校准：冻结 Pi 的 Agent Loop 在 terminal assistant 为 `error` 或 `aborted` 时直接 `agent_end`，不会继续 outer Follow-up poll；其 interactive host 在 Esc 时先清出 queue 并把文本恢复到 editor。当前 OpenCode 的 durable queued input 在 interrupt 后仍 pending，等待后续 `resume`；当前 Codex CLI TUI 在 interrupted/budget-limited Turn 后把 queued input 恢复到 composer 而不自动提交。三者的保存位置不同，但都不支持“异常停止后仍盲目继续 Follow-up”。
+- Drain policy：正常 Run 成功时继续 FIFO drain；一次成功完成的 overflow recovery 也视为该 input 正常成功。Provider/tool fatal error、overflow recovery 失败、caller context cancellation、`Cancel` 或 `Close` 一旦使当前 input execution 返回 non-nil error，当前 Advance 就停止取新 Follow-up、封住 admission window，并原子 detach 所有尚未消费的 pending input。
+- Result hand-back：`AdvanceResult` 增加 `UnconsumedFollowUps []string`，按原 FIFO 顺序把 detached input 的 ownership 从 Session 交还给 Advance caller。成功且完整 drain 时该字段为空。它不是 Conversation History、Semantic Event、持久化记录或每条输入的 execution result；未来 terminal 可在 Esc 后恢复这些文本，`/exit` 可以明确选择忽略它们。
+- Consumption boundary：已经被 `Engine.Run` 接受并成为 Conversation user Message 的 Follow-up 算作 consumed；即使该 Run 随后失败，它也只保留在 History，不得再次出现在 `UnconsumedFollowUps`。若一条已从 FIFO 取出的输入在 pre-Run compaction、Working Context derivation 或 pre-canceled Engine acceptance 前失败，它尚未成为 Message，必须作为交还列表的第一项，后接仍在 queue 中的输入。
+- Controls：`Cancel()` 仍只非阻塞地请求 active Advance cancellation，`Close(ctx)` 仍永久停止 admission、请求取消并等待 settlement/resource close；两者不直接返回 queue。负责执行 `Advance` 的 caller 在其 result 中接收 hand-back。首版的单 host/coordinator 可以据此恢复或丢弃输入；多调用方的 durable receipt、per-input handle 和跨进程恢复仍等待真实 Gateway/IM consumer。
+- 对既有决定的影响：本决定细化 D98–D100 的 cancellation/result contract，并以第二个明确字段取代 D100“`AdvanceResult` 只含 History”的旧最小形状。它不改变 error Run delta 仍提交、History snapshot 仍返回、`Advance` error 仍独立报告，也不引入 parked queue、resume scheduler 或后台执行。
+
+### D105. Lesson 14 不新增 queue Semantic Event
+
+- 日期：2026-07-29
+- 已有表达：每条被消费的 Follow-up 已自然产生新的 `Run(mode=input)` started/settled 与 user `Message` event；同一外层 `Advance` 仍只在全部 drain 或异常 hand-back 完成后产生一次 settled event。Admission caller 通过 `FollowUp()` 返回值观察 acceptance，异常 hand-back 通过 `AdvanceResult.UnconsumedFollowUps` 观察。
+- Consumer evidence：当前真实 line observer 不展示 pending queue，one-shot CLI 也不是 Follow-up producer。现在新增 admitted/consumed/returned event 会迫使本课预先决定 input ID、queue count、正文 projection 或 correlation 规则，却没有 consumer 证明最小 payload。
+- 决定：本课不增加 queue event family，也不把 Follow-up 正文放入现有 events。Ordering tests 使用现有 nested Run/Message/Advance events 证明执行与 settlement 边界，使用 API result、Provider calls 和 History 证明 admission、FIFO 与 hand-back。
+- Future boundary：最小交互终端出现 pending-preview consumer 时，必须从 Session-owned queue 派生真实投影，再决定 bounded queue events 或另一种只读 projection；terminal 不能仅凭本地调用猜测维护第二份 authoritative queue。该未来设计不得改变本课的 Session-only ownership、admission linearization 或单次 Advance settlement。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -917,3 +955,10 @@
 - 2026-07-29：学习者明确要求用 `ce-simplify-code` 再次复核 Lesson 13 是否受 Legacy 设计拖累。主线程三维审查应用四组 quality 整理：删除无消费者的 forwarding constructor wrapper；让 `FinalText`、trace Go 字段和 tests 使用当前 Advance/settlement/Session/Engine 词汇，同时保留 trace JSON `run_error` wire contract；删除 constructor cleanup 的重复条件；没有发现可复用 utility 缺口。减少重复 clone 的 efficiency 候选因会削弱 Session、Engine、Provider 之间的 ownership isolation 而跳过。`make check`、`make race`、Session lifecycle 20 轮并发压测和 `git diff --check` 再次全部通过，课程仍为待理解确认且尚未提交。
 - 2026-07-29：学习者提出需要查看单个 Session 的完整动作时间线，以分析 compaction threshold、Provider/model 差异和策略效果。D101 将它记录为 host-owned observer diagnostic recorder，而不是 Session 内第二份 action history 或 durable recovery journal；当前不扩大 Lesson 13，也不提前冻结 trace schema或课号。
 - 2026-07-29：学习者确认 Lesson 13 的关键 Session、Cancel/Wait 与 Close 语义，不再要求逐项展开 tests，并明确授权自动完成课程、提交及直接推送 `origin/main`。课程最终验证继续要求 `make check`、`make race`、Session lifecycle 并发压测与 `git diff --check` 全部通过；Lesson 13 至此完成。
+- 2026-07-29：学习者在本地冻结 Pi、OpenCode 与 Codex CLI 的横向行为对比后确认 D102：Follow-up 是新的 input-started Engine Run，但多个 Follow-up Runs 仍由同一个 active Advance 顺序协调，队列排空后才发布 Advance settlement 与 Session quiescence；普通并发 Advance 继续 fail fast，Session 继续是唯一长期 queue/lifecycle owner。
+- 2026-07-29：学习者选择并确认 D103：`FollowUp(input) error` 是非阻塞 admission API，`nil` 只确认 pending input ownership 已转给 Session；idle 或已封口返回 `ErrFollowUpUnavailable`，closing/closed 返回 `ErrSessionClosed`。Advance 在 mutex 下执行 dequeue-or-seal，消除 queue-empty 与晚到 admission 之间的 orphan race。
+- 2026-07-29：学习者选择并确认 D104：正常 Run（含成功 overflow recovery）继续 FIFO drain；任何 Run error 或 cancellation 都停止 Advance 并把尚未成为 Conversation Message 的输入按顺序放入 `AdvanceResult.UnconsumedFollowUps`。Cancel/Close 不自动执行或静默丢弃 queue，未来 terminal 决定恢复还是在退出时忽略 hand-back。
+- 2026-07-29：学习者选择并确认 D105：Lesson 14 不新增 queue Semantic Event。Follow-up execution 复用现有 Run/Message events，admission 与异常 hand-back 分别由同步 API result 和 AdvanceResult 表达；pending preview 的最小投影等真实 terminal consumer 出现后再定。
+- 2026-07-29：Lesson 14 按 D102–D105 完成测试先行实现：`activeAdvance` 持有 admission window 与 FIFO queue，`FollowUp` 只做非阻塞 ownership transfer，`Advance` 在每个已提交 Run 后原子 dequeue-or-seal，并在 error/cancellation 时通过 `UnconsumedFollowUps` 交还尚未被 Engine 接受的输入。Tests 覆盖 FIFO、Run 间无 idle gap、idle/blank/sealed/closed admission、Provider 与 pre-Run compaction failure、caller/Cancel/Close cancellation、overflow recovery 和 final-seal race；现有 semantic events 证明多个 input Runs 与单次 outer settlement。简化审查合并 queue seal/detach 路径并删除重复 hand-back clone；没有为无真实 producer 的内存 queue 猜测容量限制。最终 `make check`、`go test -race ./...` 与主线程多视角审查全部通过，课程进入待理解确认且尚未提交。
+- 2026-07-29：学习者确认理解 Lesson 14 的最终 acceptance boundary：dequeued Follow-up 若在 pre-Run compaction 或其他 Engine acceptance 前失败，尚未成为 Conversation Message，不进入 History，并作为 `UnconsumedFollowUps` 第一项与其余 pending inputs 一起交还；这只异常结束当前 Advance，普通 failure/Cancel 后 Session 仍可继续，只有 Close 才结束 Session lifetime。Lesson 14 进入待提交，不自动开始 Steering。
+- 2026-07-29：学习者明确要求提交 Lesson 14 并直接推送到 `origin/main`。课程状态更新为已提交；下一课不会因此自动开始。

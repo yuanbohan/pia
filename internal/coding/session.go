@@ -18,6 +18,8 @@ var (
 	ErrSessionBusy = errors.New("coding: session is busy")
 	// ErrSessionClosed means the Session is closing or closed.
 	ErrSessionClosed = errors.New("coding: session is closed")
+	// ErrFollowUpUnavailable means no active Advance can accept a Follow-up.
+	ErrFollowUpUnavailable = errors.New("coding: follow-up is unavailable")
 )
 
 // SessionConfig contains the fixed DeepSeek coding profile inputs.
@@ -37,10 +39,11 @@ type SessionInfo struct {
 	SkillDiagnostics []SkillDiagnostic
 }
 
-// AdvanceResult contains the complete authoritative Conversation History after
-// one Advance settles.
+// AdvanceResult contains the complete authoritative Conversation History and
+// any admitted Follow-ups handed back after one Advance settles.
 type AdvanceResult struct {
-	History []ai.Message
+	History             []ai.Message
+	UnconsumedFollowUps []string
 }
 
 // FinalText concatenates text blocks from the last assistant message without
@@ -95,8 +98,30 @@ const (
 )
 
 type activeAdvance struct {
-	cancel context.CancelCauseFunc
-	done   chan struct{}
+	cancel             context.CancelCauseFunc
+	done               chan struct{}
+	acceptingFollowUps bool
+	pendingFollowUps   []string
+}
+
+// sealAndDetachFollowUps transfers queue ownership to the caller. Session.mu
+// must be held.
+func (control *activeAdvance) sealAndDetachFollowUps(
+	currentInput string,
+	returnCurrent bool,
+) []string {
+	control.acceptingFollowUps = false
+	if !returnCurrent {
+		unconsumed := control.pendingFollowUps
+		control.pendingFollowUps = nil
+		return unconsumed
+	}
+
+	unconsumed := make([]string, 0, len(control.pendingFollowUps)+1)
+	unconsumed = append(unconsumed, currentInput)
+	unconsumed = append(unconsumed, control.pendingFollowUps...)
+	control.pendingFollowUps = nil
+	return unconsumed
 }
 
 // Session is the sole long-lived owner of one coding Conversation, its
@@ -160,8 +185,8 @@ func (s *Session) Info() SessionInfo {
 	return cloneSessionInfo(s.info)
 }
 
-// Advance accepts one user input and settles every execution, commit, and
-// observation it starts before returning.
+// Advance accepts one initial input, drains admitted Follow-ups, and settles
+// every execution, commit, and observation it starts before returning.
 func (s *Session) Advance(
 	ctx context.Context,
 	input string,
@@ -172,8 +197,10 @@ func (s *Session) Advance(
 	}
 
 	s.observer.Observe(observation.Advance{Phase: observation.PhaseStarted})
+	var unconsumedFollowUps []string
 	defer func() {
 		result.History = s.historySnapshot()
+		result.UnconsumedFollowUps = unconsumedFollowUps
 		s.observer.Observe(observation.Advance{
 			Phase:   observation.PhaseSettled,
 			Outcome: observation.OutcomeFromError(err),
@@ -181,48 +208,77 @@ func (s *Session) Advance(
 		s.finishAdvance(control)
 	}()
 
-	if advanceErr := s.executeAdvance(executionCtx, input); advanceErr != nil {
-		return result, fmt.Errorf("coding: run Agent: %w", advanceErr)
+	nextInput := input
+	isFollowUp := false
+	for {
+		accepted, advanceErr := s.executeInput(executionCtx, nextInput)
+		if advanceErr != nil {
+			unconsumedFollowUps = s.stopFollowUps(
+				control,
+				nextInput,
+				isFollowUp && !accepted,
+			)
+			return result, fmt.Errorf("coding: run Agent: %w", advanceErr)
+		}
+
+		var ok bool
+		var dequeueErr error
+		nextInput, ok, unconsumedFollowUps, dequeueErr = s.dequeueFollowUp(
+			control,
+			executionCtx,
+		)
+		if dequeueErr != nil {
+			return result, fmt.Errorf("coding: run Agent: %w", dequeueErr)
+		}
+		if !ok {
+			return result, nil
+		}
+		isFollowUp = true
 	}
-	return result, nil
 }
 
-func (s *Session) executeAdvance(ctx context.Context, input string) error {
+func (s *Session) executeInput(ctx context.Context, input string) (bool, error) {
 	if err := s.compactBeforeRun(ctx, input); err != nil {
-		return err
+		return false, err
 	}
 
 	workingContext, err := s.workingContextSnapshot()
 	if err != nil {
-		return fmt.Errorf("coding: derive Working Context: %w", err)
+		return false, fmt.Errorf("coding: derive Working Context: %w", err)
 	}
 	result, runErr := s.engine.Run(ctx, workingContext, input)
+	// Engine.Run returns an empty delta only when cancellation wins before its
+	// input acceptance point.
+	accepted := len(result.NewMessages) > 0
 	historyStart := s.appendRun(result.NewMessages)
 	if runErr == nil || !s.compaction.enabled() {
-		return runErr
+		return accepted, runErr
 	}
 
 	terminalOffset, ok := recoverableOverflowTerminal(result.NewMessages)
 	if !ok {
-		return runErr
+		return accepted, runErr
 	}
 	if err := s.compactAfterOverflow(ctx, historyStart+terminalOffset); err != nil {
-		return fmt.Errorf("coding: recover context overflow: %w", err)
+		return accepted, fmt.Errorf("coding: recover context overflow: %w", err)
 	}
 
 	workingContext, err = s.workingContextSnapshot()
 	if err != nil {
-		return fmt.Errorf("coding: derive recovery Working Context: %w", err)
+		return accepted, fmt.Errorf("coding: derive recovery Working Context: %w", err)
 	}
 	continuation, continueErr := s.engine.Continue(ctx, workingContext)
 	s.appendRun(continuation.NewMessages)
 	if continueErr != nil {
 		if _, overflowedAgain := recoverableOverflowTerminal(continuation.NewMessages); overflowedAgain {
-			return fmt.Errorf("coding: context overflow recovery exhausted: %w", continueErr)
+			return accepted, fmt.Errorf(
+				"coding: context overflow recovery exhausted: %w",
+				continueErr,
+			)
 		}
-		return fmt.Errorf("coding: continue after context overflow: %w", continueErr)
+		return accepted, fmt.Errorf("coding: continue after context overflow: %w", continueErr)
 	}
-	return nil
+	return accepted, nil
 }
 
 func (s *Session) beginAdvance(
@@ -247,11 +303,72 @@ func (s *Session) beginAdvance(
 
 	executionCtx, cancel := context.WithCancelCause(callerCtx)
 	control := &activeAdvance{
-		cancel: cancel,
-		done:   make(chan struct{}),
+		cancel:             cancel,
+		done:               make(chan struct{}),
+		acceptingFollowUps: true,
 	}
 	s.active = control
 	return control, executionCtx, nil, nil
+}
+
+// FollowUp admits input for the active Advance to consume at its next settled
+// Run boundary. A nil error acknowledges ownership transfer, not completion.
+func (s *Session) FollowUp(input string) error {
+	if strings.TrimSpace(input) == "" {
+		return errors.New("coding: input is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.lifetime != sessionOpen {
+		return ErrSessionClosed
+	}
+	if s.active == nil || !s.active.acceptingFollowUps {
+		return ErrFollowUpUnavailable
+	}
+	s.active.pendingFollowUps = append(
+		s.active.pendingFollowUps,
+		strings.Clone(input),
+	)
+	return nil
+}
+
+func (s *Session) dequeueFollowUp(
+	control *activeAdvance,
+	ctx context.Context,
+) (input string, ok bool, unconsumed []string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cause := context.Cause(ctx)
+	if cause == nil && s.lifetime != sessionOpen {
+		cause = context.Canceled
+	}
+	if cause != nil && len(control.pendingFollowUps) > 0 {
+		unconsumed = control.sealAndDetachFollowUps("", false)
+		return "", false, unconsumed, cause
+	}
+	if len(control.pendingFollowUps) == 0 {
+		control.acceptingFollowUps = false
+		return "", false, nil, nil
+	}
+
+	input = control.pendingFollowUps[0]
+	control.pendingFollowUps[0] = ""
+	control.pendingFollowUps = control.pendingFollowUps[1:]
+	return input, true, nil, nil
+}
+
+func (s *Session) stopFollowUps(
+	control *activeAdvance,
+	currentInput string,
+	returnCurrent bool,
+) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return control.sealAndDetachFollowUps(currentInput, returnCurrent)
 }
 
 func (s *Session) finishAdvance(control *activeAdvance) {

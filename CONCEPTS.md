@@ -109,7 +109,7 @@ Conversation is primarily a state/data concept inside a Session, not a peer life
 
 The runtime responsibility that owns a Conversation’s complete ordered History and current model-view projection. In Pia, Session fulfills this role.
 
-Conversation Owner names a role, not a separate controller, type, or package beside Session. Session accepts at most one active user advance for its Conversation and rejects concurrent attempts rather than silently queueing them. An overflow recovery may coordinate one input-started Run and one later input-free Run under the same Session guard; this does not prevent different Sessions or parallel-safe tools within one Run from executing concurrently. Conversation state does not independently acquire queue, cancel, close, or persistence lifecycle.
+Conversation Owner names a role, not a separate controller, type, or package beside Session. Session accepts at most one active user advance for its Conversation and rejects concurrent attempts rather than silently queueing them. One accepted Advance may consume explicitly admitted Follow-up inputs at settled Run boundaries as additional input-started Runs under the same guard; these are not concurrent Advance attempts. An overflow recovery may likewise coordinate one input-started Run and one later input-free Run under that guard. None of this prevents different Sessions or parallel-safe tools within one Run from executing concurrently. Conversation state does not independently acquire queue, cancel, close, or persistence lifecycle.
 
 ### Message
 
@@ -123,7 +123,7 @@ The authoritative, complete, ordered record of accepted Messages in a Conversati
 
 It retains successful, error, and aborted terminal assistant messages and the tool results that close accepted tool calls, including explicit not-executed results. It excludes partial stream formation, Provider Request Snapshots, system prompts, tool schemas, logs, and UI-only events.
 
-Session commits each Run Message Delta after that engine invocation settles. One accepted coding user advance may commit an initial failed delta and a later continuation delta when bounded overflow recovery succeeds. Until future persistence creates a stronger requirement, Conversation History represents settled Runs rather than partially formed active-Run state.
+Session commits each Run Message Delta after that engine invocation settles. One accepted coding user advance may commit multiple input-started deltas while consuming Follow-up inputs, or an initial failed delta and a later input-free continuation delta when bounded overflow recovery succeeds. Until future persistence creates a stronger requirement, Conversation History represents settled Runs rather than partially formed active-Run state.
 
 *Avoid:* using “transcript” without qualification when it is unclear whether the complete Conversation History or the current derived Working Context is meant.
 
@@ -157,7 +157,7 @@ The current internal event payload carries only bounded semantic state such as f
 
 ### User Advance
 
-One transient Session operation that accepts a user input and coordinates everything required to settle that submission: optional pre-Run compaction, one input-started Run, bounded overflow recovery with an optional input-free continuation, Conversation History commits, and the final result snapshot.
+One transient Session operation that accepts an initial user input and coordinates everything required to reach quiescence from that submission: optional pre-Run compaction, its input-started Run, any explicitly admitted Follow-up inputs consumed as later input-started Runs, bounded overflow recovery with an optional input-free continuation for each eligible Run, Conversation History commits, and the final result snapshot.
 
 “Advance” is a precise operation boundary used to distinguish the complete user request from an internal Run. It is not a fourth long-lived runtime object, does not require its own owner or package, and does not add another lock or persisted state machine. Session performs it.
 
@@ -169,9 +169,9 @@ Steering does not start a concurrent Run, preempt an in-flight Provider or tool 
 
 ### Follow-up
 
-User input accepted while a Session execution is active but reserved for a later sequential user advance after the current execution reaches an eligible settlement boundary.
+User input accepted while a Session Advance is active but reserved for a later sequential input-started Run under that same Advance, after the current Run reaches an eligible settlement boundary and commits its Message Delta.
 
-A pending Follow-up is distinct from Steering and keeps the Session from reporting true idle until it is either consumed or explicitly discarded by a closing control operation.
+Successful Follow-up admission transfers responsibility for that input from the caller to Session; it acknowledges acceptance, not execution completion or a per-input result. A pending Follow-up is not a Conversation Message until its Run accepts it. It is distinct from Steering and keeps the Session from reporting true quiescence until it is consumed or an abnormal Advance settlement explicitly hands it back to the host.
 
 ### Session Journal
 
