@@ -19,7 +19,7 @@ func TestExecuteValidatesArgumentsBeforeReadingConfiguration(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "missing", args: nil},
+		{name: "missing"},
 		{name: "too many", args: []string{"one", "two"}},
 		{name: "blank", args: []string{" \t\n"}},
 	}
@@ -64,13 +64,13 @@ func TestExecuteRequiresInheritedKeyBeforeReadingWorkspace(t *testing.T) {
 	}
 }
 
-func TestExecuteReturnsWorkingDirectoryFailureBeforeRun(t *testing.T) {
+func TestExecuteReturnsWorkingDirectoryFailureBeforeConstructingSession(t *testing.T) {
 	getwdErr := errors.New("cwd unavailable")
-	deps := successfulDependencies()
+	deps, _ := successfulDependencies()
 	deps.getwd = func() (string, error) { return "", getwdErr }
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		t.Fatal("Run started without a working directory")
-		return coding.RunResult{}, nil
+	deps.newSession = func(coding.SessionConfig) (codingSession, error) {
+		t.Fatal("Session constructed without a working directory")
+		return nil, nil
 	}
 
 	err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps)
@@ -79,83 +79,54 @@ func TestExecuteReturnsWorkingDirectoryFailureBeforeRun(t *testing.T) {
 	}
 }
 
-func TestExecutePassesRawTaskAndPrintsOnlyFinalText(t *testing.T) {
+func TestExecuteConstructsAdvancesClosesAndPrintsOnlyFinalText(t *testing.T) {
 	const task = "-fix the project exactly"
-	var gotInput coding.RunInput
-	deps := successfulDependencies()
-	deps.run = func(_ context.Context, input coding.RunInput) (coding.RunResult, error) {
-		gotInput = input
-		return coding.RunResult{Transcript: []ai.Message{
-			ai.UserMessage{Content: task},
-			ai.AssistantMessage{Content: []ai.AssistantContent{
-				ai.ThinkingContent{Thinking: "hidden reasoning"},
-				ai.ToolCall{ID: "call", Name: "read"},
-			}, StopReason: ai.StopReasonToolUse},
-			ai.ToolResultMessage{ToolCallID: "call", ToolName: "read", Content: "hidden tool result"},
-			ai.AssistantMessage{Content: []ai.AssistantContent{
-				ai.ThinkingContent{Thinking: "more hidden reasoning"},
-				ai.TextContent{Text: "finished"},
-			}, StopReason: ai.StopReasonLength},
-		}}, nil
+	deps, session := successfulDependencies()
+	var gotConfig coding.SessionConfig
+	deps.newSession = func(config coding.SessionConfig) (codingSession, error) {
+		gotConfig = config
+		session.observer = config.Observer
+		return session, nil
 	}
+	session.result = coding.AdvanceResult{History: []ai.Message{
+		ai.UserMessage{Content: task},
+		ai.AssistantMessage{Content: []ai.AssistantContent{
+			ai.ThinkingContent{Thinking: "hidden reasoning"},
+			ai.ToolCall{ID: "call", Name: "read"},
+		}, StopReason: ai.StopReasonToolUse},
+		ai.ToolResultMessage{ToolCallID: "call", ToolName: "read", Content: "hidden tool result"},
+		ai.AssistantMessage{Content: []ai.AssistantContent{
+			ai.ThinkingContent{Thinking: "more hidden reasoning"},
+			ai.TextContent{Text: "finished"},
+		}, StopReason: ai.StopReasonLength},
+	}}
 
 	var stdout bytes.Buffer
 	if err := execute(context.Background(), []string{task}, &stdout, io.Discard, deps); err != nil {
 		t.Fatalf("execute() error = %v", err)
 	}
-	if gotInput.WorkspacePath != "/workspace" || gotInput.Task != task || gotInput.APIKey != "key" {
-		t.Fatalf("Run input = %#v, want workspace, task, and key", gotInput)
+	if gotConfig.WorkspacePath != "/workspace" || gotConfig.DeepSeekAPIKey != "key" {
+		t.Fatalf("Session config = %#v, want workspace and key", gotConfig)
 	}
-	if gotInput.Observer == nil {
-		t.Fatal("Run input observer = nil, want live line observer")
+	if gotConfig.Observer == nil {
+		t.Fatal("Session config observer = nil, want live line observer")
 	}
-	if got, want := stdout.String(), "finished\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
+	if session.input != task {
+		t.Fatalf("Advance input = %q, want raw task %q", session.input, task)
 	}
-}
-
-func TestExecuteProjectsLiveEventsToStderrAndFinalTextToStdout(t *testing.T) {
-	deps := successfulDependencies()
-	deps.run = func(_ context.Context, input coding.RunInput) (coding.RunResult, error) {
-		input.Observer.Observe(observation.NewToolStarted(0, "read", "Read main.go"))
-		input.Observer.Observe(observation.NewToolSettled(
-			0,
-			"read",
-			"Read main.go",
-			observation.OutcomeSuccess,
-		))
-		return coding.RunResult{Transcript: []ai.Message{
-			ai.AssistantMessage{
-				Content:    []ai.AssistantContent{ai.TextContent{Text: "finished"}},
-				StopReason: ai.StopReasonStop,
-			},
-		}}, nil
-	}
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if err := execute(context.Background(), []string{"task"}, &stdout, &stderr, deps); err != nil {
-		t.Fatalf("execute() error = %v", err)
-	}
-	if got, want := stderr.String(), "pia: Read main.go\n"; got != want {
-		t.Fatalf("stderr = %q, want %q", got, want)
+	if session.closeCalls != 1 {
+		t.Fatalf("Close calls = %d, want 1", session.closeCalls)
 	}
 	if got, want := stdout.String(), "finished\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
 
-func TestExecutePrintsSuccessfulFinalTextDespiteObserverFailure(t *testing.T) {
+func TestExecuteProjectsLiveEventsAndReturnsObserverFailureAfterFinalText(t *testing.T) {
 	writeErr := errors.New("live stderr unavailable")
-	deps := successfulDependencies()
-	deps.run = func(_ context.Context, input coding.RunInput) (coding.RunResult, error) {
-		input.Observer.Observe(observation.NewToolStarted(0, "read", "Read main.go"))
-		return coding.RunResult{Transcript: []ai.Message{
-			ai.AssistantMessage{
-				Content:    []ai.AssistantContent{ai.TextContent{Text: "finished"}},
-				StopReason: ai.StopReasonStop,
-			},
-		}}, nil
+	deps, session := successfulDependencies()
+	session.onAdvance = func() {
+		session.observer.Observe(observation.NewToolStarted(0, "read", "Read main.go"))
 	}
 
 	var stdout bytes.Buffer
@@ -163,18 +134,18 @@ func TestExecutePrintsSuccessfulFinalTextDespiteObserverFailure(t *testing.T) {
 	if !errors.Is(err, writeErr) {
 		t.Fatalf("execute() error = %v, want observer write error", err)
 	}
-	if got, want := stdout.String(), "finished\n"; got != want {
-		t.Fatalf("stdout = %q, want successful final despite observer failure", got)
+	if got, want := stdout.String(), "done\n"; got != want {
+		t.Fatalf("stdout = %q, want successful final text", got)
 	}
 }
 
-func TestExecuteJoinsRunAndObserverFailures(t *testing.T) {
-	runErr := errors.New("coding failed")
+func TestExecuteJoinsSettlementAndObserverFailures(t *testing.T) {
+	advanceErr := errors.New("advance failed")
 	writeErr := errors.New("live stderr unavailable")
-	deps := successfulDependencies()
-	deps.run = func(_ context.Context, input coding.RunInput) (coding.RunResult, error) {
-		input.Observer.Observe(observation.NewToolStarted(0, "read", "Read main.go"))
-		return coding.RunResult{}, runErr
+	deps, session := successfulDependencies()
+	session.advanceErr = advanceErr
+	session.onAdvance = func() {
+		session.observer.Observe(observation.NewToolStarted(0, "read", "Read main.go"))
 	}
 
 	err := execute(
@@ -184,244 +155,176 @@ func TestExecuteJoinsRunAndObserverFailures(t *testing.T) {
 		errorWriter{err: writeErr},
 		deps,
 	)
-	if !errors.Is(err, runErr) || !errors.Is(err, writeErr) {
-		t.Fatalf("execute() error = %v, want joined Run and observer errors", err)
+	if !errors.Is(err, advanceErr) || !errors.Is(err, writeErr) {
+		t.Fatalf("execute() error = %v, want Advance and observer errors", err)
 	}
 }
 
-func TestExecuteDoesNotAddBlankLineToFinalTextWithNewline(t *testing.T) {
-	deps := successfulDependencies()
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return coding.RunResult{Transcript: []ai.Message{
-			ai.AssistantMessage{
-				Content:    []ai.AssistantContent{ai.TextContent{Text: "finished\n"}},
-				StopReason: ai.StopReasonStop,
-			},
-		}}, nil
-	}
-
-	var stdout bytes.Buffer
-	if err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps); err != nil {
-		t.Fatalf("execute() error = %v", err)
-	}
-	if got, want := stdout.String(), "finished\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-}
-
-func TestExecuteAllowsEmptyFinalText(t *testing.T) {
-	deps := successfulDependencies()
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return coding.RunResult{Transcript: []ai.Message{
-			ai.AssistantMessage{StopReason: ai.StopReasonStop},
-		}}, nil
-	}
-	var stdout bytes.Buffer
-	if err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps); err != nil {
-		t.Fatalf("execute() error = %v", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
-	}
-}
-
-func TestExecuteDoesNotBuildTraceWhenPathIsUnsetOrEmpty(t *testing.T) {
+func TestExecuteFinalTextFormatting(t *testing.T) {
 	tests := []struct {
-		name   string
-		values map[string]string
+		name string
+		text string
+		want string
 	}{
-		{name: "unset", values: map[string]string{deepSeekAPIKeyEnv: "key"}},
-		{name: "empty", values: map[string]string{deepSeekAPIKeyEnv: "key", tracePathEnv: ""}},
+		{name: "adds newline", text: "finished", want: "finished\n"},
+		{name: "keeps newline", text: "finished\n", want: "finished\n"},
+		{name: "allows empty", text: "", want: ""},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			deps := successfulDependencies()
-			deps.lookupEnv = environment(test.values)
-			deps.buildTrace = func(coding.RunResult, error) (coding.Trace, error) {
-				t.Fatal("trace was built without a non-empty trace path")
-				return coding.Trace{}, nil
-			}
-			deps.writeTrace = func(string, coding.Trace) error {
-				t.Fatal("trace was written without a non-empty trace path")
-				return nil
-			}
-			if err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps); err != nil {
+			deps, session := successfulDependencies()
+			session.result = coding.AdvanceResult{History: []ai.Message{
+				ai.AssistantMessage{
+					Content:    []ai.AssistantContent{ai.TextContent{Text: test.text}},
+					StopReason: ai.StopReasonStop,
+				},
+			}}
+			var stdout bytes.Buffer
+			if err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps); err != nil {
 				t.Fatalf("execute() error = %v", err)
+			}
+			if got := stdout.String(); got != test.want {
+				t.Fatalf("stdout = %q, want %q", got, test.want)
 			}
 		})
 	}
 }
 
-func TestExecuteWritesRequestedTraceAfterFailedRunAndSuppressesFinal(t *testing.T) {
-	runErr := errors.New("Provider failed")
-	result := coding.RunResult{Transcript: []ai.Message{
-		ai.AssistantMessage{Content: []ai.AssistantContent{ai.TextContent{Text: "partial"}}, StopReason: ai.StopReasonError},
-	}}
-	deps := successfulDependencies()
+func TestExecuteReturnsConstructorFailureWithoutTraceOrClose(t *testing.T) {
+	constructorErr := errors.New("construct failed")
+	deps, _ := successfulDependencies()
+	deps.lookupEnv = environment(map[string]string{
+		deepSeekAPIKeyEnv: "key",
+		tracePathEnv:      "/trace.json",
+	})
+	deps.newSession = func(coding.SessionConfig) (codingSession, error) {
+		return nil, constructorErr
+	}
+	deps.buildTrace = func(coding.SessionInfo, coding.AdvanceResult, error) (coding.Trace, error) {
+		t.Fatal("trace built without a constructed Session")
+		return coding.Trace{}, nil
+	}
+
+	err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps)
+	if !errors.Is(err, constructorErr) {
+		t.Fatalf("execute() error = %v, want constructor error", err)
+	}
+}
+
+func TestExecuteJoinsAdvanceAndCloseFailuresAndTracesSettlement(t *testing.T) {
+	advanceErr := errors.New("advance failed")
+	closeErr := errors.New("close failed")
+	deps, session := successfulDependencies()
+	session.advanceErr = advanceErr
+	session.closeErr = closeErr
 	deps.lookupEnv = environment(map[string]string{
 		deepSeekAPIKeyEnv: "key",
 		tracePathEnv:      "evidence/trace.json",
 	})
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return result, runErr
+
+	var tracedInfo coding.SessionInfo
+	var tracedResult coding.AdvanceResult
+	var tracedErr error
+	deps.buildTrace = func(
+		info coding.SessionInfo,
+		result coding.AdvanceResult,
+		err error,
+	) (coding.Trace, error) {
+		tracedInfo = info
+		tracedResult = result
+		tracedErr = err
+		return coding.Trace{SettlementError: err.Error()}, nil
 	}
-	traceBuilt := false
-	deps.buildTrace = func(gotResult coding.RunResult, gotErr error) (coding.Trace, error) {
-		traceBuilt = true
-		if !reflect.DeepEqual(gotResult, result) || !errors.Is(gotErr, runErr) {
-			t.Fatalf("trace input = (%#v, %v), want settled result and Run error", gotResult, gotErr)
-		}
-		return coding.Trace{RunError: gotErr.Error()}, nil
-	}
-	traceWritten := false
-	deps.writeTrace = func(path string, trace coding.Trace) error {
-		traceWritten = true
-		if got, want := path, "/workspace/evidence/trace.json"; got != want {
-			t.Fatalf("trace path = %q, want %q", got, want)
-		}
-		if trace.RunError != runErr.Error() {
-			t.Fatalf("trace RunError = %q, want %q", trace.RunError, runErr)
-		}
+	var tracePath string
+	deps.writeTrace = func(path string, _ coding.Trace) error {
+		tracePath = path
 		return nil
 	}
 
 	var stdout bytes.Buffer
 	err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps)
-	if !errors.Is(err, runErr) {
-		t.Fatalf("execute() error = %v, want Run error", err)
+	if !errors.Is(err, advanceErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("execute() error = %v, want Advance and Close errors", err)
 	}
-	if !traceBuilt || !traceWritten {
-		t.Fatal("requested trace was not built and written after failed Run")
+	if !reflect.DeepEqual(tracedInfo, session.info) ||
+		!reflect.DeepEqual(tracedResult, session.result) ||
+		!errors.Is(tracedErr, advanceErr) ||
+		!errors.Is(tracedErr, closeErr) {
+		t.Fatalf("trace input = (%#v, %#v, %v), want complete Session settlement", tracedInfo, tracedResult, tracedErr)
+	}
+	if tracePath != "/workspace/evidence/trace.json" {
+		t.Fatalf("trace path = %q, want workspace-relative path", tracePath)
 	}
 	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
+		t.Fatalf("stdout = %q, want failure to suppress final text", stdout.String())
 	}
 }
 
-func TestExecuteWritesRequestedTraceAfterSuccessfulRunAndPrintsFinal(t *testing.T) {
-	result := coding.RunResult{Transcript: []ai.Message{
-		ai.AssistantMessage{Content: []ai.AssistantContent{ai.TextContent{Text: "finished"}}, StopReason: ai.StopReasonStop},
-	}}
-	deps := successfulDependencies()
-	deps.lookupEnv = environment(map[string]string{
-		deepSeekAPIKeyEnv: "key",
-		tracePathEnv:      "evidence/trace.json",
-	})
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return result, nil
+func TestExecuteDoesNotBuildTraceWhenPathIsUnset(t *testing.T) {
+	deps, _ := successfulDependencies()
+	deps.buildTrace = func(coding.SessionInfo, coding.AdvanceResult, error) (coding.Trace, error) {
+		t.Fatal("trace built without a configured path")
+		return coding.Trace{}, nil
 	}
-	deps.buildTrace = func(gotResult coding.RunResult, gotErr error) (coding.Trace, error) {
-		if !reflect.DeepEqual(gotResult, result) || gotErr != nil {
-			t.Fatalf("trace input = (%#v, %v), want successful settled result", gotResult, gotErr)
-		}
-		return coding.Trace{Workspace: "/workspace"}, nil
-	}
-	traceWritten := false
-	deps.writeTrace = func(path string, trace coding.Trace) error {
-		traceWritten = true
-		if got, want := path, "/workspace/evidence/trace.json"; got != want {
-			t.Fatalf("trace path = %q, want %q", got, want)
-		}
-		if trace.Workspace != "/workspace" {
-			t.Fatalf("trace Workspace = %q, want /workspace", trace.Workspace)
-		}
-		return nil
-	}
-
-	var stdout bytes.Buffer
-	if err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps); err != nil {
+	if err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps); err != nil {
 		t.Fatalf("execute() error = %v", err)
 	}
-	if !traceWritten {
-		t.Fatal("requested trace was not written after successful Run")
+}
+
+func TestExecuteTraceFailuresSuppressFinalText(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*dependencies, error)
+	}{
+		{
+			name: "build",
+			configure: func(deps *dependencies, want error) {
+				deps.buildTrace = func(coding.SessionInfo, coding.AdvanceResult, error) (coding.Trace, error) {
+					return coding.Trace{}, want
+				}
+				deps.writeTrace = func(string, coding.Trace) error {
+					t.Fatal("trace writer called after build failure")
+					return nil
+				}
+			},
+		},
+		{
+			name: "write",
+			configure: func(deps *dependencies, want error) {
+				deps.writeTrace = func(string, coding.Trace) error { return want }
+			},
+		},
 	}
-	if got, want := stdout.String(), "finished\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			want := errors.New("trace failed")
+			deps, _ := successfulDependencies()
+			deps.lookupEnv = environment(map[string]string{
+				deepSeekAPIKeyEnv: "key",
+				tracePathEnv:      "/trace.json",
+			})
+			test.configure(&deps, want)
+
+			var stdout bytes.Buffer
+			err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps)
+			if !errors.Is(err, want) {
+				t.Fatalf("execute() error = %v, want trace error", err)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want trace failure to suppress final text", stdout.String())
+			}
+		})
 	}
 }
 
-func TestExecuteJoinsRunAndTraceErrors(t *testing.T) {
-	runErr := errors.New("Run failed")
-	traceErr := errors.New("trace failed")
-	deps := successfulDependencies()
-	deps.lookupEnv = environment(map[string]string{
-		deepSeekAPIKeyEnv: "key",
-		tracePathEnv:      "/trace.json",
-	})
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return coding.RunResult{}, runErr
-	}
-	deps.writeTrace = func(string, coding.Trace) error { return traceErr }
+func TestRunProcessPrintsEscapedSkillDiagnosticsAfterSuccess(t *testing.T) {
+	deps, session := successfulDependencies()
+	session.info.SkillDiagnostics = []coding.SkillDiagnostic{{
+		Path:    ".pia/skills/bad\npia: forged\r\x1b[31m/SKILL.md",
+		Message: "invalid\npia: forged\r\x1b[31m Skill",
+	}}
 
-	err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps)
-	if !errors.Is(err, runErr) || !errors.Is(err, traceErr) {
-		t.Fatalf("execute() error = %v, want joined Run and trace errors", err)
-	}
-}
-
-func TestExecuteTraceFailureSuppressesSuccessfulFinalText(t *testing.T) {
-	traceErr := errors.New("trace failed")
-	deps := successfulDependencies()
-	deps.lookupEnv = environment(map[string]string{
-		deepSeekAPIKeyEnv: "key",
-		tracePathEnv:      "/trace.json",
-	})
-	deps.writeTrace = func(string, coding.Trace) error { return traceErr }
-	var stdout bytes.Buffer
-
-	err := execute(context.Background(), []string{"task"}, &stdout, io.Discard, deps)
-	if !errors.Is(err, traceErr) {
-		t.Fatalf("execute() error = %v, want trace error", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want final text suppressed", stdout.String())
-	}
-}
-
-func TestExecuteTraceBuildFailureDoesNotCallWriter(t *testing.T) {
-	buildErr := errors.New("trace conversion failed")
-	deps := successfulDependencies()
-	deps.lookupEnv = environment(map[string]string{
-		deepSeekAPIKeyEnv: "key",
-		tracePathEnv:      "/trace.json",
-	})
-	deps.buildTrace = func(coding.RunResult, error) (coding.Trace, error) {
-		return coding.Trace{}, buildErr
-	}
-	deps.writeTrace = func(string, coding.Trace) error {
-		t.Fatal("trace writer was called after conversion failure")
-		return nil
-	}
-
-	err := execute(context.Background(), []string{"task"}, io.Discard, io.Discard, deps)
-	if !errors.Is(err, buildErr) {
-		t.Fatalf("execute() error = %v, want trace-build error", err)
-	}
-}
-
-func TestExecuteReturnsStdoutFailure(t *testing.T) {
-	writeErr := errors.New("stdout unavailable")
-	deps := successfulDependencies()
-	err := execute(context.Background(), []string{"task"}, errorWriter{err: writeErr}, io.Discard, deps)
-	if !errors.Is(err, writeErr) {
-		t.Fatalf("execute() error = %v, want stdout error", err)
-	}
-}
-
-func TestRunProcessPrintsSkillDiagnosticsOnSuccessfulRun(t *testing.T) {
-	deps := successfulDependencies()
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return coding.RunResult{
-			SkillDiagnostics: []coding.SkillDiagnostic{{
-				Path:    ".pia/skills/broken/SKILL.md",
-				Message: "required name is missing",
-			}},
-			Transcript: []ai.Message{ai.AssistantMessage{
-				Content:    []ai.AssistantContent{ai.TextContent{Text: "done"}},
-				StopReason: ai.StopReasonStop,
-			}},
-		}, nil
-	}
 	var stdout, stderr bytes.Buffer
 	if got := runProcess(context.Background(), []string{"task"}, &stdout, &stderr, deps); got != 0 {
 		t.Fatalf("runProcess() code = %d, want 0; stderr=%q", got, stderr.String())
@@ -429,69 +332,46 @@ func TestRunProcessPrintsSkillDiagnosticsOnSuccessfulRun(t *testing.T) {
 	if got, want := stdout.String(), "done\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
-	if got, want := stderr.String(), "pia: warning: \".pia/skills/broken/SKILL.md\": \"required name is missing\"\n"; got != want {
-		t.Fatalf("stderr = %q, want %q", got, want)
+	wantWarning := "pia: warning: \".pia/skills/bad\\npia: forged\\r\\x1b[31m/SKILL.md\": \"invalid\\npia: forged\\r\\x1b[31m Skill\"\n"
+	if got := stderr.String(); got != wantWarning {
+		t.Fatalf("stderr = %q, want %q", got, wantWarning)
 	}
 }
 
-func TestRunProcessEscapesControlCharactersInSkillDiagnostics(t *testing.T) {
-	deps := successfulDependencies()
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return coding.RunResult{SkillDiagnostics: []coding.SkillDiagnostic{{
-			Path:    ".pia/skills/bad\npia: forged\r\x1b[31m/SKILL.md",
-			Message: "invalid\npia: forged\r\x1b[31m Skill",
-		}}}, nil
-	}
+func TestRunProcessDoesNotPrintSkillDiagnosticsAfterFailure(t *testing.T) {
+	deps, session := successfulDependencies()
+	session.info.SkillDiagnostics = []coding.SkillDiagnostic{{
+		Path:    ".pia/skills/broken/SKILL.md",
+		Message: "must not be printed",
+	}}
+	session.advanceErr = errors.New("advance failed")
 
-	var stderr bytes.Buffer
-	if got := runProcess(context.Background(), []string{"task"}, io.Discard, &stderr, deps); got != 0 {
-		t.Fatalf("runProcess() code = %d, want 0; stderr=%q", got, stderr.String())
-	}
-	want := "pia: warning: \".pia/skills/bad\\npia: forged\\r\\x1b[31m/SKILL.md\": \"invalid\\npia: forged\\r\\x1b[31m Skill\"\n"
-	if got := stderr.String(); got != want {
-		t.Fatalf("stderr = %q, want %q", got, want)
-	}
-}
-
-func TestRunProcessDoesNotPrintSkillDiagnosticsWhenRunFails(t *testing.T) {
-	runErr := errors.New("run failed")
-	deps := successfulDependencies()
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return coding.RunResult{SkillDiagnostics: []coding.SkillDiagnostic{{
-			Path:    ".pia/skills/broken/SKILL.md",
-			Message: "required name is missing",
-		}}}, runErr
-	}
 	var stderr bytes.Buffer
 	if got := runProcess(context.Background(), []string{"task"}, io.Discard, &stderr, deps); got != 1 {
 		t.Fatalf("runProcess() code = %d, want 1", got)
 	}
-	if got, want := stderr.String(), "pia: run failed\n"; got != want {
+	if got, want := stderr.String(), "pia: advance failed\n"; got != want {
 		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 
-func TestExecuteWithDiagnosticsReturnsStderrFailure(t *testing.T) {
+func TestExecuteReturnsSkillDiagnosticWriterFailure(t *testing.T) {
 	writeErr := errors.New("stderr unavailable")
-	deps := successfulDependencies()
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return coding.RunResult{SkillDiagnostics: []coding.SkillDiagnostic{{
-			Path:    ".pia/skills/broken/SKILL.md",
-			Message: "required name is missing",
-		}}}, nil
-	}
+	deps, session := successfulDependencies()
+	session.info.SkillDiagnostics = []coding.SkillDiagnostic{{
+		Path:    ".pia/skills/broken/SKILL.md",
+		Message: "required name is missing",
+	}}
+
 	err := execute(context.Background(), []string{"task"}, io.Discard, errorWriter{err: writeErr}, deps)
 	if !errors.Is(err, writeErr) {
-		t.Fatalf("execute() error = %v, want stderr failure", err)
+		t.Fatalf("execute() error = %v, want diagnostic writer failure", err)
 	}
 }
 
-func TestRunProcessReportsErrorsOnlyToStderr(t *testing.T) {
-	deps := successfulDependencies()
-	runErr := errors.New("broken")
-	deps.run = func(context.Context, coding.RunInput) (coding.RunResult, error) {
-		return coding.RunResult{}, runErr
-	}
+func TestRunProcessReportsSettlementErrorsOnlyToStderr(t *testing.T) {
+	deps, session := successfulDependencies()
+	session.advanceErr = errors.New("broken")
 	var stdout, stderr bytes.Buffer
 
 	code := runProcess(context.Background(), []string{"task"}, &stdout, &stderr, deps)
@@ -501,23 +381,60 @@ func TestRunProcessReportsErrorsOnlyToStderr(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "pia:") || !strings.Contains(got, runErr.Error()) {
-		t.Fatalf("stderr = %q, want temporary command context and error", got)
+	if got := stderr.String(); !strings.Contains(got, "pia:") || !strings.Contains(got, "broken") {
+		t.Fatalf("stderr = %q, want command context and settlement error", got)
 	}
 }
 
-func successfulDependencies() dependencies {
-	return dependencies{
+func successfulDependencies() (dependencies, *fakeSession) {
+	session := &fakeSession{
+		info: coding.SessionInfo{WorkspacePath: "/workspace"},
+		result: coding.AdvanceResult{History: []ai.Message{
+			ai.AssistantMessage{
+				Content:    []ai.AssistantContent{ai.TextContent{Text: "done"}},
+				StopReason: ai.StopReasonStop,
+			},
+		}},
+	}
+	deps := dependencies{
 		lookupEnv: environment(map[string]string{deepSeekAPIKeyEnv: "key"}),
 		getwd:     func() (string, error) { return "/workspace", nil },
-		run: func(context.Context, coding.RunInput) (coding.RunResult, error) {
-			return coding.RunResult{Transcript: []ai.Message{
-				ai.AssistantMessage{Content: []ai.AssistantContent{ai.TextContent{Text: "done"}}, StopReason: ai.StopReasonStop},
-			}}, nil
+		newSession: func(config coding.SessionConfig) (codingSession, error) {
+			session.observer = config.Observer
+			return session, nil
 		},
 		buildTrace: coding.BuildTrace,
 		writeTrace: func(string, coding.Trace) error { return nil },
 	}
+	return deps, session
+}
+
+type fakeSession struct {
+	info       coding.SessionInfo
+	result     coding.AdvanceResult
+	advanceErr error
+	closeErr   error
+	observer   observation.Observer
+	onAdvance  func()
+	input      string
+	closeCalls int
+}
+
+func (s *fakeSession) Info() coding.SessionInfo {
+	return s.info
+}
+
+func (s *fakeSession) Advance(_ context.Context, input string) (coding.AdvanceResult, error) {
+	s.input = input
+	if s.onAdvance != nil {
+		s.onAdvance()
+	}
+	return s.result, s.advanceErr
+}
+
+func (s *fakeSession) Close(context.Context) error {
+	s.closeCalls++
+	return s.closeErr
 }
 
 func environment(values map[string]string) func(string) (string, bool) {

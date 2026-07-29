@@ -23,9 +23,15 @@ const (
 type dependencies struct {
 	lookupEnv  func(string) (string, bool)
 	getwd      func() (string, error)
-	run        func(context.Context, coding.RunInput) (coding.RunResult, error)
-	buildTrace func(coding.RunResult, error) (coding.Trace, error)
+	newSession func(coding.SessionConfig) (codingSession, error)
+	buildTrace func(coding.SessionInfo, coding.AdvanceResult, error) (coding.Trace, error)
 	writeTrace func(string, coding.Trace) error
+}
+
+type codingSession interface {
+	Info() coding.SessionInfo
+	Advance(context.Context, string) (coding.AdvanceResult, error)
+	Close(context.Context) error
 }
 
 func main() {
@@ -73,33 +79,39 @@ func execute(
 	}
 
 	live := newLineObserver(stderr)
-	result, runErr := deps.run(ctx, coding.RunInput{
-		WorkspacePath: workspacePath,
-		Task:          task,
-		APIKey:        apiKey,
-		Observer:      live.Observe,
+	session, err := deps.newSession(coding.SessionConfig{
+		WorkspacePath:  workspacePath,
+		DeepSeekAPIKey: apiKey,
+		Observer:       live.Observe,
 	})
+	if err != nil {
+		return errors.Join(err, live.Err())
+	}
+	info := session.Info()
+	result, advanceErr := session.Advance(ctx, task)
+	closeErr := session.Close(ctx)
+	settlementErr := errors.Join(advanceErr, closeErr)
 	observerErr := live.Err()
 	var traceErr error
 	if tracePath != "" {
-		// Trace creation intentionally happens after Run settlement and does not
+		// Trace creation intentionally happens after Session settlement and does not
 		// reuse a canceled context. It preserves failure evidence but cannot roll
 		// back Provider calls or tool mutations that already completed.
-		trace, buildErr := deps.buildTrace(result, runErr)
+		trace, buildErr := deps.buildTrace(info, result, settlementErr)
 		if buildErr != nil {
 			traceErr = fmt.Errorf("build requested trace: %w", buildErr)
 		} else if writeErr := deps.writeTrace(tracePath, trace); writeErr != nil {
 			traceErr = fmt.Errorf("write requested trace: %w", writeErr)
 		}
 	}
-	if combined := errors.Join(runErr, traceErr); combined != nil {
+	if combined := errors.Join(settlementErr, traceErr); combined != nil {
 		return errors.Join(combined, observerErr)
 	}
 
 	// A failed live writer has already proved stderr unavailable. Do not let a
 	// repeated warning write suppress a successful final response on stdout.
 	if observerErr == nil {
-		for _, diagnostic := range result.SkillDiagnostics {
+		for _, diagnostic := range info.SkillDiagnostics {
 			if diagnostic.Path == "" {
 				if _, err := fmt.Fprintf(stderr, "pia: warning: %q\n", diagnostic.Message); err != nil {
 					return fmt.Errorf("write Skill diagnostic: %w", err)
@@ -134,9 +146,11 @@ func resolveTracePath(workspacePath, configured string) string {
 
 func systemDependencies() dependencies {
 	return dependencies{
-		lookupEnv:  os.LookupEnv,
-		getwd:      os.Getwd,
-		run:        coding.Run,
+		lookupEnv: os.LookupEnv,
+		getwd:     os.Getwd,
+		newSession: func(config coding.SessionConfig) (codingSession, error) {
+			return coding.NewSession(config)
+		},
 		buildTrace: coding.BuildTrace,
 		writeTrace: writeTraceFile,
 	}

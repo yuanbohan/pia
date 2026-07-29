@@ -9,7 +9,7 @@ import (
 )
 
 // Trace is an intentionally unstable, sensitive diagnostic snapshot created
-// after one coding Run settles. It contains no dedicated credential field, but
+// after one Session Advance settles. It contains no dedicated credential field, but
 // ordinary transcript content may still contain secrets emitted by a tool.
 type Trace struct {
 	Workspace        string            `json:"workspace"`
@@ -18,7 +18,7 @@ type Trace struct {
 	Tools            []TraceTool       `json:"tools"`
 	SkillDiagnostics []SkillDiagnostic `json:"skill_diagnostics,omitempty"`
 	Transcript       []TraceMessage    `json:"transcript"`
-	RunError         string            `json:"run_error,omitempty"`
+	SettlementError  string            `json:"run_error,omitempty"`
 }
 
 type TraceModel struct {
@@ -71,36 +71,36 @@ type TraceUsage struct {
 // BuildTrace converts interface-backed protocol messages into explicitly
 // tagged JSON data. Tool-call arguments remain strings so malformed arguments
 // in an error transcript cannot invalidate the enclosing trace document.
-func BuildTrace(result RunResult, runErr error) (Trace, error) {
+func BuildTrace(info SessionInfo, result AdvanceResult, settlementErr error) (Trace, error) {
 	trace := Trace{
-		Workspace:    result.WorkspacePath,
-		SystemPrompt: result.SystemPrompt,
+		Workspace:    info.WorkspacePath,
+		SystemPrompt: info.SystemPrompt,
 		Model: TraceModel{
-			Provider:        result.Model.Provider,
-			Name:            result.Model.Name,
-			Thinking:        result.Model.Thinking,
-			ReasoningEffort: result.Model.ReasoningEffort,
+			Provider:        info.Model.Provider,
+			Name:            info.Model.Name,
+			Thinking:        info.Model.Thinking,
+			ReasoningEffort: info.Model.ReasoningEffort,
 		},
-		Tools: make([]TraceTool, len(result.Tools)),
+		Tools: make([]TraceTool, len(info.Tools)),
 		SkillDiagnostics: append(
 			[]SkillDiagnostic(nil),
-			result.SkillDiagnostics...,
+			info.SkillDiagnostics...,
 		),
 	}
-	if runErr != nil {
-		trace.RunError = runErr.Error()
+	if settlementErr != nil {
+		trace.SettlementError = settlementErr.Error()
 	}
-	for index, tool := range result.Tools {
+	for index, tool := range info.Tools {
 		trace.Tools[index] = TraceTool{
 			Name:        tool.Name,
 			Description: tool.Description,
 			Parameters:  bytes.Clone(tool.Parameters),
 		}
 	}
-	if result.Transcript != nil {
-		trace.Transcript = make([]TraceMessage, len(result.Transcript))
+	if result.History != nil {
+		trace.Transcript = make([]TraceMessage, len(result.History))
 	}
-	for index, message := range result.Transcript {
+	for index, message := range result.History {
 		converted, err := traceMessage(message)
 		if err != nil {
 			return Trace{}, fmt.Errorf("coding: build trace message %d: %w", index, err)

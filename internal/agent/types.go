@@ -1,18 +1,13 @@
-// Package agent owns the stateful model and tool execution loop.
+// Package agent owns the run-local model and tool execution loop.
 package agent
 
 import (
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/yuanbohan/pia/internal/ai"
 	"github.com/yuanbohan/pia/internal/observation"
 )
-
-// ErrRunActive means another Agent Loop execution already owns this Agent's
-// Working Context.
-var ErrRunActive = errors.New("agent: run already active")
 
 // Config contains the stable dependencies of one Agent loop.
 type Config struct {
@@ -29,22 +24,19 @@ type RunResult struct {
 	NewMessages []ai.Message
 }
 
-// Agent owns the replaceable Working Context used by the model and tool loop.
-type Agent struct {
-	mu     sync.Mutex
-	active bool
-
-	provider       ai.Provider
-	systemPrompt   string
-	tools          map[string]registeredTool
-	toolSchemas    []ai.ToolSchema
-	workingContext []ai.Message
-	requestLimits  ai.RequestLimits
-	observer       observation.Observer
+// Engine owns immutable dependencies shared by run-local Agent Loop
+// executions. Its caller owns and serializes Conversation state.
+type Engine struct {
+	provider      ai.Provider
+	systemPrompt  string
+	tools         map[string]registeredTool
+	toolSchemas   []ai.ToolSchema
+	requestLimits ai.RequestLimits
+	observer      observation.Observer
 }
 
-// New constructs an Agent with an empty Working Context.
-func New(config Config) (*Agent, error) {
+// New constructs an Engine from stable Provider and tool dependencies.
+func New(config Config) (*Engine, error) {
 	if config.Provider == nil {
 		return nil, errors.New("agent: provider is required")
 	}
@@ -55,7 +47,7 @@ func New(config Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Agent{
+	return &Engine{
 		provider:      config.Provider,
 		systemPrompt:  config.SystemPrompt,
 		tools:         tools,

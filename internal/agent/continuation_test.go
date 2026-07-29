@@ -24,11 +24,8 @@ func TestContinueUsesExistingUserTailWithoutAppendingInput(t *testing.T) {
 	}
 	provider := newFaux(t, assistantStep(final))
 	runtime := newAgent(t, provider, "system")
-	if err := runtime.ReplaceWorkingContext(initial); err != nil {
-		t.Fatalf("ReplaceWorkingContext() error = %v", err)
-	}
 
-	result, err := runtime.Continue(context.Background())
+	result, err := runtime.Continue(context.Background(), initial)
 	if err != nil {
 		t.Fatalf("Continue() error = %v", err)
 	}
@@ -71,11 +68,8 @@ func TestContinueAcceptsPairedToolResultTail(t *testing.T) {
 	}
 	provider := newFaux(t, assistantStep(final))
 	runtime := newAgent(t, provider, "system")
-	if err := runtime.ReplaceWorkingContext(initial); err != nil {
-		t.Fatalf("ReplaceWorkingContext() error = %v", err)
-	}
 
-	result, err := runtime.Continue(context.Background())
+	result, err := runtime.Continue(context.Background(), initial)
 	if err != nil {
 		t.Fatalf("Continue() error = %v", err)
 	}
@@ -111,11 +105,8 @@ func TestContinueReusesToolLoopAndReturnsOnlyNewMessages(t *testing.T) {
 		},
 	})
 	initial := []ai.Message{ai.UserMessage{Content: "inspect then finish"}}
-	if err := runtime.ReplaceWorkingContext(initial); err != nil {
-		t.Fatalf("ReplaceWorkingContext() error = %v", err)
-	}
 
-	result, err := runtime.Continue(context.Background())
+	result, err := runtime.Continue(context.Background(), initial)
 	if err != nil {
 		t.Fatalf("Continue() error = %v", err)
 	}
@@ -166,11 +157,8 @@ func TestContinueReusesProviderFailureToolCallSettlement(t *testing.T) {
 		},
 	})
 	initial := []ai.Message{ai.UserMessage{Content: "finish from this accepted input"}}
-	if err := runtime.ReplaceWorkingContext(initial); err != nil {
-		t.Fatalf("ReplaceWorkingContext() error = %v", err)
-	}
 
-	result, err := runtime.Continue(context.Background())
+	result, err := runtime.Continue(context.Background(), initial)
 	if err == nil || !strings.Contains(err.Error(), failed.ErrorMessage) {
 		t.Fatalf("Continue() error = %v, want Provider failure", err)
 	}
@@ -263,11 +251,8 @@ func TestContinueRejectsInvalidContextWithoutCallingProvider(t *testing.T) {
 
 			provider := newFaux(t, assistantStep(ai.AssistantMessage{StopReason: ai.StopReasonStop}))
 			runtime := newAgent(t, provider, "system")
-			if err := runtime.ReplaceWorkingContext(test.messages); err != nil {
-				t.Fatalf("ReplaceWorkingContext() error = %v", err)
-			}
 
-			result, err := runtime.Continue(context.Background())
+			result, err := runtime.Continue(context.Background(), test.messages)
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), test.want) {
 				t.Fatalf("Continue() error = %v, want fragment %q", err, test.want)
 			}
@@ -291,13 +276,10 @@ func TestPreCanceledContinueDoesNotMutateWorkingContext(t *testing.T) {
 	provider := newFaux(t, assistantStep(final))
 	runtime := newAgent(t, provider, "system")
 	initial := []ai.Message{ai.UserMessage{Content: "finish this"}}
-	if err := runtime.ReplaceWorkingContext(initial); err != nil {
-		t.Fatalf("ReplaceWorkingContext() error = %v", err)
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := runtime.Continue(ctx)
+	result, err := runtime.Continue(ctx, initial)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Continue() error = %v, want context.Canceled", err)
 	}
@@ -308,7 +290,7 @@ func TestPreCanceledContinueDoesNotMutateWorkingContext(t *testing.T) {
 		t.Fatalf("Provider requests after canceled Continue = %d, want 0", got)
 	}
 
-	result, err = runtime.Continue(context.Background())
+	result, err = runtime.Continue(context.Background(), initial)
 	if err != nil {
 		t.Fatalf("second Continue() error = %v", err)
 	}
@@ -317,50 +299,5 @@ func TestPreCanceledContinueDoesNotMutateWorkingContext(t *testing.T) {
 	}
 	if got := provider.Requests()[0].Messages; !reflect.DeepEqual(got, initial) {
 		t.Fatalf("Provider messages = %#v, want unchanged context %#v", got, initial)
-	}
-}
-
-func TestActiveContinueRejectsRunContinueAndReplacement(t *testing.T) {
-	t.Parallel()
-
-	started := make(chan struct{})
-	release := make(chan struct{})
-	provider := &blockingProvider{started: started, release: release}
-	runtime := newAgent(t, provider, "system")
-	initial := []ai.Message{ai.UserMessage{Content: "finish this"}}
-	if err := runtime.ReplaceWorkingContext(initial); err != nil {
-		t.Fatalf("ReplaceWorkingContext() error = %v", err)
-	}
-
-	type continueReturn struct {
-		result agent.RunResult
-		err    error
-	}
-	returned := make(chan continueReturn, 1)
-	go func() {
-		result, err := runtime.Continue(context.Background())
-		returned <- continueReturn{result: result, err: err}
-	}()
-	<-started
-
-	if result, err := runtime.Run(context.Background(), "must not be accepted"); !errors.Is(err, agent.ErrRunActive) {
-		t.Fatalf("Run() error = %v, want ErrRunActive; result = %#v", err, result)
-	}
-	if result, err := runtime.Continue(context.Background()); !errors.Is(err, agent.ErrRunActive) {
-		t.Fatalf("second Continue() error = %v, want ErrRunActive; result = %#v", err, result)
-	}
-	if err := runtime.ReplaceWorkingContext([]ai.Message{
-		ai.UserMessage{Content: "must not replace"},
-	}); !errors.Is(err, agent.ErrRunActive) {
-		t.Fatalf("ReplaceWorkingContext() error = %v, want ErrRunActive", err)
-	}
-
-	close(release)
-	got := <-returned
-	if got.err != nil {
-		t.Fatalf("first Continue() error = %v", got.err)
-	}
-	if gotMessages := provider.Requests()[0].Messages; !reflect.DeepEqual(gotMessages, initial) {
-		t.Fatalf("Provider messages = %#v, want unchanged context %#v", gotMessages, initial)
 	}
 }

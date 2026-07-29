@@ -105,7 +105,7 @@ func TestRunFreezesToolDefinitionsAndSendsCompleteMultiTurnRequests(t *testing.T
 	runtime := newAgentWithTools(t, provider, "stable system", tool)
 	parameters[1] = 'Y'
 
-	result, err := runtime.Run(context.Background(), "inspect main.go")
+	result, err := runtime.Run(context.Background(), nil, "inspect main.go")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -195,7 +195,7 @@ func TestRunMapsCallLocalToolFailuresAndContinues(t *testing.T) {
 	}}
 	runtime := newAgentWithTools(t, provider, "system", decode, fail)
 
-	result, err := runtime.Run(context.Background(), "exercise failures")
+	result, err := runtime.Run(context.Background(), nil, "exercise failures")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -249,7 +249,7 @@ func TestRunDoesNotExecuteTruncatedToolCalls(t *testing.T) {
 	}}
 	runtime := newAgentWithTools(t, provider, "system", tool)
 
-	result, err := runtime.Run(context.Background(), "inspect")
+	result, err := runtime.Run(context.Background(), nil, "inspect")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -307,7 +307,7 @@ func TestRunRejectsMalformedToolCallProtocolBeforeAppendingProviderMessage(t *te
 			provider := &responseProvider{messages: []ai.AssistantMessage{test.message}}
 			runtime := newAgent(t, provider, "system")
 
-			result, err := runtime.Run(context.Background(), "invalid protocol")
+			result, err := runtime.Run(context.Background(), nil, "invalid protocol")
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Run() error = %v, want substring %q", err, test.want)
 			}
@@ -337,7 +337,7 @@ func TestRunTreatsEmptyToolNameAsCallLocalError(t *testing.T) {
 	}}
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Run(context.Background(), "empty tool name")
+	result, err := runtime.Run(context.Background(), nil, "empty tool name")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -370,7 +370,7 @@ func TestRunExecutesToolCallsWhenStopReasonIsStop(t *testing.T) {
 	}}
 	runtime := newAgentWithTools(t, provider, "system", tool)
 
-	if _, err := runtime.Run(context.Background(), "inspect"); err != nil {
+	if _, err := runtime.Run(context.Background(), nil, "inspect"); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if got := executions.Load(); got != 1 {
@@ -553,7 +553,7 @@ func TestToolLocalTimeoutIsCallLocalAndLaterStageContinues(t *testing.T) {
 	)
 	runtime := newAgentWithTools(t, provider, "system", read, write)
 
-	result, err := runtime.Run(context.Background(), "timeout")
+	result, err := runtime.Run(context.Background(), nil, "timeout")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -666,7 +666,11 @@ func TestRunCancellationSettlesAllCallsAndNextRunUsesPairedHistory(t *testing.T)
 		}
 	}
 
-	second, err := runtime.Run(context.Background(), "continue after cancellation")
+	second, err := runtime.Run(
+		context.Background(),
+		first.result.NewMessages,
+		"continue after cancellation",
+	)
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
@@ -720,7 +724,7 @@ func TestProviderAbortedTerminalClosesCompletedToolCallsWithoutExecuting(t *test
 	}}
 	runtime := newAgentWithTools(t, provider, "system", tool)
 
-	first, err := runtime.Run(ctx, "inspect")
+	first, err := runtime.Run(ctx, nil, "inspect")
 	if !errors.Is(err, cause) {
 		t.Fatalf("first Run() error = %v, want cancellation cause", err)
 	}
@@ -738,7 +742,7 @@ func TestProviderAbortedTerminalClosesCompletedToolCallsWithoutExecuting(t *test
 		t.Fatalf("settlement result = %#v, want same-ID not-executed error", result)
 	}
 
-	second, err := runtime.Run(context.Background(), "continue")
+	second, err := runtime.Run(context.Background(), first.NewMessages, "continue")
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
@@ -777,7 +781,7 @@ func TestProviderErrorTerminalClosesToolCallsWithoutExecuting(t *testing.T) {
 		ai.ErrorEvent{Message: failed},
 	}}}, "system", tool)
 
-	result, err := runtime.Run(context.Background(), "inspect")
+	result, err := runtime.Run(context.Background(), nil, "inspect")
 	if err == nil || !strings.Contains(err.Error(), "upstream disconnected") {
 		t.Fatalf("Run() error = %v, want Provider failure", err)
 	}
@@ -811,7 +815,7 @@ func TestProviderErrorTerminalWithDuplicateToolCallIDIsProtocolError(t *testing.
 		ai.ErrorEvent{Message: malformed},
 	}}}, "system")
 
-	result, err := runtime.Run(context.Background(), "inspect")
+	result, err := runtime.Run(context.Background(), nil, "inspect")
 	if err == nil || !strings.Contains(err.Error(), "duplicate ID") {
 		t.Fatalf("Run() error = %v, want duplicate-ID protocol error", err)
 	}
@@ -860,7 +864,7 @@ func toolSchema(name string) ai.ToolSchema {
 	}
 }
 
-func newAgentWithTools(t *testing.T, provider ai.Provider, systemPrompt string, tools ...agent.Tool) *agent.Agent {
+func newAgentWithTools(t *testing.T, provider ai.Provider, systemPrompt string, tools ...agent.Tool) *agent.Engine {
 	t.Helper()
 	runtime, err := agent.New(agent.Config{
 		Provider:     provider,
@@ -976,10 +980,10 @@ type runReturn struct {
 	err    error
 }
 
-func runInBackground(runtime *agent.Agent, ctx context.Context, input string) <-chan runReturn {
+func runInBackground(runtime *agent.Engine, ctx context.Context, input string) <-chan runReturn {
 	returned := make(chan runReturn, 1)
 	go func() {
-		result, err := runtime.Run(ctx, input)
+		result, err := runtime.Run(ctx, nil, input)
 		returned <- runReturn{result: result, err: err}
 	}()
 	return returned

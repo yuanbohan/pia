@@ -74,19 +74,35 @@ func TestSignalHelperProcess(t *testing.T) {
 	deps := dependencies{
 		lookupEnv: os.LookupEnv,
 		getwd:     func() (string, error) { return workspacePath, nil },
-		run: func(ctx context.Context, _ coding.RunInput) (coding.RunResult, error) {
-			if err := os.WriteFile(readyPath, []byte("ready"), 0o600); err != nil {
-				return coding.RunResult{}, err
-			}
-			<-ctx.Done()
-			return coding.RunResult{}, context.Cause(ctx)
+		newSession: func(coding.SessionConfig) (codingSession, error) {
+			return signalSession{readyPath: readyPath}, nil
 		},
 		buildTrace: coding.BuildTrace,
 		writeTrace: func(path string, trace coding.Trace) error {
-			return os.WriteFile(path, []byte(trace.RunError), 0o600)
+			return os.WriteFile(path, []byte(trace.SettlementError), 0o600)
 		},
 	}
 	os.Exit(processMain([]string{"task"}, io.Discard, io.Discard, deps))
+}
+
+type signalSession struct {
+	readyPath string
+}
+
+func (signalSession) Info() coding.SessionInfo {
+	return coding.SessionInfo{}
+}
+
+func (s signalSession) Advance(ctx context.Context, _ string) (coding.AdvanceResult, error) {
+	if err := os.WriteFile(s.readyPath, []byte("ready"), 0o600); err != nil {
+		return coding.AdvanceResult{}, err
+	}
+	<-ctx.Done()
+	return coding.AdvanceResult{}, context.Cause(ctx)
+}
+
+func (signalSession) Close(context.Context) error {
+	return nil
 }
 
 func waitForPath(t *testing.T, path string) {

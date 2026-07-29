@@ -2,7 +2,7 @@
 
 ## 课程目标
 
-第一阶段通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。第二阶段继续迁移 Conversation/Working Context、compaction、Skills 与 overflow recovery 等 coding-relevant 能力；第三阶段优先建设可观察、可控制、可持久化且可 clean resume 的单 Session Runtime，并用最小交互终端把它接入日常 coding 工作。更长期的课程以 Pi parity 为能力下限，并通过受控评测追求稳定超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为；长期产品方向、指标和投入领域以根目录 [`STRATEGY.md`](../../STRATEGY.md) 为准。
+第一阶段通过阅读冻结的 Pi 实现并逐课完成 Go 语义移植，得到一个可运行、可测试、能在单一目录中完成固定真实 coding 任务的最小 headless Agent Runtime。第二阶段继续迁移 Conversation/Working Context、compaction、Skills 与 overflow recovery 等 coding-relevant 能力；第三阶段优先建设可观察、可控制、可持久化且可 safe resume 的单 Session Runtime，并用最小交互终端把它接入日常 coding 工作。更长期的课程以 Pi parity 为能力下限，并通过受控评测追求稳定超过 Pi。课程不复刻 TypeScript 文件结构，而是理解、选择并验证 Pi coding loop 的可观察行为；长期产品方向、指标和投入领域以根目录 [`STRATEGY.md`](../../STRATEGY.md) 为准。
 
 仓库与产品名统一为 **Pia**，Go module path 统一为 `github.com/yuanbohan/pia`；课程、计划和决策记录使用同一项目名称。
 
@@ -31,8 +31,8 @@
 |---|---|---|---|---|
 | 第一阶段 | Lessons 00–06 | 建立最小 headless coding loop，并用本地 `pia` 命令完成真实 one-shot coding task | [基础实施计划](../plans/2026-07-15-001-pi-core-go-learning-port-plan.md)、[Lesson 06 one-shot 实施计划](../plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md)、[第一阶段课程表](#phase-1-courses) | 全部已提交 |
 | 第二阶段 | Lessons 07–11 | 扩展 Conversation/Working Context、compaction、project-local Skills 与 overflow recovery，保持完整 History 和模型工作视图可独立演进 | [第二阶段滚动课程实施计划](#第二阶段滚动课程实施计划)、[第二阶段课程表](#phase-2-courses) | 全部已提交 |
-| 第三阶段 | Lesson 12 与待编号后续课 | 建立可日常使用、可持久化并能 clean resume 的单 Session Runtime 与最小交互终端 | [第三阶段滚动课程实施计划](#第三阶段滚动课程实施计划) | Lesson 12 已提交 |
-| 更长期后续 | 第三阶段之后 | 根据单 Session 真实使用证据，再拆分 interrupted recovery、multi-Session isolation、Provider retry、完整 TUI、Orchestration 与评测等方向 | [尚未编号的后续方向](#尚未编号的后续方向) | 尚未进入实施 |
+| 第三阶段 | Lessons 12–13 与待编号后续课 | 建立可日常使用、可持久化并能 safe resume 的单 Session Runtime 与最小交互终端 | [第三阶段滚动课程实施计划](#第三阶段滚动课程实施计划) | Lessons 12–13 已提交 |
+| 更长期后续 | 第三阶段之后 | 根据单 Session 真实使用证据，再拆分 in-place interrupted recovery、multi-Session isolation、Provider retry、完整 TUI、Orchestration 与评测等方向 | [尚未编号的后续方向](#尚未编号的后续方向) | 尚未进入实施 |
 
 根 README 只保留本页入口；阶段实施文档、逐课链接和状态以这里为准。第一阶段有稳定的基础计划与 Lesson 06 专项计划；第二、三阶段采用滚动计划，由本页课程表和对应 lesson 文档共同承载，不再创建重复的阶段计划文件。新增课程时，只需在所属阶段的课程表增加一行并链接 lesson 文档；边界尚未明确的能力先保留阶段内临时顺序或放入“尚未编号的后续方向”。
 
@@ -40,7 +40,7 @@
 
 第一阶段包含 Lessons 00–06。它的实施契约由[基础实施计划](../plans/2026-07-15-001-pi-core-go-learning-port-plan.md)与 [Lesson 06 one-shot 实施计划](../plans/2026-07-19-001-feature-pia-one-shot-coding-agent-plan.md)共同承载。
 
-下面使用 Lesson 07 已校准的 Conversation History、Working Context 和 Conversation Owner 术语描述第一阶段闭环，以保持当前文档一致；这只是后续课程对所有权的修正，不把 Lesson 07 归入第一阶段。
+下面使用 Lessons 07–13 校准后的 Conversation History、Working Context、Session 与 Agent Execution Engine 术语描述第一阶段闭环，以保持当前文档一致；这只是后续课程对所有权的修正，不把这些课程归入第一阶段。
 
 第一阶段只证明最短 coding 闭环：
 
@@ -58,9 +58,9 @@ task + system prompt + working context + tool schemas + workspace context
 
 核心术语：
 
-- `Core Agent`：通用模型与工具循环，拥有可替换的 Working Context，并负责 Provider 调用、工具循环和取消。
-- `Conversation Owner`：Coding Agent 的私有应用层责任，保存同一 Conversation 的完整有序内存 History，并提交 Core Agent 每次 Run 返回的 message delta；一次 overflow recovery 可在同一外层 guard 内顺序协调 input-started Run 与 input-free Continue。
-- `Run`：一次 accepted Agent Loop execution，可以包含多个模型 Turn；`Run(ctx, input)` 在接受时追加 user message，`Continue(ctx)` 从既有 user/tool-result tail 无输入继续。课程使用 `run_start/run_end`，引用 Pi 源码时保留 `agent_start/agent_end`。
+- `Agent Execution Engine`：run-local 的通用模型与工具循环；接收 Session 派生的 Working Context snapshot，负责 Provider 调用、工具循环和 cancellation settlement，并返回 message delta，不长期拥有 Conversation state。
+- `Conversation Owner`：保存同一 Conversation 完整有序 History 与 model-view projection 的责任；正式 Session 承担该角色，不另设并列 controller。Lesson 07 的 coding-owned `conversation` 是在 Session 出现前验证语义分离的临时实现。
+- `Run`：一次 accepted Agent Loop execution，可以包含多个模型 Turn；它可以接受新 user input，也可以从既有 user/tool-result tail 无输入继续。课程使用 `run_start/run_end`，引用 Pi 源码时保留 `agent_start/agent_end`。
 - `Turn`：一次 assistant response，以及它触发的 tool calls 和 tool results。
 - `Tool stage`：同一 assistant message 中的一个执行阶段。连续 parallel-safe calls 构成并行阶段，其他调用分别构成串行屏障。
 - `Headless`：没有 TUI 或网页界面。第一阶段还进一步限定为单目录、单 active Run 和单进程内存上下文，但这些不是“headless”一词本身的定义。
@@ -162,19 +162,21 @@ flowchart LR
 
 ## 第三阶段滚动课程实施计划
 
-第三阶段主题是 **单 Session Runtime：可观察、可控制、可日常交互、可持久化并可 clean resume**。它把第二阶段已经稳定的 Core Agent、complete Conversation History、replaceable Working Context、compaction、Skills 和 overflow recovery 组织成一个长期运行单元，并先让本地用户真正使用起来。Interrupted execution recovery、multi-Session isolation 与 Orchestrator 前置验收不再作为本阶段退出条件。
+第三阶段主题是 **单 Session Runtime：可观察、可控制、可日常交互、可持久化并可 safe resume**。它保留第二阶段已经验证的 complete Conversation History、model-view projection、compaction、Skills、overflow recovery 与 Agent Loop 行为，但不把当时的临时 owner 和 API 形状视为兼容义务。Lesson 13 先把它们重构成一个长期 Session 与 run-local execution engine，再让本地用户真正使用起来。Safe resume 同时覆盖正常关闭后的 exact resume，以及异常终止时回退到 last committed Advance 的 checkpoint fallback；保留并继续未完成 Advance 的 in-place interrupted execution recovery、multi-Session isolation 与 Orchestrator 前置验收不作为本阶段退出条件。
 
-本阶段使用一个收敛后的心智模型：Session 是长期 lifecycle object，Conversation 是它拥有的交互数据，Core Agent 是它调用的执行引擎，user advance 是处理一次用户提交的短期操作而不是第四个长期对象。当前 coding-owned Conversation role 只是正式 Session 出现前的过渡性 outer coordinator；单 Session lifecycle 开课时要吸收而不是包裹其重叠的 active 职责。
+本阶段使用一个收敛后的心智模型：Session 是每个 Conversation 唯一的长期 owner，拥有 Workspace/resources、Conversation History、compaction projection 与 lifecycle；Conversation 是它拥有的交互数据；Agent Execution Engine 是只消费派生 Working Context snapshot、返回 message delta 的 run-local component；user advance 是处理一次用户提交的短期操作而不是第四个长期对象。Lesson 13 实现前的 coding-owned `conversation` 与 stateful Core Agent 是正式 Session 出现前的过渡结构，已经按 D97 删除而不是包裹。
 
-Lesson 11 已经完成实现、验证与理解确认；学习者于 2026-07-26 明确开始 Lesson 12，开课源码校准见本课文档。下面七行是基于当前冻结 Pi 源码、Pia 代码边界和长期策略形成的**滚动假设**，不是七份已经定型的 implementation spec。Lesson 12 是最近且边界已足够清楚的稳定全局课次；其余行只有阶段内顺序，开课时必须重新阅读对应 Pi 源码与测试、追踪当时 Pia 路径，并允许拆分、合并、换序或推翻。
+Lessons 11–13 已经完成实现、验证、理解确认和提交。Lesson 13 的开课源码校准、最终边界和实现结果见本课文档。下面七行是基于当前冻结 Pi 源码、Pia 代码边界和长期策略形成的**滚动假设**，不是七份已经定型的 implementation spec。Lessons 12–13 是最近且边界已足够清楚的稳定全局课次；其余行只有阶段内顺序，开课时必须重新阅读对应 Pi 源码与测试、追踪当时 Pia 路径，并允许拆分、合并、换序或推翻。
 
 Lesson 12 是第三阶段的第一课，不是对第二阶段的再次补课。它观察第二阶段已经建立的 Run、tool、compaction 与 overflow-recovery 语义，并把这些事实转换成可由 headless consumer 使用的实时事件；它不回头改变 Lesson 11 的恢复闭环，也不在这一课实现 Session 持久化。
+
+Lesson 13 先完成一次 ownership refactor，再建立 lifecycle：删除 product-level `coding.Run` 与 coding-owned `conversation` controller，让 Session 独占 Workspace、History、projection 和 busy/cancel/wait/close，把 `internal/agent` 收敛为 run-local execution engine，并由 host 直接构造 Session、Advance 一次或多次、最后 Close。它保留已有 observable behavior，不保留旧函数、类型或重复 state；follow-up、steering、终端和持久化仍留在后续课程。
 
 ### 阶段准入与退出边界
 
 准入时，Pia 应已经能在一个内存 Conversation 中：保存完整 History、独立替换 Working Context、在 Runs 之间 threshold compact、按需使用 project-local Skills，并从一次明确 context overflow 中有界 compact-and-continue。
 
-退出时，Pia 应具备一个 internal 的单 Session Runtime 和一个最小本地交互终端：用户可以实时观察、顺序推进、steer、queue follow-up、取消和关闭长期 Session；正常 settled close 后，进程重启可以从 durable journal 重新打开原 workspace 并 clean resume。此退出信号不承诺 interrupted execution recovery、多个 Session instances、公共 SDK、网络协议、Manager/scheduler 或完整 TUI。
+退出时，Pia 应具备一个 internal 的单 Session Runtime 和一个最小本地交互终端：用户可以实时观察、顺序推进、steer、queue follow-up、取消和关闭长期 Session；正常 settled close 后，进程重启可以从 durable journal 重新打开原 workspace 并 exact resume；hard kill 后可以回退到 last committed Advance，警告 workspace 可能含部分副作用，并等待新的用户输入。此退出信号不承诺保留或继续未完成 Advance、多个 Session instances、公共 SDK、网络协议、Manager/scheduler 或完整 TUI。
 
 <a id="phase-3-courses"></a>
 
@@ -183,30 +185,32 @@ Lesson 12 是第三阶段的第一课，不是对第二阶段的再次补课。�
 | 阶段内课次 | 全局课次 | 解锁能力 | Pi 的大致做法与源码区域 | Pia 预先边界与非目标 | 结束信号 | 依赖 | 规模 | 状态 |
 |---|---:|---|---|---|---|---|---|---|
 | 三期 01 | 12 | [Semantic events 与实时 line observer](lessons/12-semantic-events-and-live-observer.md) | `packages/agent/src/{types,agent-loop,agent}.ts` 定义并顺序交付 run/turn/message/tool events，`AgentSession` 转发它们并补充 compaction 与 `agent_settled` | 先建立 terminal/semantic event ordering 与至少一个真实非交互 consumer；Core execution engine 报告 Run/Turn/message/tool facts，outer user-operation coordinator 只补充 Compaction 与整个 Advance settlement，overflow recovery 由 `reason=overflow` 的 compaction 加 continuation Run 组合表达；当前 producer 不固化成永久 Session 层，不做 token delta、持久化、输入控制或完整 TUI | observer 能在执行发生时按顺序重建 accepted user advance、其中的 Core Runs/Turns、terminal messages、tool starts/results、compaction attempt、overflow continuation 与最终 settlement，而不是事后猜 transcript | 11 | Large | 已提交 |
-| 三期 02 | 待编号 | 单个长期 in-memory Session lifecycle 与控制 | `AgentSession` 组合 prompt、abort、wait-for-idle、state 与 teardown，并在 core executions 外形成 settled boundary | 只支持顺序推进、busy/idle、cancel、wait 和 close 的一个 Session instance；不做持久化、公共 SDK、Manager 或网络服务 | 同一 Session 可接受多次 user advance，active control 与资源关闭确定收敛，close 后不再接受工作且无 goroutine/resource leak | 三期 01 | Large | 待开始 |
+| 三期 02 | 13 | [单 Session ownership、lifecycle 与执行控制](lessons/13-single-session-lifecycle-and-execution-control.md) | 冻结 Pi 的 `AgentSession`/core `Agent` 展示双层 state；Codex `Session` 内聚 history、configuration/services、active turn 与 input queue；OpenCode 拆分 durable Session、workspace Instance 与 runner registry。Pia 取其责任证据，不复制任何一种类型图 | 删除 product-level `coding.Run`、coding-owned `conversation` controller、长期 Core Working Context 与重复 guards；建立唯一长期 in-memory Session，拥有 Workspace、History、projection 与 lifecycle，并调用只消费 snapshot/返回 delta 的 run-local execution engine；支持多次顺序 Advance、busy/idle、cancel、wait、close；不做 queue、持久化、公共 SDK、Manager、网络或终端 | 同一 Session 可接受多次 user advance；每次 Working Context 都从权威 Session state 派生；busy 覆盖完整 Advance settlement；cancel 不提前发布 idle；wait 可观察最终收敛；Close 立即取消并永久停止 admission，caller context 可有界停止等待且不冒充 clean close，resources 只在已无 active work 后关闭；one-shot host 的 observable behavior 保持 | 12 | Large | 已提交 |
 | 三期 03 | 待编号 | Follow-up queue 与 quiescence | `AgentSession` 区分 follow-up 与 steering，并在当前 execution 结算后顺序推进 queued input | 先完成“当前 execution 结束后再开始下一次 user advance”的内存队列，并定义 pending input、settlement 与真正 idle；不注入 active Core loop，不持久化，不做 scheduler | 多条 follow-up 各消费一次且顺序确定；Session 只有在 active execution 和 pending follow-up 都清空后才报告 idle | 三期 01–02 | Medium | 待开始 |
 | 三期 04 | 待编号 | Steering queue 与 post-tool safe-boundary 注入 | core Agent 在 tool loop 的安全边界拉取 steering messages，`AgentSession` 维护 queue 并暴露状态 | 只允许 active execution 中的 input 在已定义的 tool settlement 后边界进入；不抢占正在执行的 Provider/tool，不启动并发 Core execution，不持久化或增加多用户优先级 | 多条 steering input 各提交一次且顺序确定，既不越过 active tool settlement，也与 follow-up 保持可观察区分 | 三期 01–03 | Large | 待开始 |
 | 三期 05 | 待编号 | 最小交互终端与 Codex-style controls | Pi interactive mode 订阅 Session 事件并把 terminal input 映射为 prompt、abort、queue 与 exit；具体产品按键参考当前 Codex 行为再校准 | 建立非 full-screen 的本地交互 host：idle input 启动 advance，active `Enter` 形成 steering，`Tab` 形成 follow-up，`Esc` 取消当前 execution 并保留 Session，`/exit` 取消后等待 settlement 再关闭；不以 Ctrl-C/Ctrl-D 为主控制，不做主题、picker、复杂布局或 UI-owned runtime state | 用户可在执行中继续输入；事件投影、取消、queue 和退出顺序确定，`/exit` 不执行尚未消费的 pending input，终端关闭后无遗留 Run 或资源 | 三期 01–04 | Large | 待开始 |
-| 三期 06 | 待编号 | Versioned durable Session journal | `SessionManager` 以 versioned append-only entries 保存 messages、compaction 与 lifecycle state，并验证记录 | 只保存 Session identity、固定 workspace binding、authoritative History、settled lifecycle facts 与独立 compaction records；首版只支持可证明 clean close 的恢复基础，不把 active/pending queue、内部 summary exchange 或 live event stream 当数据库，也不做 branch/tree、cloud DB 或跨 Session index | crash-safe append/close 与损坏输入测试证明 committed facts 可读取；能辨认 clean close，latest committed compaction 可重建 model view，版本不支持或尾部不完整时不静默改写历史 | 三期 01–05 | Large | 待开始 |
-| 三期 07 | 待编号 | Clean settled Session resume 与 Working Context 重建 | `SessionManager.buildSessionContext()` 从 entries、latest compaction 和 kept boundary 重建 model context，`AgentSession` 恢复 model/session state | `resume` 只接受 journal 能证明已经 clean settled/closed 且没有 pending input 的 Session，并重新打开记录的原 workspace；未知或 interrupted 状态明确拒绝，不自动重放，不因调用者 cwd 不同而 rebind，也不做 branch navigation | 正常 `/exit` 后重启，complete History、下一次 Provider request 与 compaction continuity 等价且不会重复 work；unclean journal 或原 workspace 不可用时明确失败 | 三期 06 | Large | 待开始 |
+| 三期 06 | 待编号 | Versioned durable Session journal | `SessionManager` 以 versioned append-only entries 保存 messages、compaction 与 lifecycle state，并验证记录 | 只保存 Session identity、固定 workspace binding、authoritative History、settled lifecycle facts、独立 compaction records 与可识别的 committed Advance checkpoints；不把 active/pending queue、内部 summary exchange 或 live event stream 当数据库，也不为精细 interrupted recovery 保存逐调用 in-flight state，不做 branch/tree、cloud DB 或跨 Session index | crash-safe append/close 与损坏输入测试证明 committed facts 和 last committed Advance 可读取；能辨认 clean/unclean termination，checkpoint 内 latest committed compaction 可重建 model view，版本不支持或无法验证有效前缀时不静默改写历史 | 三期 01–05 | Large | 待开始 |
+| 三期 07 | 待编号 | Safe Session resume 与 Working Context 重建 | `SessionManager.buildSessionContext()` 从 entries、latest compaction 和 kept boundary 重建 model context，`AgentSession` 恢复 model/session state | clean settled/closed 时 exact resume；unclean termination 时只恢复到 last committed Advance，忽略其后 tail，向 model projection 注入 workspace partial-effects warning，再等待新用户输入；两者都重新打开 recorded workspace，不自动重放、不按调用者 cwd rebind，也不保留/继续未完成 Advance或做 branch navigation | 正常 `/exit` 后重启时 complete History、下一次 Provider request 与 compaction continuity 等价且不会重复 work；hard kill 后可以从较早 checkpoint 继续且不自动执行旧调用；journal 无有效前缀或原 workspace 不可用时明确失败 | 三期 06 | Large | 待开始 |
 
 ### 第三阶段的滚动规则
 
 - 每一行只表达一个可独立讲解和验收的 capability，不预先确定公开类型、storage schema、event payload 或 package layout。
 - 后一行的存在不表示前一课实现时要预留它的 API。只有当前 concrete consumer 证明共享责任时才抽取 interface 或 common package。
-- 当前只固定 Lesson 12 的全局课号；后面六行虽然顺序已确认，仍要等最近课程证据稳定后逐一编号。
+- 当前只固定 Lessons 12–13 的全局课号；后面五行虽然顺序已确认，仍要等最近课程证据稳定后逐一编号。
 - Lesson 12 开课时仍要重新确认“哪个实时 line consumer 足以证明 event contract”。如果没有真实 consumer，不能只发布无人使用的 event types。
 - Persistence 不等于 event sourcing。Semantic events 服务实时观察；durable journal 服务权威恢复。是否共享内部事实必须由当时证据决定，不能先把两者合成一个 log。
 - D80 已固定 compaction 的持久化归属：未来使用 Session journal 中独立的 settled record，而不是 Conversation History、Working Context、live event stream 或 trace 文件。首版不为没有状态正确性需求的中途进程崩溃预写 durable `Started` record；若后续审计证据要求完整识别 interrupted compaction，再在 journal 课程重新评估成对 lifecycle entries。
 - D83 记录当前 workspace 判断：第三阶段首版让一个 Session 固定绑定创建时的 workspace root，并把该 binding 作为 durable Session metadata，而不是 Conversation Message。`resume` 从任何调用者 cwd 都重新打开记录的 workspace；路径不存在或不可访问时明确失败，不静默改绑到当前目录。原因是 workspace 决定 coding tools、相对路径、system prompt、project instructions、Skills 和数据外发边界，而未来 Orchestrator/IM 调用也没有可作为 Session authority 的进程 cwd。仓库搬迁、worktree、跨主机恢复或真实 TUI/Orchestrator consumer 出现时，必须重新评估显式 relocate/rebind 或 fork，而不是把当前判断固化为永久限制。
 - Follow-up 先于 steering 是当前的教学与依赖假设：先在 Session settlement 边界证明 queue/quiescence，再修改 active Core loop 的安全注入点；开课源码若证明两者共享不可分割的 owner 或相反依赖，必须在实现前改表。
 - 最小交互终端是第三阶段主路径的真实 host，不是新的 Runtime owner。它消费 events，调用 Session controls，并负责按键、输入缓冲和渲染；不得拥有 Conversation History、Working Context、compaction、queue settlement 或 persistence。
-- `Esc` 只取消当前 execution 并让 Session 可继续；active `/exit` 先请求取消，等待既有 settlement 与 commit section 收敛，丢弃尚未消费的 steering/follow-up，再关闭 Session。操作系统信号仍可作为外部取消来源，但 Ctrl-C/Ctrl-D 不是首版产品主控制。
-- Clean resume 只服务正常 close 后的主路径。Journal/restore 课程必须能够正面证明前一 owner 已 clean settled；没有这种证据时宁可明确拒绝，也不把旧 committed state 猜成可安全继续的当前状态。
-- 单 Session lifecycle 课程开课时必须重新审查 Session、Conversation 与 Core Agent 的 ownership。若 Session 已独占后两者并成为唯一 user-advance 入口，应优先让它吸收外层 lifecycle guard，并评估降低 Conversation/Core 的重复职责；不得机械叠加可能分歧的 `active`、`busy`、queue、wait、cancel 或 close 状态。局部 guard 只有在独立 package contract 或具体并发 invariant 仍需要时才保留。
-- 第三阶段先到单 Session clean resume 为止。Interrupted recovery、multi-Session isolation、Provider retry 与完整 TUI 由真实使用证据重新排序和拆课，不再为了形式完整阻塞日常主路径。
+- `Esc` 只取消当前 execution 并让 Session 可继续；active `/exit` 先永久停止 admission、立即请求取消，再在 host-owned grace period 内等待既有 settlement、commit section 与 resource close。若窗口耗尽，host 可以直接结束进程并留下 unclean Session，不能让 Runtime 强关仍被借用的 Workspace或冒充 clean close。确切默认 grace period（例如首版候选 3 秒）在最小交互终端课程结合真实取消耗时固定，不进入通用 Session policy。操作系统信号仍可作为外部取消来源，但 Ctrl-C/Ctrl-D 不是首版产品主控制。
+- Safe resume 区分两条路径：clean settled/closed 后 exact resume；unclean termination 后只恢复到 last committed Advance，忽略不完整 tail，并向模型提示 workspace 可能包含后来工作的部分副作用。两条路径都不自动重放；只有 journal 无法验证有效 committed prefix、版本不支持或 workspace 不可用时明确失败。
+- D97 已固定 Lesson 13 的单 owner 边界：Session 独占每个 Conversation 的长期 state、Workspace resources 与 lifecycle；Working Context 按 execution 派生；Agent Execution Engine 不保留 Conversation state 或第二个 active guard。该决定推翻 Lesson 07 的临时类型/owner 形状，但保留 History/model-view 分离与 ownership-independent delta 等行为契约。后续每课继续把新能力当作重新验证既有模块边界的证据；没有真实外部 consumer 时，不为兼容旧实现而增加 wrapper 或重复 state。
+- D100 已固定 Lesson 13 的最小 internal Go surface：host 使用 `NewSession -> Advance -> Close`，Session controls 为 `Cancel/Wait/Close`，构造静态信息与一次 Advance 的完整 History 分属 `SessionInfo` 和 `AdvanceResult`；`internal/agent.Engine` 只消费显式 Working Context snapshot 并返回 run-local delta。Pi 的大 options、Codex 的 generic `Submit(Op)`、OpenCode 的 ID registry 和公开 state polling 都不进入本课。
+- D101 新增一个尚未编号的 Session diagnostic timeline 方向：可选 host recorder 消费 ordered semantic events，并结合 `SessionInfo` 保存适合 trace、Provider/model 比较和 compaction threshold 优化的动作时间线；它不进入 Session 业务状态，也不取代 durable journal。当前 events 尚缺时间、稳定序号与压缩前后指标，具体 coverage、格式、保存位置和课序等待真实分析 consumer 开课校准。
+- 第三阶段先到单 Session safe resume 为止。保留并继续未完成 Advance 的 in-place interrupted recovery、multi-Session isolation、Provider retry 与完整 TUI 由真实使用证据重新排序和拆课，不再为了形式完整阻塞日常主路径。
 
-第三阶段明确不包含 Goal Runtime、Gateway、gRPC、IM adapters、公共 SDK、完整 TUI、interrupted execution recovery、multi-Session isolation、自动 Provider retry、worktree/GitHub 管理、完整 Agent Skills/community compatibility、正式 Pi 对照 benchmark、分布式 lease 或多进程调度。它们留在单 Session 日常使用与 clean resume 证据之后单独拆分。
+第三阶段明确不包含 Goal Runtime、Gateway、gRPC、IM adapters、公共 SDK、完整 TUI、in-place interrupted execution recovery、multi-Session isolation、自动 Provider retry、worktree/GitHub 管理、完整 Agent Skills/community compatibility、正式 Pi 对照 benchmark、分布式 lease 或多进程调度。它们留在单 Session 日常使用与 safe resume 证据之后单独拆分。
 
 ### 尚未编号的后续方向
 
@@ -215,14 +219,14 @@ Lesson 12 是第三阶段的第一课，不是对第二阶段的再次补课。�
 | Agent Skills 与社区兼容扩展 | Pi、Claude Code 与 Codex 支持更多 source scopes、metadata、symlink、resources 和 invocation/runtime 行为 | 在 Pia Skill v1 和 dedicated activation tool 稳定后，再分别评估 `.agents`/`.claude` project roots、global scopes、完整 Agent Skills、supporting resources 与 vendor semantics；整体是 XLarge，必须拆课 | Lesson 10 完成且真实 Pia Skills 使用暴露兼容需求后逐项编号 |
 | 项目指令兼容增强 | 冻结 Pi 从 global agent dir 和 ancestor directories 读取每层第一个 `AGENTS.md`/`CLAUDE.md`；Codex 与 Claude 的层级、候选和 lazy-loading 语义不同 | Lesson 06 已完成 workspace-root `AGENTS.md` 优先、`CLAUDE.md` fallback 的最小支持；完整 project-only instruction chain 是独立于 Skills 的 prompt/context 能力，不并入 Lesson 09/10，也不扫描 user/global instructions | Lesson 10 后，或 monorepo/nested-workspace 需求出现时，先校准 project root、启动目录和按需子目录语义再编号 |
 | Provider retry 与失败韧性 | `AgentSession` auto-retry 配合 `packages/ai/src/utils/retry.ts`，overflow 走独立 compaction path | 不在第三阶段主路径先猜 transient taxonomy；未来只 retry 有真实证据的 Provider/transport failure，不 retry tools，也不混入 overflow、预算或 circuit breaker | 最小终端或 Session telemetry 积累可复现失败分布后拆课 |
-| Interrupted execution recovery | Pi 以 append-only entries、tool settlement 和 resume checks 暴露不完整状态 | Clean resume 遇到无法证明正常 close 的 journal 先明确拒绝；以后再分别讨论 Provider in-flight、tool pre-start、tool running 与 result commit，禁止自动重放未知副作用 | 正常 journal/resume 已稳定，且真实 crash/kill 场景影响日常任务后拆分 |
-| Multi-Session instance isolation | Pi 的多个 `AgentSession`/`SessionManager` instances 各自拥有 model、queues、events 与 persistence | 先不为未来 Manager 增加同进程并发、全局锁或 workspace 协调；单 Session owner 稳定后再验证实例间无共享可变状态 | 单 Session clean resume 完成且 Orchestrator 设计准备进入时 |
+| In-place interrupted execution recovery | Pi 以 append-only entries、tool settlement 和 resume checks 暴露不完整状态 | 第三阶段已经允许 unclean Session 回退到 last committed Advance；这里仅讨论如何保留未完成 Advance 的部分 Turns，并分别处理 Provider in-flight、tool pre-start、tool running 与 result commit，继续禁止自动重放未知副作用 | checkpoint fallback 已稳定，且真实使用证明丢失整个最新 Advance 的代价值得增加复杂度后拆分 |
+| Multi-Session instance isolation | Pi 的多个 `AgentSession`/`SessionManager` instances 各自拥有 model、queues、events 与 persistence | 先不为未来 Manager 增加同进程并发、全局锁或 workspace 协调；单 Session owner 稳定后再验证实例间无共享可变状态 | 单 Session safe resume 完成且 Orchestrator 设计准备进入时 |
 | Goal Runtime 与高级执行保护 | Pi 的 Session 设置、retry 与 compaction 提供部分机制，但不替 Pia 定义 goal、deadline、cost、turn/tool budget 或 circuit breaker | Goal progression、wall-clock/model-turn/cost budget 与循环保险丝不是一个能力，不能打包成“Runtime 完善”；Provider retry 也按上一行独立处理 | Session telemetry 和真实长任务 failure distribution 可用后逐项拆课 |
 | Orchestration、Gateway 与 IM | Pi 的 coding core 提供 Session 生命周期与事件，但不替 Pia 定义外部服务拓扑 | Orchestrator 需要协调多个隔离 Session，Gateway 与 IM adapters 只做外层接入；整体是 XLarge 方向，必须按已证明的 Session、事件和任务生命周期责任拆分 | Single-Session persistence/resume 与后续 instance isolation 稳定后细化 |
-| 完整 TUI 与交互扩展 | Pi 的 interactive mode 订阅 Session 事件并处理 terminal、渲染和输入 | 第三阶段只做可日常使用的最小非 full-screen terminal host；主题、复杂布局、Session picker/history browser、完整 slash commands 与交互 polish 留待后续，且继续只做外层投影 | 最小终端、clean resume 和真实使用反馈稳定后逐项拆分 |
+| 完整 TUI 与交互扩展 | Pi 的 interactive mode 订阅 Session 事件并处理 terminal、渲染和输入 | 第三阶段只做可日常使用的最小非 full-screen terminal host；主题、复杂布局、Session picker/history browser、完整 slash commands 与交互 polish 留待后续，且继续只做外层投影 | 最小终端、safe resume 和真实使用反馈稳定后逐项拆分 |
 | 稳定对照评测 | Pi 没有替 Pia 定义对照协议；需要在两个 agent 外建立公平实验 | 评测契约、runner/corpus 和对照迭代是多个能力，不提前塞进一课 | coding-relevant Pi 能力完成覆盖审计后细化 |
 
-第三阶段已经为单 Session 日常使用与 clean resume 分配滚动系列，不表示这些能力已经实现，也不表示 Lesson 12 之后的临时课次已获得稳定全局编号。Interrupted recovery、multi-Session isolation、Provider retry、完整 TUI、Goal Runtime、Orchestrator/Agent Manager、Gateway、公共 SDK、gRPC、IM、多用户、多仓库、worktree/GitHub 管理、extensions 和 MCP 仍未进入已编号课程。它们是否属于长期策略与它们何时进入实施是两个问题；第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于已经确定后续公开 API。
+第三阶段已经为单 Session 日常使用与 safe resume 分配滚动系列，不表示这些能力已经实现，也不表示 Lesson 13 之后的临时课次已获得稳定全局编号。In-place interrupted recovery、multi-Session isolation、Provider retry、完整 TUI、Goal Runtime、Orchestrator/Agent Manager、Gateway、公共 SDK、gRPC、IM、多用户、多仓库、worktree/GitHub 管理、extensions 和 MCP 仍未进入已编号课程。它们是否属于长期策略与它们何时进入实施是两个问题；第 00 课已经讨论过的 lifecycle/listener 内容仍是学习记录，不等于已经确定后续公开 API。
 
 ### 长期 coding 能力与评测目标
 

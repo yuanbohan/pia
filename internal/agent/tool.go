@@ -107,8 +107,8 @@ type completedTool struct {
 	result ai.ToolResultMessage
 }
 
-func (a *Agent) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResultMessage, error) {
-	stages := a.toolStages(calls)
+func (e *Engine) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResultMessage, error) {
+	stages := e.toolStages(calls)
 	outcomes := make([]toolOutcome, len(calls))
 	displays := make([]toolDisplay, len(calls))
 
@@ -121,12 +121,12 @@ func (a *Agent) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai
 		if stage.parallel {
 			completed := make(chan completedTool, stage.end-stage.start)
 			for index := stage.start; index < stage.end; index++ {
-				displays[index] = a.observeToolStarted(index, calls[index])
+				displays[index] = e.observeToolStarted(index, calls[index])
 				index := index
 				go func() {
 					completed <- completedTool{
 						index:  index,
-						result: a.executeToolCall(ctx, calls[index]),
+						result: e.executeToolCall(ctx, calls[index]),
 					}
 				}()
 			}
@@ -136,7 +136,7 @@ func (a *Agent) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai
 					result:   settled.result,
 					assigned: true,
 				}
-				a.observeToolSettled(
+				e.observeToolSettled(
 					settled.index,
 					displays[settled.index],
 					settled.result,
@@ -144,12 +144,12 @@ func (a *Agent) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai
 			}
 		} else {
 			index := stage.start
-			displays[index] = a.observeToolStarted(index, calls[index])
+			displays[index] = e.observeToolStarted(index, calls[index])
 			outcomes[index] = toolOutcome{
-				result:   a.executeToolCall(ctx, calls[index]),
+				result:   e.executeToolCall(ctx, calls[index]),
 				assigned: true,
 			}
-			a.observeToolSettled(index, displays[index], outcomes[index].result)
+			e.observeToolSettled(index, displays[index], outcomes[index].result)
 		}
 
 		if cause := context.Cause(ctx); cause != nil {
@@ -161,19 +161,19 @@ func (a *Agent) executeToolBatch(ctx context.Context, calls []ai.ToolCall) ([]ai
 	return orderedToolResults(outcomes), nil
 }
 
-func (a *Agent) observeToolStarted(index int, call ai.ToolCall) toolDisplay {
-	if a.observer == nil {
+func (e *Engine) observeToolStarted(index int, call ai.ToolCall) toolDisplay {
+	if e.observer == nil {
 		return toolDisplay{}
 	}
 
 	display := toolDisplay{name: call.Name, summary: call.Name}
-	registered, exists := a.tools[call.Name]
+	registered, exists := e.tools[call.Name]
 	if exists {
 		if summary := registered.tool.DescribeInvocation(bytes.Clone(call.Arguments)); summary != "" {
 			display.summary = summary
 		}
 	}
-	a.observer.Observe(observation.NewToolStarted(
+	e.observer.Observe(observation.NewToolStarted(
 		index,
 		display.name,
 		display.summary,
@@ -181,12 +181,12 @@ func (a *Agent) observeToolStarted(index int, call ai.ToolCall) toolDisplay {
 	return display
 }
 
-func (a *Agent) observeToolSettled(
+func (e *Engine) observeToolSettled(
 	index int,
 	display toolDisplay,
 	result ai.ToolResultMessage,
 ) {
-	if a.observer == nil {
+	if e.observer == nil {
 		return
 	}
 
@@ -194,7 +194,7 @@ func (a *Agent) observeToolSettled(
 	if result.IsError {
 		outcome = observation.OutcomeError
 	}
-	a.observer.Observe(observation.NewToolSettled(
+	e.observer.Observe(observation.NewToolSettled(
 		index,
 		display.name,
 		display.summary,
@@ -202,10 +202,10 @@ func (a *Agent) observeToolSettled(
 	))
 }
 
-func (a *Agent) toolStages(calls []ai.ToolCall) []toolStage {
+func (e *Engine) toolStages(calls []ai.ToolCall) []toolStage {
 	stages := make([]toolStage, 0, len(calls))
 	for index := 0; index < len(calls); {
-		registered, exists := a.tools[calls[index].Name]
+		registered, exists := e.tools[calls[index].Name]
 		if !exists || !registered.canRunParallel {
 			stages = append(stages, toolStage{start: index, end: index + 1})
 			index++
@@ -214,7 +214,7 @@ func (a *Agent) toolStages(calls []ai.ToolCall) []toolStage {
 
 		end := index + 1
 		for end < len(calls) {
-			next, exists := a.tools[calls[end].Name]
+			next, exists := e.tools[calls[end].Name]
 			if !exists || !next.canRunParallel {
 				break
 			}
@@ -226,11 +226,11 @@ func (a *Agent) toolStages(calls []ai.ToolCall) []toolStage {
 	return stages
 }
 
-func (a *Agent) executeToolCall(ctx context.Context, call ai.ToolCall) ai.ToolResultMessage {
+func (e *Engine) executeToolCall(ctx context.Context, call ai.ToolCall) ai.ToolResultMessage {
 	if strings.TrimSpace(call.Name) == "" {
 		return toolErrorResult(call, fmt.Errorf("agent: tool call %q has an empty name", call.ID))
 	}
-	registered, exists := a.tools[call.Name]
+	registered, exists := e.tools[call.Name]
 	if !exists {
 		return toolErrorResult(call, fmt.Errorf("agent: unknown tool %q", call.Name))
 	}

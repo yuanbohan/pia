@@ -2,7 +2,6 @@ package coding
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,7 +15,6 @@ import (
 	readtool "github.com/yuanbohan/pia/internal/coding/tools/read"
 	skilltool "github.com/yuanbohan/pia/internal/coding/tools/skill"
 	writetool "github.com/yuanbohan/pia/internal/coding/tools/write"
-	"github.com/yuanbohan/pia/internal/observation"
 )
 
 const (
@@ -35,17 +33,7 @@ const (
 	productSplitPrefixMaxOutput  = 8_192
 )
 
-// RunInput contains the one-shot coding application inputs supplied by its
-// process host. APIKey is used only to construct the Provider and is never
-// copied into RunResult or trace metadata.
-type RunInput struct {
-	WorkspacePath string
-	Task          string
-	APIKey        string
-	Observer      observation.Observer
-}
-
-// ModelInfo is the non-credential product profile used for one coding Run.
+// ModelInfo is the non-credential product profile used by one Session.
 type ModelInfo struct {
 	Provider        string
 	Name            string
@@ -53,116 +41,94 @@ type ModelInfo struct {
 	ReasoningEffort string
 }
 
-// RunResult is the settled coding context retained for final projection and
-// optional diagnostics. Transcript is the complete Conversation History; the
-// separate Go error remains the Run outcome.
-type RunResult struct {
-	WorkspacePath    string
-	SystemPrompt     string
-	Model            ModelInfo
-	Tools            []ai.ToolSchema
-	SkillDiagnostics []SkillDiagnostic
-	Transcript       []ai.Message
-}
-
-// Run executes the fixed Phase 1 DeepSeek coding profile.
-func Run(ctx context.Context, input RunInput) (RunResult, error) {
-	provider, err := deepseek.New(productDeepSeekConfig(input.APIKey))
-	if err != nil {
-		return RunResult{Model: productModelInfo()}, fmt.Errorf("coding: create DeepSeek Provider: %w", err)
+// NewSession constructs the fixed DeepSeek coding profile for one Workspace.
+func NewSession(config SessionConfig) (*Session, error) {
+	if strings.TrimSpace(config.WorkspacePath) == "" {
+		return nil, errors.New("coding: workspace path is required")
 	}
-	return runWithProvider(ctx, input, provider)
-}
-
-func runWithProvider(
-	ctx context.Context,
-	input RunInput,
-	provider ai.Provider,
-) (RunResult, error) {
-	return runWithWorkspaceOperations(
-		ctx,
-		input,
+	provider, err := deepseek.New(productDeepSeekConfig(config.DeepSeekAPIKey))
+	if err != nil {
+		return nil, fmt.Errorf("coding: create DeepSeek Provider: %w", err)
+	}
+	return newSessionWithWorkspaceOperations(
+		config,
 		provider,
 		OpenWorkspace,
 		(*Workspace).Close,
 	)
 }
 
-func runWithWorkspaceOperations(
-	ctx context.Context,
-	input RunInput,
+func newSessionWithWorkspaceOperations(
+	config SessionConfig,
 	provider ai.Provider,
 	openWorkspace func(string) (*Workspace, error),
 	closeWorkspace func(*Workspace) error,
-) (result RunResult, err error) {
-	result.Model = productModelInfo()
-	if strings.TrimSpace(input.Task) == "" {
-		return result, fmt.Errorf("coding: task is required")
-	}
+) (session *Session, err error) {
 	if provider == nil {
-		return result, fmt.Errorf("coding: Provider is required")
+		return nil, errors.New("coding: Provider is required")
 	}
 
-	workspace, err := openWorkspace(input.WorkspacePath)
+	workspace, err := openWorkspace(config.WorkspacePath)
 	if err != nil {
-		return result, fmt.Errorf("coding: open workspace: %w", err)
+		return nil, fmt.Errorf("coding: open workspace: %w", err)
 	}
-	// The workspace root is borrowed by every file tool. Close it only after
-	// the Conversation advance has settled all Provider and tool work, and
-	// preserve both the primary failure and any descriptor-cleanup failure for
-	// diagnosis.
+	owned := true
 	defer func() {
+		if !owned {
+			return
+		}
 		if closeErr := closeWorkspace(workspace); closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("coding: close workspace: %w", closeErr))
 		}
 	}()
-	result.WorkspacePath = workspace.Path()
 
 	skillDiscovery, err := discoverPiaSkills(workspace)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	result.SkillDiagnostics = append([]SkillDiagnostic(nil), skillDiscovery.Diagnostics...)
 	tools, err := newCodingTools(workspace, skillDiscovery.Entries)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	result.Tools = toolSchemas(tools)
+	schemas := toolSchemas(tools)
 	prompt, err := buildSystemPrompt(workspace, tools, skillDiscovery.Catalog)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	result.SystemPrompt = prompt
 
 	requestLimits := productRequestLimits()
-	core, err := agent.New(agent.Config{
+	engine, err := agent.New(agent.Config{
 		Provider:      provider,
 		SystemPrompt:  prompt,
 		Tools:         tools,
 		RequestLimits: requestLimits,
-		Observer:      input.Observer,
+		Observer:      config.Observer,
 	})
 	if err != nil {
-		return result, fmt.Errorf("coding: create Agent: %w", err)
+		return nil, fmt.Errorf("coding: create Agent execution engine: %w", err)
 	}
-	conversation, err := newConversation(conversationConfig{
-		Core:          core,
+	session, err = newSession(sessionDependencies{
+		Engine:        engine,
 		Provider:      provider,
-		SystemPrompt:  prompt,
-		Tools:         result.Tools,
 		RequestLimits: requestLimits,
 		Compaction:    productCompactionPolicy(),
-		Observer:      input.Observer,
+		Observer:      config.Observer,
+		Info: SessionInfo{
+			WorkspacePath:    workspace.Path(),
+			SystemPrompt:     prompt,
+			Model:            productModelInfo(),
+			Tools:            schemas,
+			SkillDiagnostics: skillDiscovery.Diagnostics,
+		},
+		CloseWorkspace: func() error {
+			return closeWorkspace(workspace)
+		},
 	})
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	history, runErr := conversation.run(ctx, input.Task)
-	result.Transcript = history
-	if runErr != nil {
-		return result, fmt.Errorf("coding: run Agent: %w", runErr)
-	}
-	return result, nil
+	owned = false
+	return session, nil
 }
 
 func productRequestLimits() ai.RequestLimits {
@@ -240,37 +206,4 @@ func productModelInfo() ModelInfo {
 		Thinking:        true,
 		ReasoningEffort: productReasoningLevel,
 	}
-}
-
-// FinalText concatenates text blocks from the last assistant message without
-// exposing reasoning, tool calls, tool results, or earlier assistant text.
-func (r RunResult) FinalText() string {
-	for index := len(r.Transcript) - 1; index >= 0; index-- {
-		var message ai.AssistantMessage
-		switch candidate := r.Transcript[index].(type) {
-		case ai.AssistantMessage:
-			message = candidate
-		case *ai.AssistantMessage:
-			if candidate == nil {
-				continue
-			}
-			message = *candidate
-		default:
-			continue
-		}
-
-		var final strings.Builder
-		for _, content := range message.Content {
-			switch content := content.(type) {
-			case ai.TextContent:
-				final.WriteString(content.Text)
-			case *ai.TextContent:
-				if content != nil {
-					final.WriteString(content.Text)
-				}
-			}
-		}
-		return final.String()
-	}
-	return ""
 }

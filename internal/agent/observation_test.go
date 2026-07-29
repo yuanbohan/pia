@@ -14,7 +14,7 @@ import (
 	"github.com/yuanbohan/pia/internal/observation"
 )
 
-func TestRunEmitsCoreSemanticEventsInSettlementOrder(t *testing.T) {
+func TestRunEmitsEngineSemanticEventsInSettlementOrder(t *testing.T) {
 	t.Parallel()
 
 	toolTerminal := toolAssistant(
@@ -46,7 +46,7 @@ func TestRunEmitsCoreSemanticEventsInSettlementOrder(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if _, err := runtime.Run(context.Background(), "inspect"); err != nil {
+	if _, err := runtime.Run(context.Background(), nil, "inspect"); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 
@@ -96,7 +96,7 @@ func TestRunEmitsErrorSettlementsWithoutCopyingProviderError(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if _, err := runtime.Run(context.Background(), "fail"); err == nil {
+	if _, err := runtime.Run(context.Background(), nil, "fail"); err == nil {
 		t.Fatal("Run() error = nil, want Provider failure")
 	}
 
@@ -113,35 +113,6 @@ func TestRunEmitsErrorSettlementsWithoutCopyingProviderError(t *testing.T) {
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events =\n%#v\nwant\n%#v", events, want)
-	}
-}
-
-func TestRunKeepsActiveGuardThroughSettledObservation(t *testing.T) {
-	t.Parallel()
-
-	provider := newFaux(t, assistantStep(ai.AssistantMessage{StopReason: ai.StopReasonStop}))
-	var runtime *agent.Agent
-	var reentryErr error
-	created, err := agent.New(agent.Config{
-		Provider: provider,
-		Observer: func(event observation.Event) {
-			run, ok := event.(observation.Run)
-			if !ok || run.Phase != observation.PhaseSettled {
-				return
-			}
-			_, reentryErr = runtime.Run(context.Background(), "re-enter")
-		},
-	})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	runtime = created
-
-	if _, err := runtime.Run(context.Background(), "first"); err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if !errors.Is(reentryErr, agent.ErrRunActive) {
-		t.Fatalf("observer re-entry error = %v, want ErrRunActive", reentryErr)
 	}
 }
 
@@ -168,7 +139,7 @@ func TestAgentWithoutObserverDoesNotDescribeToolInvocation(t *testing.T) {
 	)
 	runtime := newAgentWithTools(t, provider, "system", read)
 
-	if _, err := runtime.Run(context.Background(), "inspect"); err != nil {
+	if _, err := runtime.Run(context.Background(), nil, "inspect"); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if descriptionCalls != 0 {
@@ -213,7 +184,7 @@ func TestSerialToolErrorSettlesOnlyThatToolAsError(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if _, err := runtime.Run(context.Background(), "inspect then update"); err != nil {
+	if _, err := runtime.Run(context.Background(), nil, "inspect then update"); err != nil {
 		t.Fatalf("Run() error = %v, want call-local tool error to remain in the Turn", err)
 	}
 

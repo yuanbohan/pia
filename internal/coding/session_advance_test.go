@@ -17,15 +17,15 @@ import (
 	skilltool "github.com/yuanbohan/pia/internal/coding/tools/skill"
 )
 
-func TestNewConversationRequiresCoreAgent(t *testing.T) {
+func TestNewSessionRequiresExecutionEngine(t *testing.T) {
 	t.Parallel()
 
-	if _, err := newConversation(conversationConfig{}); err == nil {
-		t.Fatal("newConversation() error = nil, want missing-Core-Agent error")
+	if _, err := newSession(sessionDependencies{}); err == nil {
+		t.Fatal("newSession() error = nil, want missing execution-engine error")
 	}
 }
 
-func TestConversationCompactsBetweenRunsAndUpdatesPreviousSummary(t *testing.T) {
+func TestSessionCompactsBetweenRunsAndUpdatesPreviousSummary(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -55,20 +55,20 @@ func TestConversationCompactsBetweenRunsAndUpdatesPreviousSummary(t *testing.T) 
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "checkpoint two"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
-		conversationAssistantStep(second),
-		conversationAssistantStep(summaryOne),
-		conversationAssistantStep(third),
-		conversationAssistantStep(summaryTwo),
-		conversationAssistantStep(fourth),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
+		codingAssistantStep(second),
+		codingAssistantStep(summaryOne),
+		codingAssistantStep(third),
+		codingAssistantStep(summaryTwo),
+		codingAssistantStep(fourth),
 	)
-	conversation := newCompactingTestConversation(t, provider)
+	session := newCompactingTestSession(t, provider)
 
 	var history []ai.Message
 	for _, input := range []string{"first question", "second question", "third question", "fourth question"} {
 		var err error
-		history, err = conversation.run(context.Background(), input)
+		history, err = session.advanceHistory(context.Background(), input)
 		if err != nil {
 			t.Fatalf("run %q error = %v", input, err)
 		}
@@ -145,7 +145,7 @@ func TestConversationCompactsBetweenRunsAndUpdatesPreviousSummary(t *testing.T) 
 	}
 }
 
-func TestConversationCompactsSkillResultWithoutProtectedProjection(t *testing.T) {
+func TestSessionCompactsSkillResultWithoutProtectedProjection(t *testing.T) {
 	directory := t.TempDir()
 	writePiaSkill(t, directory, "review-go", `name: review-go
 description: Review Go changes.
@@ -177,20 +177,20 @@ description: Review Go changes.
 		Usage:      ai.Usage{InputTokens: threshold + 1},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
+	provider := newCodingFaux(t,
 		fauxToolStep(ai.ToolCall{ID: "load-skill", Name: "skill", Arguments: json.RawMessage(`{"name":"review-go"}`)}),
-		conversationAssistantStep(firstFinal),
-		conversationAssistantStep(ai.AssistantMessage{
+		codingAssistantStep(firstFinal),
+		codingAssistantStep(ai.AssistantMessage{
 			Content:    []ai.AssistantContent{ai.TextContent{Text: "The review Skill was used in the prior run."}},
 			StopReason: ai.StopReasonStop,
 		}),
-		conversationAssistantStep(ai.AssistantMessage{
+		codingAssistantStep(ai.AssistantMessage{
 			Content:    []ai.AssistantContent{ai.TextContent{Text: "continued"}},
 			StopReason: ai.StopReasonStop,
 		}),
 	)
 	limits := ai.RequestLimits{ContextCapacity: 100_000, ModelMaxOutput: 400, ContextSafety: 10}
-	core, err := agent.New(agent.Config{
+	engine, err := agent.New(agent.Config{
 		Provider:      provider,
 		SystemPrompt:  systemPrompt,
 		Tools:         tools,
@@ -199,12 +199,15 @@ description: Review Go changes.
 	if err != nil {
 		t.Fatalf("agent.New() error = %v", err)
 	}
-	conversation, err := newConversation(conversationConfig{
-		Core:          core,
-		Provider:      provider,
-		SystemPrompt:  systemPrompt,
-		Tools:         schemas,
-		RequestLimits: limits,
+	session, err := newSession(sessionDependencies{
+		Engine:         engine,
+		Provider:       provider,
+		RequestLimits:  limits,
+		CloseWorkspace: func() error { return nil },
+		Info: SessionInfo{
+			SystemPrompt: systemPrompt,
+			Tools:        schemas,
+		},
 		Compaction: compactionPolicy{
 			Threshold:                threshold,
 			SoftCeiling:              threshold - 100,
@@ -214,13 +217,13 @@ description: Review Go changes.
 		},
 	})
 	if err != nil {
-		t.Fatalf("newConversation() error = %v", err)
+		t.Fatalf("newSession() error = %v", err)
 	}
 
-	if _, err := conversation.run(context.Background(), firstInput); err != nil {
+	if _, err := session.advanceHistory(context.Background(), firstInput); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
-	history, err := conversation.run(context.Background(), secondInput)
+	history, err := session.advanceHistory(context.Background(), secondInput)
 	if err != nil {
 		t.Fatalf("second run error = %v", err)
 	}
@@ -248,7 +251,7 @@ description: Review Go changes.
 	}
 }
 
-func TestConversationCompactsWhenProjectedInputEqualsThreshold(t *testing.T) {
+func TestSessionCompactsWhenProjectedInputEqualsThreshold(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -256,25 +259,25 @@ func TestConversationCompactsWhenProjectedInputEqualsThreshold(t *testing.T) {
 		Usage:      ai.Usage{InputTokens: 90, OutputTokens: 8},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
-		conversationAssistantStep(ai.AssistantMessage{
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
+		codingAssistantStep(ai.AssistantMessage{
 			Content:    []ai.AssistantContent{ai.TextContent{Text: "turn prefix"}},
 			StopReason: ai.StopReasonStop,
 		}),
-		conversationAssistantStep(ai.AssistantMessage{
+		codingAssistantStep(ai.AssistantMessage{
 			Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
 			StopReason: ai.StopReasonStop,
 		}),
 	)
-	conversation := newCompactingTestConversation(t, provider)
+	session := newCompactingTestSession(t, provider)
 
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 	// The valid usage contributes 98 tokens and the five-character input adds
 	// ceil(5/4) = 2, exactly matching the test policy's threshold of 100.
-	if _, err := conversation.run(context.Background(), "12345"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "12345"); err != nil {
 		t.Fatalf("threshold run error = %v", err)
 	}
 
@@ -287,7 +290,7 @@ func TestConversationCompactsWhenProjectedInputEqualsThreshold(t *testing.T) {
 	}
 }
 
-func TestConversationSummaryFailureRejectsNewInputAndCanRetry(t *testing.T) {
+func TestSessionSummaryFailureRejectsNewInputAndCanRetry(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -304,30 +307,30 @@ func TestConversationSummaryFailureRejectsNewInputAndCanRetry(t *testing.T) {
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "recovered"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
-		conversationAssistantStep(second),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
+		codingAssistantStep(second),
 		faux.Step{Events: []ai.Event{ai.ErrorEvent{Message: ai.AssistantMessage{
 			StopReason:   ai.StopReasonError,
 			ErrorMessage: "summary unavailable",
 		}}}},
-		conversationAssistantStep(ai.AssistantMessage{
+		codingAssistantStep(ai.AssistantMessage{
 			Content:    []ai.AssistantContent{ai.TextContent{Text: "checkpoint"}},
 			StopReason: ai.StopReasonStop,
 		}),
-		conversationAssistantStep(recovered),
+		codingAssistantStep(recovered),
 	)
-	conversation := newCompactingTestConversation(t, provider)
+	session := newCompactingTestSession(t, provider)
 
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
-	wantHistory, err := conversation.run(context.Background(), "second question")
+	wantHistory, err := session.advanceHistory(context.Background(), "second question")
 	if err != nil {
 		t.Fatalf("second run error = %v", err)
 	}
 
-	history, err := conversation.run(context.Background(), "must not be accepted")
+	history, err := session.advanceHistory(context.Background(), "must not be accepted")
 	if err == nil || !strings.Contains(err.Error(), "summary unavailable") {
 		t.Fatalf("failed compaction error = %v, want summary failure", err)
 	}
@@ -335,7 +338,7 @@ func TestConversationSummaryFailureRejectsNewInputAndCanRetry(t *testing.T) {
 		t.Fatalf("History after failed compaction = %#v, want %#v", history, wantHistory)
 	}
 
-	history, err = conversation.run(context.Background(), "accepted after retry")
+	history, err = session.advanceHistory(context.Background(), "accepted after retry")
 	if err != nil {
 		t.Fatalf("retry run error = %v", err)
 	}
@@ -353,7 +356,7 @@ func TestConversationSummaryFailureRejectsNewInputAndCanRetry(t *testing.T) {
 	}
 }
 
-func TestConversationSequentialRunsReturnCompleteIndependentHistory(t *testing.T) {
+func TestSessionSequentialRunsReturnCompleteIndependentHistory(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -364,17 +367,17 @@ func TestConversationSequentialRunsReturnCompleteIndependentHistory(t *testing.T
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t, conversationAssistantStep(first), conversationAssistantStep(second))
-	conversation := newTestConversation(t, provider)
+	provider := newCodingFaux(t, codingAssistantStep(first), codingAssistantStep(second))
+	session := newHistoryTestSession(t, provider)
 
-	firstHistory, err := conversation.run(context.Background(), "first question")
+	firstHistory, err := session.advanceHistory(context.Background(), "first question")
 	if err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 	returnedAssistant := firstHistory[1].(ai.AssistantMessage)
 	returnedAssistant.Content[0] = ai.TextContent{Text: "caller mutation"}
 
-	secondHistory, err := conversation.run(context.Background(), "second question")
+	secondHistory, err := session.advanceHistory(context.Background(), "second question")
 	if err != nil {
 		t.Fatalf("second run error = %v", err)
 	}
@@ -398,19 +401,19 @@ func TestConversationSequentialRunsReturnCompleteIndependentHistory(t *testing.T
 	}
 }
 
-func TestConversationCommitsAcceptedRunDeltaBeforeReturningError(t *testing.T) {
+func TestSessionCommitsAcceptedRunDeltaBeforeReturningError(t *testing.T) {
 	t.Parallel()
 
 	failed := ai.AssistantMessage{
 		StopReason:   ai.StopReasonError,
 		ErrorMessage: "upstream unavailable",
 	}
-	provider := newConversationFaux(t, faux.Step{Events: []ai.Event{
+	provider := newCodingFaux(t, faux.Step{Events: []ai.Event{
 		ai.ErrorEvent{Message: failed},
 	}})
-	conversation := newTestConversation(t, provider)
+	session := newHistoryTestSession(t, provider)
 
-	history, err := conversation.run(context.Background(), "try once")
+	history, err := session.advanceHistory(context.Background(), "try once")
 	if err == nil || !strings.Contains(err.Error(), "upstream unavailable") {
 		t.Fatalf("run error = %v, want Provider failure", err)
 	}
@@ -423,23 +426,23 @@ func TestConversationCommitsAcceptedRunDeltaBeforeReturningError(t *testing.T) {
 	}
 }
 
-func TestConversationPreCanceledRunReturnsUnchangedHistory(t *testing.T) {
+func TestSessionPreCanceledRunReturnsUnchangedHistory(t *testing.T) {
 	t.Parallel()
 
 	answer := ai.AssistantMessage{
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "done"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t, conversationAssistantStep(answer))
-	conversation := newTestConversation(t, provider)
-	wantHistory, err := conversation.run(context.Background(), "accepted")
+	provider := newCodingFaux(t, codingAssistantStep(answer))
+	session := newHistoryTestSession(t, provider)
+	wantHistory, err := session.advanceHistory(context.Background(), "accepted")
 	if err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	history, err := conversation.run(ctx, "not accepted")
+	history, err := session.advanceHistory(ctx, "not accepted")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled run error = %v, want context.Canceled", err)
 	}
@@ -451,40 +454,40 @@ func TestConversationPreCanceledRunReturnsUnchangedHistory(t *testing.T) {
 	}
 }
 
-func TestConversationRejectsConcurrentRunWithoutQueueing(t *testing.T) {
+func TestSessionRejectsConcurrentRunWithoutQueueing(t *testing.T) {
 	t.Parallel()
 
-	provider := &conversationBlockingProvider{
+	provider := &blockingCodingProvider{
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	conversation := newTestConversation(t, provider)
+	session := newHistoryTestSession(t, provider)
 	type runReturn struct {
 		history []ai.Message
 		err     error
 	}
 	firstReturned := make(chan runReturn, 1)
 	go func() {
-		history, err := conversation.run(context.Background(), "first input")
+		history, err := session.advanceHistory(context.Background(), "first input")
 		firstReturned <- runReturn{history: history, err: err}
 	}()
 	<-provider.started
 
 	secondReturned := make(chan runReturn, 1)
 	go func() {
-		history, err := conversation.run(context.Background(), "second input")
+		history, err := session.advanceHistory(context.Background(), "second input")
 		secondReturned <- runReturn{history: history, err: err}
 	}()
 	select {
 	case second := <-secondReturned:
-		if !errors.Is(second.err, agent.ErrRunActive) {
-			t.Fatalf("second run error = %v, want ErrRunActive", second.err)
+		if !errors.Is(second.err, ErrSessionBusy) {
+			t.Fatalf("second Advance error = %v, want ErrSessionBusy", second.err)
 		}
 		if len(second.history) != 0 {
 			t.Fatalf("second history = %#v, want settled empty history", second.history)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("second run blocked instead of returning ErrRunActive")
+		t.Fatal("second Advance blocked instead of returning ErrSessionBusy")
 	}
 
 	close(provider.release)
@@ -501,22 +504,25 @@ func TestConversationRejectsConcurrentRunWithoutQueueing(t *testing.T) {
 	}
 }
 
-func newTestConversation(t *testing.T, provider ai.Provider) *conversation {
+func newHistoryTestSession(t *testing.T, provider ai.Provider) *Session {
 	t.Helper()
-	core, err := agent.New(agent.Config{Provider: provider, SystemPrompt: "system"})
+	engine, err := agent.New(agent.Config{Provider: provider, SystemPrompt: "system"})
 	if err != nil {
 		t.Fatalf("agent.New() error = %v", err)
 	}
-	conversation, err := newConversation(conversationConfig{Core: core})
+	session, err := newSession(sessionDependencies{
+		Engine:         engine,
+		CloseWorkspace: func() error { return nil },
+	})
 	if err != nil {
-		t.Fatalf("newConversation() error = %v", err)
+		t.Fatalf("newSession() error = %v", err)
 	}
-	return conversation
+	return session
 }
 
-func newCompactingTestConversation(t *testing.T, provider ai.Provider) *conversation {
+func newCompactingTestSession(t *testing.T, provider ai.Provider) *Session {
 	t.Helper()
-	return newCompactingTestConversationWithPolicy(t, provider, testCompactionPolicy())
+	return newCompactingTestSessionWithPolicy(t, provider, testCompactionPolicy())
 }
 
 func testCompactionPolicy() compactionPolicy {
@@ -529,18 +535,18 @@ func testCompactionPolicy() compactionPolicy {
 	}
 }
 
-func newCompactingTestConversationWithPolicy(
+func newCompactingTestSessionWithPolicy(
 	t *testing.T,
 	provider ai.Provider,
 	policy compactionPolicy,
-) *conversation {
+) *Session {
 	t.Helper()
 	limits := ai.RequestLimits{
 		ContextCapacity: 1000,
 		ModelMaxOutput:  400,
 		ContextSafety:   10,
 	}
-	core, err := agent.New(agent.Config{
+	engine, err := agent.New(agent.Config{
 		Provider:      provider,
 		SystemPrompt:  "system",
 		RequestLimits: limits,
@@ -548,17 +554,18 @@ func newCompactingTestConversationWithPolicy(
 	if err != nil {
 		t.Fatalf("agent.New() error = %v", err)
 	}
-	conversation, err := newConversation(conversationConfig{
-		Core:          core,
-		Provider:      provider,
-		SystemPrompt:  "system",
-		RequestLimits: limits,
-		Compaction:    policy,
+	session, err := newSession(sessionDependencies{
+		Engine:         engine,
+		Provider:       provider,
+		RequestLimits:  limits,
+		Compaction:     policy,
+		CloseWorkspace: func() error { return nil },
+		Info:           SessionInfo{SystemPrompt: "system"},
 	})
 	if err != nil {
-		t.Fatalf("newConversation() error = %v", err)
+		t.Fatalf("newSession() error = %v", err)
 	}
-	return conversation
+	return session
 }
 
 func withoutUsage(message ai.AssistantMessage) ai.AssistantMessage {
@@ -570,7 +577,7 @@ func messagesContain(messages []ai.Message, fragment string) bool {
 	return strings.Contains(serializeConversation(messages), fragment)
 }
 
-func newConversationFaux(t *testing.T, steps ...faux.Step) *faux.Provider {
+func newCodingFaux(t *testing.T, steps ...faux.Step) *faux.Provider {
 	t.Helper()
 	provider, err := faux.New(steps...)
 	if err != nil {
@@ -579,7 +586,7 @@ func newConversationFaux(t *testing.T, steps ...faux.Step) *faux.Provider {
 	return provider
 }
 
-func conversationAssistantStep(message ai.AssistantMessage) faux.Step {
+func codingAssistantStep(message ai.AssistantMessage) faux.Step {
 	events := []ai.Event{ai.StartEvent{}}
 	for index, content := range message.Content {
 		text := content.(ai.TextContent)
@@ -593,31 +600,31 @@ func conversationAssistantStep(message ai.AssistantMessage) faux.Step {
 	return faux.Step{Events: events}
 }
 
-type conversationBlockingProvider struct {
+type blockingCodingProvider struct {
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
 }
 
-func (p *conversationBlockingProvider) Stream(context.Context, ai.Request) ai.Stream {
+func (p *blockingCodingProvider) Stream(context.Context, ai.Request) ai.Stream {
 	p.once.Do(func() { close(p.started) })
-	return &conversationBlockingStream{release: p.release, message: p.message()}
+	return &blockingCodingStream{release: p.release, message: p.message()}
 }
 
-func (p *conversationBlockingProvider) message() ai.AssistantMessage {
+func (p *blockingCodingProvider) message() ai.AssistantMessage {
 	return ai.AssistantMessage{
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "done"}},
 		StopReason: ai.StopReasonStop,
 	}
 }
 
-type conversationBlockingStream struct {
+type blockingCodingStream struct {
 	release chan struct{}
 	message ai.AssistantMessage
 	done    bool
 }
 
-func (s *conversationBlockingStream) Receive() (ai.Event, error) {
+func (s *blockingCodingStream) Receive() (ai.Event, error) {
 	if s.done {
 		return nil, io.EOF
 	}

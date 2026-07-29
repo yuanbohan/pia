@@ -12,21 +12,21 @@ import (
 	"github.com/yuanbohan/pia/internal/observation"
 )
 
-func TestRunWithProviderDeliversNestedAdvanceAndCoreEvents(t *testing.T) {
+func TestSessionWithProviderDeliversNestedAdvanceAndEngineEvents(t *testing.T) {
 	t.Parallel()
 
 	terminal := textAssistant("done")
-	provider := newConversationFaux(t, conversationAssistantStep(terminal))
+	provider := newCodingFaux(t, codingAssistantStep(terminal))
 	var events []observation.Event
 
-	if _, err := runWithProvider(context.Background(), RunInput{
+	if _, err := advanceTestSessionWithProvider(context.Background(), testSessionAdvance{
 		WorkspacePath: t.TempDir(),
-		Task:          "finish",
+		Input:         "finish",
 		Observer: func(event observation.Event) {
 			events = append(events, event)
 		},
 	}, provider); err != nil {
-		t.Fatalf("runWithProvider() error = %v", err)
+		t.Fatalf("advance test Session error = %v", err)
 	}
 
 	want := []observation.Event{
@@ -57,15 +57,15 @@ func TestThresholdCompactionEventsSurroundOnlyRealAttempt(t *testing.T) {
 	}
 	summary := textAssistant("checkpoint")
 	second := textAssistant("second answer")
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
-		conversationAssistantStep(summary),
-		conversationAssistantStep(second),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
+		codingAssistantStep(summary),
+		codingAssistantStep(second),
 	)
 	var events []observation.Event
-	var conversation *conversation
+	var session *Session
 	projectionPublishedAtSettlement := false
-	conversation = newObservedCompactingConversation(t, provider, func(event observation.Event) {
+	session = newObservedCompactingSession(t, provider, func(event observation.Event) {
 		events = append(events, event)
 		compaction, ok := event.(observation.Compaction)
 		if !ok ||
@@ -73,16 +73,16 @@ func TestThresholdCompactionEventsSurroundOnlyRealAttempt(t *testing.T) {
 			compaction.Outcome != observation.OutcomeSuccess {
 			return
 		}
-		conversation.mu.Lock()
-		projectionPublishedAtSettlement = conversation.projection != nil
-		conversation.mu.Unlock()
+		session.mu.Lock()
+		projectionPublishedAtSettlement = session.projection != nil
+		session.mu.Unlock()
 	})
 
-	if _, err := conversation.run(context.Background(), "first"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 	events = nil
-	if _, err := conversation.run(context.Background(), "second"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "second"); err != nil {
 		t.Fatalf("second run error = %v", err)
 	}
 
@@ -128,20 +128,20 @@ func TestCompactionFailureSettlesAttemptAndAdvanceAsError(t *testing.T) {
 		StopReason:   ai.StopReasonError,
 		ErrorMessage: "summary failed",
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
 		recoveryErrorStep(summaryFailure),
 	)
 	var events []observation.Event
-	conversation := newObservedCompactingConversation(t, provider, func(event observation.Event) {
+	session := newObservedCompactingSession(t, provider, func(event observation.Event) {
 		events = append(events, event)
 	})
 
-	if _, err := conversation.run(context.Background(), "first"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 	events = nil
-	if _, err := conversation.run(context.Background(), "second"); err == nil {
+	if _, err := session.advanceHistory(context.Background(), "second"); err == nil {
 		t.Fatal("second run error = nil, want compaction failure")
 	}
 
@@ -179,22 +179,22 @@ func TestOverflowRecoveryUsesCompactionAndContinuationEvents(t *testing.T) {
 		StopReason:   ai.StopReasonError,
 		ErrorMessage: "context length exceeded",
 	}
-	provider := newConversationFaux(t,
+	provider := newCodingFaux(t,
 		fauxToolStep(call),
 		recoveryErrorStep(overflow),
-		conversationAssistantStep(textAssistant("checkpoint")),
-		conversationAssistantStep(textAssistant("recovered")),
+		codingAssistantStep(textAssistant("checkpoint")),
+		codingAssistantStep(textAssistant("recovered")),
 	)
 	var events []observation.Event
 
-	if _, err := runWithProvider(context.Background(), RunInput{
+	if _, err := advanceTestSessionWithProvider(context.Background(), testSessionAdvance{
 		WorkspacePath: workspace,
-		Task:          "read and finish",
+		Input:         "read and finish",
 		Observer: func(event observation.Event) {
 			events = append(events, event)
 		},
 	}, provider); err != nil {
-		t.Fatalf("runWithProvider() error = %v", err)
+		t.Fatalf("advance test Session error = %v", err)
 	}
 
 	want := []observation.Event{
@@ -244,55 +244,56 @@ func TestOverflowRecoveryUsesCompactionAndContinuationEvents(t *testing.T) {
 func TestAdvanceKeepsActiveGuardThroughSettledObservation(t *testing.T) {
 	t.Parallel()
 
-	provider := newConversationFaux(t, conversationAssistantStep(textAssistant("done")))
-	var conversation *conversation
+	provider := newCodingFaux(t, codingAssistantStep(textAssistant("done")))
+	var session *Session
 	var reentryErr error
 	observer := observation.Observer(func(event observation.Event) {
 		advance, ok := event.(observation.Advance)
 		if !ok || advance.Phase != observation.PhaseSettled {
 			return
 		}
-		_, reentryErr = conversation.run(context.Background(), "re-enter")
+		_, reentryErr = session.advanceHistory(context.Background(), "re-enter")
 	})
-	conversation = newObservedConversation(t, provider, observer)
+	session = newObservedSession(t, provider, observer)
 
-	if _, err := conversation.run(context.Background(), "first"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first"); err != nil {
 		t.Fatalf("run error = %v", err)
 	}
-	if !errors.Is(reentryErr, agent.ErrRunActive) {
-		t.Fatalf("observer re-entry error = %v, want ErrRunActive", reentryErr)
+	if !errors.Is(reentryErr, ErrSessionBusy) {
+		t.Fatalf("observer re-entry error = %v, want ErrSessionBusy", reentryErr)
 	}
 }
 
-func newObservedConversation(
+func newObservedSession(
 	t *testing.T,
 	provider ai.Provider,
 	observer observation.Observer,
-) *conversation {
+) *Session {
 	t.Helper()
 
-	core, err := agent.New(agent.Config{
+	engine, err := agent.New(agent.Config{
 		Provider: provider,
 		Observer: observer,
 	})
 	if err != nil {
 		t.Fatalf("agent.New() error = %v", err)
 	}
-	conversation, err := newConversation(conversationConfig{
-		Core:     core,
-		Observer: observer,
+	session, err := newSession(sessionDependencies{
+		Engine:         engine,
+		Observer:       observer,
+		CloseWorkspace: func() error { return nil },
 	})
 	if err != nil {
-		t.Fatalf("newConversation() error = %v", err)
+		t.Fatalf("newSession() error = %v", err)
 	}
-	return conversation
+	return session
 }
 
-func newObservedCompactingConversation(
+func newObservedCompactingSession(
 	t *testing.T,
 	provider ai.Provider,
 	observer observation.Observer,
-) *conversation {
+) *Session {
 	t.Helper()
 
 	limits := ai.RequestLimits{
@@ -300,7 +301,7 @@ func newObservedCompactingConversation(
 		ModelMaxOutput:  400,
 		ContextSafety:   10,
 	}
-	core, err := agent.New(agent.Config{
+	engine, err := agent.New(agent.Config{
 		Provider:      provider,
 		SystemPrompt:  "system",
 		RequestLimits: limits,
@@ -309,16 +310,17 @@ func newObservedCompactingConversation(
 	if err != nil {
 		t.Fatalf("agent.New() error = %v", err)
 	}
-	conversation, err := newConversation(conversationConfig{
-		Core:          core,
-		Provider:      provider,
-		SystemPrompt:  "system",
-		RequestLimits: limits,
-		Compaction:    testCompactionPolicy(),
-		Observer:      observer,
+	session, err := newSession(sessionDependencies{
+		Engine:         engine,
+		Provider:       provider,
+		RequestLimits:  limits,
+		Compaction:     testCompactionPolicy(),
+		Observer:       observer,
+		CloseWorkspace: func() error { return nil },
+		Info:           SessionInfo{SystemPrompt: "system"},
 	})
 	if err != nil {
-		t.Fatalf("newConversation() error = %v", err)
+		t.Fatalf("newSession() error = %v", err)
 	}
-	return conversation
+	return session
 }

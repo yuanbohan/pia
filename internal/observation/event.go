@@ -97,7 +97,7 @@ type Compaction struct {
 
 func (Compaction) isEvent() {}
 
-// Run observes one accepted Core Agent execution.
+// Run observes one accepted run-local Agent Engine execution.
 type Run struct {
 	Phase   Phase
 	Mode    RunMode

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yuanbohan/pia/internal/agent"
 	"github.com/yuanbohan/pia/internal/ai"
 	"github.com/yuanbohan/pia/internal/ai/provider/faux"
 )
@@ -203,7 +202,7 @@ func TestSummaryTextRejectsInvalidTerminalContent(t *testing.T) {
 	}
 }
 
-func TestConversationRejectsCandidateThatCannotFitBelowThreshold(t *testing.T) {
+func TestSessionRejectsCandidateThatCannotFitBelowThreshold(t *testing.T) {
 	t.Parallel()
 
 	answer := ai.AssistantMessage{
@@ -211,20 +210,20 @@ func TestConversationRejectsCandidateThatCannotFitBelowThreshold(t *testing.T) {
 		Usage:      ai.Usage{InputTokens: 110, OutputTokens: 10},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(answer),
-		conversationAssistantStep(ai.AssistantMessage{
+	provider := newCodingFaux(t,
+		codingAssistantStep(answer),
+		codingAssistantStep(ai.AssistantMessage{
 			Content:    []ai.AssistantContent{ai.TextContent{Text: "turn prefix"}},
 			StopReason: ai.StopReasonStop,
 		}),
 	)
-	conversation := newCompactingTestConversation(t, provider)
-	wantHistory, err := conversation.run(context.Background(), "first question")
+	session := newCompactingTestSession(t, provider)
+	wantHistory, err := session.advanceHistory(context.Background(), "first question")
 	if err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 
-	history, err := conversation.run(context.Background(), strings.Repeat("x", 400))
+	history, err := session.advanceHistory(context.Background(), strings.Repeat("x", 400))
 	if err == nil || !strings.Contains(err.Error(), "still at or above threshold") {
 		t.Fatalf("oversized candidate error = %v, want threshold failure", err)
 	}
@@ -244,7 +243,7 @@ func TestConversationRejectsCandidateThatCannotFitBelowThreshold(t *testing.T) {
 	}
 }
 
-func TestConversationAllowsCandidateAboveSoftCeilingBelowThreshold(t *testing.T) {
+func TestSessionAllowsCandidateAboveSoftCeilingBelowThreshold(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -256,22 +255,22 @@ func TestConversationAllowsCandidateAboveSoftCeilingBelowThreshold(t *testing.T)
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "second answer"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
-		conversationAssistantStep(ai.AssistantMessage{
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
+		codingAssistantStep(ai.AssistantMessage{
 			Content:    []ai.AssistantContent{ai.TextContent{Text: "prefix"}},
 			StopReason: ai.StopReasonStop,
 		}),
-		conversationAssistantStep(second),
+		codingAssistantStep(second),
 	)
 	policy := testCompactionPolicy()
 	policy.SoftCeiling = 30
-	conversation := newCompactingTestConversationWithPolicy(t, provider, policy)
+	session := newCompactingTestSessionWithPolicy(t, provider, policy)
 
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
-	if _, err := conversation.run(context.Background(), "next"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "next"); err != nil {
 		t.Fatalf("second run error = %v", err)
 	}
 
@@ -290,7 +289,7 @@ func TestConversationAllowsCandidateAboveSoftCeilingBelowThreshold(t *testing.T)
 	}
 }
 
-func TestConversationInvalidSummaryLeavesStateUnchanged(t *testing.T) {
+func TestSessionInvalidSummaryLeavesStateUnchanged(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -300,7 +299,7 @@ func TestConversationInvalidSummaryLeavesStateUnchanged(t *testing.T) {
 	}{
 		{
 			name: "empty summary",
-			step: conversationAssistantStep(ai.AssistantMessage{StopReason: ai.StopReasonStop}),
+			step: codingAssistantStep(ai.AssistantMessage{StopReason: ai.StopReasonStop}),
 			want: "empty text",
 		},
 		{
@@ -317,14 +316,14 @@ func TestConversationInvalidSummaryLeavesStateUnchanged(t *testing.T) {
 				Usage:      ai.Usage{InputTokens: 110, OutputTokens: 10},
 				StopReason: ai.StopReasonStop,
 			}
-			provider := newConversationFaux(t, conversationAssistantStep(answer), test.step)
-			conversation := newCompactingTestConversation(t, provider)
-			wantHistory, err := conversation.run(context.Background(), "first question")
+			provider := newCodingFaux(t, codingAssistantStep(answer), test.step)
+			session := newCompactingTestSession(t, provider)
+			wantHistory, err := session.advanceHistory(context.Background(), "first question")
 			if err != nil {
 				t.Fatalf("first run error = %v", err)
 			}
 
-			history, err := conversation.run(context.Background(), "not accepted")
+			history, err := session.advanceHistory(context.Background(), "not accepted")
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("invalid summary error = %v, want %q", err, test.want)
 			}
@@ -335,7 +334,7 @@ func TestConversationInvalidSummaryLeavesStateUnchanged(t *testing.T) {
 	}
 }
 
-func TestConversationCancellationDuringSummaryKeepsStateAndGuard(t *testing.T) {
+func TestSessionCancellationDuringSummaryKeepsStateAndGuard(t *testing.T) {
 	t.Parallel()
 
 	cancelErr := errors.New("operator canceled compaction")
@@ -351,8 +350,8 @@ func TestConversationCancellationDuringSummaryKeepsStateAndGuard(t *testing.T) {
 			StopReason: ai.StopReasonStop,
 		},
 	}
-	conversation := newCompactingTestConversation(t, provider)
-	wantHistory, err := conversation.run(context.Background(), "first question")
+	session := newCompactingTestSession(t, provider)
+	wantHistory, err := session.advanceHistory(context.Background(), "first question")
 	if err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
@@ -364,7 +363,7 @@ func TestConversationCancellationDuringSummaryKeepsStateAndGuard(t *testing.T) {
 	}
 	returned := make(chan runResult, 1)
 	go func() {
-		history, runErr := conversation.run(ctx, "canceled input")
+		history, runErr := session.advanceHistory(ctx, "canceled input")
 		returned <- runResult{history: history, err: runErr}
 	}()
 	select {
@@ -373,9 +372,9 @@ func TestConversationCancellationDuringSummaryKeepsStateAndGuard(t *testing.T) {
 		t.Fatal("summary request did not start")
 	}
 
-	concurrentHistory, concurrentErr := conversation.run(context.Background(), "concurrent input")
-	if !errors.Is(concurrentErr, agent.ErrRunActive) {
-		t.Fatalf("concurrent run error = %v, want ErrRunActive", concurrentErr)
+	concurrentHistory, concurrentErr := session.advanceHistory(context.Background(), "concurrent input")
+	if !errors.Is(concurrentErr, ErrSessionBusy) {
+		t.Fatalf("concurrent Advance error = %v, want ErrSessionBusy", concurrentErr)
 	}
 	if !reflect.DeepEqual(concurrentHistory, wantHistory) {
 		t.Fatalf("concurrent History = %#v, want %#v", concurrentHistory, wantHistory)
@@ -394,7 +393,7 @@ func TestConversationCancellationDuringSummaryKeepsStateAndGuard(t *testing.T) {
 		t.Fatal("canceled compaction did not return")
 	}
 
-	history, err := conversation.run(context.Background(), "accepted after cancel")
+	history, err := session.advanceHistory(context.Background(), "accepted after cancel")
 	if err != nil {
 		t.Fatalf("retry run error = %v", err)
 	}
@@ -404,83 +403,6 @@ func TestConversationCancellationDuringSummaryKeepsStateAndGuard(t *testing.T) {
 	)
 	if !reflect.DeepEqual(history, wantFinal) {
 		t.Fatalf("History after retry = %#v, want %#v", history, wantFinal)
-	}
-}
-
-func TestConversationReplacementFailureKeepsHistoryAndProjection(t *testing.T) {
-	t.Parallel()
-
-	initialAssistant := ai.AssistantMessage{
-		Content:    []ai.AssistantContent{ai.TextContent{Text: "first answer"}},
-		Usage:      ai.Usage{InputTokens: 110, OutputTokens: 10},
-		StopReason: ai.StopReasonStop,
-	}
-	initialHistory := []ai.Message{
-		ai.UserMessage{Content: "first question"},
-		initialAssistant,
-	}
-	coreProvider := &conversationBlockingProvider{
-		started: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-	limits := ai.RequestLimits{ContextCapacity: 1000, ModelMaxOutput: 400, ContextSafety: 10}
-	core, err := agent.New(agent.Config{
-		Provider:      coreProvider,
-		SystemPrompt:  "system",
-		RequestLimits: limits,
-	})
-	if err != nil {
-		t.Fatalf("agent.New() error = %v", err)
-	}
-	if err := core.ReplaceWorkingContext(initialHistory); err != nil {
-		t.Fatalf("seed Working Context error = %v", err)
-	}
-	summaryProvider := newConversationFaux(t, conversationAssistantStep(ai.AssistantMessage{
-		Content:    []ai.AssistantContent{ai.TextContent{Text: "prefix"}},
-		StopReason: ai.StopReasonStop,
-	}))
-	conversation, err := newConversation(conversationConfig{
-		Core:          core,
-		Provider:      summaryProvider,
-		SystemPrompt:  "system",
-		RequestLimits: limits,
-		Compaction:    testCompactionPolicy(),
-	})
-	if err != nil {
-		t.Fatalf("newConversation() error = %v", err)
-	}
-	conversation.history = ai.CloneMessages(initialHistory)
-
-	coreReturned := make(chan error, 1)
-	go func() {
-		_, runErr := core.Run(context.Background(), "direct active run")
-		coreReturned <- runErr
-	}()
-	select {
-	case <-coreProvider.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("direct Core Run did not start")
-	}
-
-	history, err := conversation.run(context.Background(), "must not be accepted")
-	if !errors.Is(err, agent.ErrRunActive) {
-		t.Fatalf("replacement error = %v, want ErrRunActive", err)
-	}
-	if !reflect.DeepEqual(history, initialHistory) {
-		t.Fatalf("History after replacement failure = %#v, want %#v", history, initialHistory)
-	}
-	if conversation.projection != nil {
-		t.Fatalf("projection published after replacement failure: %#v", conversation.projection)
-	}
-
-	close(coreProvider.release)
-	select {
-	case runErr := <-coreReturned:
-		if runErr != nil {
-			t.Fatalf("direct Core Run error = %v", runErr)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("direct Core Run did not settle")
 	}
 }
 

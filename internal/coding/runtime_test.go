@@ -15,9 +15,10 @@ import (
 
 	"github.com/yuanbohan/pia/internal/ai"
 	"github.com/yuanbohan/pia/internal/ai/provider/faux"
+	"github.com/yuanbohan/pia/internal/observation"
 )
 
-func TestRunWithProviderComposesStableMultiTurnCodingContext(t *testing.T) {
+func TestSessionWithProviderComposesStableMultiTurnCodingContext(t *testing.T) {
 	directory := t.TempDir()
 	writePromptFile(t, directory, "AGENTS.md", []byte("original project guidance"))
 	writePromptFile(t, directory, "input.txt", []byte("old value\n"))
@@ -31,9 +32,9 @@ func TestRunWithProviderComposesStableMultiTurnCodingContext(t *testing.T) {
 	)
 
 	const fakeKey = "fake-key-must-not-enter-runtime-data"
-	result, err := runWithProvider(
+	result, err := advanceTestSessionWithProvider(
 		context.Background(),
-		RunInput{WorkspacePath: directory, Task: "fix the project", APIKey: fakeKey},
+		testSessionAdvance{WorkspacePath: directory, Input: "fix the project"},
 		provider,
 	)
 	if err != nil {
@@ -87,7 +88,7 @@ func TestRunWithProviderComposesStableMultiTurnCodingContext(t *testing.T) {
 		}
 	}
 
-	trace, err := BuildTrace(result, nil)
+	trace, err := BuildTrace(result.SessionInfo, result.AdvanceResult, nil)
 	if err != nil {
 		t.Fatalf("build trace: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestRunWithProviderComposesStableMultiTurnCodingContext(t *testing.T) {
 	}
 }
 
-func TestRunWithProviderDoesNotSendUnselectedFileOrEnvironmentContent(t *testing.T) {
+func TestSessionWithProviderDoesNotSendUnselectedFileOrEnvironmentContent(t *testing.T) {
 	directory := t.TempDir()
 	const sentinel = "sentinel-only-visible-after-read"
 	writePromptFile(t, directory, "private.txt", []byte(sentinel))
@@ -110,9 +111,9 @@ func TestRunWithProviderDoesNotSendUnselectedFileOrEnvironmentContent(t *testing
 		fauxFinalStep("", "done"),
 	)
 
-	_, err := runWithProvider(
+	_, err := advanceTestSessionWithProvider(
 		context.Background(),
-		RunInput{WorkspacePath: directory, Task: "inspect private.txt"},
+		testSessionAdvance{WorkspacePath: directory, Input: "inspect private.txt"},
 		provider,
 	)
 	if err != nil {
@@ -139,7 +140,7 @@ func TestRunWithProviderDoesNotSendUnselectedFileOrEnvironmentContent(t *testing
 	}
 }
 
-func TestRunWithProviderDisclosesThenActivatesPiaSkill(t *testing.T) {
+func TestSessionWithProviderDisclosesThenActivatesPiaSkill(t *testing.T) {
 	directory := t.TempDir()
 	writePiaSkill(t, directory, "review-go", `name: review-go
 description: Review Go changes.
@@ -160,9 +161,9 @@ description: Review Go changes.
 		}),
 		fauxFinalStep("", "used the project skill"),
 	)
-	result, err := runWithProvider(
+	result, err := advanceTestSessionWithProvider(
 		context.Background(),
-		RunInput{WorkspacePath: directory, Task: "review this Go change"},
+		testSessionAdvance{WorkspacePath: directory, Input: "review this Go change"},
 		provider,
 	)
 	if err != nil {
@@ -205,7 +206,7 @@ description: Review Go changes.
 	}
 }
 
-func TestRunWithProviderReloadsPiaSkillWithoutActivationDedupe(t *testing.T) {
+func TestSessionWithProviderReloadsPiaSkillWithoutActivationDedupe(t *testing.T) {
 	directory := t.TempDir()
 	writePiaSkill(t, directory, "review-go", `name: review-go
 description: Review Go changes.
@@ -227,9 +228,9 @@ description: Current metadata is not revalidated during activation.
 		},
 	}
 
-	result, err := runWithProvider(
+	result, err := advanceTestSessionWithProvider(
 		context.Background(),
-		RunInput{WorkspacePath: directory, Task: "review this Go change"},
+		testSessionAdvance{WorkspacePath: directory, Input: "review this Go change"},
 		provider,
 	)
 	if err != nil {
@@ -253,7 +254,7 @@ description: Current metadata is not revalidated during activation.
 	}
 }
 
-func TestRunWithProviderKeepsOversizedSkillFailureCallLocal(t *testing.T) {
+func TestSessionWithProviderKeepsOversizedSkillFailureCallLocal(t *testing.T) {
 	directory := t.TempDir()
 	writePiaSkill(t, directory, "oversized", `name: oversized
 description: Deliberately exceeds the activation result ceiling.
@@ -263,9 +264,9 @@ description: Deliberately exceeds the activation result ceiling.
 		fauxFinalStep("", "continued after the Skill error"),
 	)
 
-	result, err := runWithProvider(
+	result, err := advanceTestSessionWithProvider(
 		context.Background(),
-		RunInput{WorkspacePath: directory, Task: "use the oversized Skill if possible"},
+		testSessionAdvance{WorkspacePath: directory, Input: "use the oversized Skill if possible"},
 		provider,
 	)
 	if err != nil {
@@ -284,7 +285,7 @@ description: Deliberately exceeds the activation result ceiling.
 	}
 }
 
-func TestRunWithProviderCannotActivateCatalogOmittedSkill(t *testing.T) {
+func TestSessionWithProviderCannotActivateCatalogOmittedSkill(t *testing.T) {
 	directory := t.TempDir()
 	const candidates = 64
 	var omittedName string
@@ -302,9 +303,9 @@ func TestRunWithProviderCannotActivateCatalogOmittedSkill(t *testing.T) {
 		fauxFinalStep("", "recovered from omitted lookup"),
 	)
 
-	result, err := runWithProvider(
+	result, err := advanceTestSessionWithProvider(
 		context.Background(),
-		RunInput{WorkspacePath: directory, Task: "try an undisclosed Skill"},
+		testSessionAdvance{WorkspacePath: directory, Input: "try an undisclosed Skill"},
 		provider,
 	)
 	if err != nil {
@@ -320,15 +321,15 @@ func TestRunWithProviderCannotActivateCatalogOmittedSkill(t *testing.T) {
 	}
 }
 
-func TestRunWithProviderReturnsSkillDiagnosticsWithoutBlockingTask(t *testing.T) {
+func TestSessionWithProviderReturnsSkillDiagnosticsWithoutBlockingTask(t *testing.T) {
 	directory := t.TempDir()
 	writePiaSkill(t, directory, "broken", `description: Missing name.
 `, "BROKEN_BODY_SENTINEL")
 	provider := newRuntimeFaux(t, fauxFinalStep("", "ordinary task completed"))
 
-	result, err := runWithProvider(
+	result, err := advanceTestSessionWithProvider(
 		context.Background(),
-		RunInput{WorkspacePath: directory, Task: "complete an ordinary task"},
+		testSessionAdvance{WorkspacePath: directory, Input: "complete an ordinary task"},
 		provider,
 	)
 	if err != nil {
@@ -348,7 +349,7 @@ func TestRunWithProviderReturnsSkillDiagnosticsWithoutBlockingTask(t *testing.T)
 	}
 }
 
-func TestRunWithProviderReturnsTranscriptAndJoinsCloseError(t *testing.T) {
+func TestSessionWithProviderReturnsHistoryAndJoinsCloseError(t *testing.T) {
 	provider := newRuntimeFaux(t, faux.Step{Events: []ai.Event{
 		ai.ErrorEvent{Message: ai.AssistantMessage{
 			StopReason:   ai.StopReasonError,
@@ -357,9 +358,9 @@ func TestRunWithProviderReturnsTranscriptAndJoinsCloseError(t *testing.T) {
 	}})
 	closeErr := errors.New("close sentinel")
 	var opened *Workspace
-	result, err := runWithWorkspaceOperations(
+	result, err := advanceTestSessionWithWorkspaceOperations(
 		context.Background(),
-		RunInput{WorkspacePath: t.TempDir(), Task: "try once"},
+		testSessionAdvance{WorkspacePath: t.TempDir(), Input: "try once"},
 		provider,
 		func(path string) (*Workspace, error) {
 			workspace, openErr := OpenWorkspace(path)
@@ -379,7 +380,7 @@ func TestRunWithProviderReturnsTranscriptAndJoinsCloseError(t *testing.T) {
 	if !errors.Is(err, closeErr) {
 		t.Fatalf("run error = %v, want joined close error", err)
 	}
-	if got, want := len(result.Transcript), 2; got != want {
+	if got, want := len(result.History), 2; got != want {
 		t.Fatalf("transcript length = %d, want %d", got, want)
 	}
 	if opened == nil {
@@ -390,21 +391,21 @@ func TestRunWithProviderReturnsTranscriptAndJoinsCloseError(t *testing.T) {
 	}
 }
 
-func TestRunWithProviderCancellationSettlesBeforeClosingWorkspace(t *testing.T) {
+func TestSessionWithProviderCancellationSettlesBeforeClosingWorkspace(t *testing.T) {
 	provider := &cancelAwareProvider{started: make(chan struct{})}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancelErr := errors.New("operator canceled")
 	closed := make(chan struct{})
 
 	type outcome struct {
-		result RunResult
+		result advancedTestSession
 		err    error
 	}
 	finished := make(chan outcome, 1)
 	go func() {
-		result, err := runWithWorkspaceOperations(
+		result, err := advanceTestSessionWithWorkspaceOperations(
 			ctx,
-			RunInput{WorkspacePath: t.TempDir(), Task: "wait"},
+			testSessionAdvance{WorkspacePath: t.TempDir(), Input: "wait"},
 			provider,
 			OpenWorkspace,
 			func(workspace *Workspace) error {
@@ -432,7 +433,7 @@ func TestRunWithProviderCancellationSettlesBeforeClosingWorkspace(t *testing.T) 
 		if !errors.Is(got.err, cancelErr) {
 			t.Fatalf("run error = %v, want cancellation cause", got.err)
 		}
-		if gotLen, want := len(got.result.Transcript), 2; gotLen != want {
+		if gotLen, want := len(got.result.History), 2; gotLen != want {
 			t.Fatalf("transcript length = %d, want %d", gotLen, want)
 		}
 	case <-time.After(5 * time.Second):
@@ -445,18 +446,19 @@ func TestRunWithProviderCancellationSettlesBeforeClosingWorkspace(t *testing.T) 
 	}
 }
 
-func TestRunWithProviderClosesWorkspaceAfterPromptFailure(t *testing.T) {
+func TestSessionWithProviderClosesWorkspaceAfterPromptFailure(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.Mkdir(filepath.Join(directory, "AGENTS.md"), 0o755); err != nil {
 		t.Fatalf("create invalid project instructions: %v", err)
 	}
 	provider := newRuntimeFaux(t, fauxFinalStep("", "unused"))
+	closeErr := errors.New("close sentinel")
 	closed := false
 	var opened *Workspace
 
-	result, err := runWithWorkspaceOperations(
+	result, err := advanceTestSessionWithWorkspaceOperations(
 		context.Background(),
-		RunInput{WorkspacePath: directory, Task: "unused"},
+		testSessionAdvance{WorkspacePath: directory, Input: "unused"},
 		provider,
 		func(path string) (*Workspace, error) {
 			workspace, openErr := OpenWorkspace(path)
@@ -465,7 +467,7 @@ func TestRunWithProviderClosesWorkspaceAfterPromptFailure(t *testing.T) {
 		},
 		func(workspace *Workspace) error {
 			closed = true
-			return workspace.Close()
+			return errors.Join(workspace.Close(), closeErr)
 		},
 	)
 	if err == nil || !strings.Contains(err.Error(), "project instructions") {
@@ -474,11 +476,14 @@ func TestRunWithProviderClosesWorkspaceAfterPromptFailure(t *testing.T) {
 	if !closed || opened == nil {
 		t.Fatal("workspace was not closed after prompt failure")
 	}
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("constructor error = %v, want joined cleanup failure", err)
+	}
 	if got := len(provider.Requests()); got != 0 {
 		t.Fatalf("Provider requests = %d, want 0", got)
 	}
-	if got, want := toolSchemaNames(result.Tools), []string{"read", "bash", "edit", "write"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("diagnostic tools after prompt failure = %v, want %v", got, want)
+	if len(result.Tools) != 0 {
+		t.Fatalf("constructor failure published Session info: %#v", result.SessionInfo)
 	}
 }
 
@@ -515,22 +520,21 @@ func TestProductDeepSeekConfigIsFixed(t *testing.T) {
 	}
 }
 
-func TestRunRejectsMissingAPIKeyBeforeOpeningWorkspace(t *testing.T) {
-	result, err := Run(context.Background(), RunInput{
-		WorkspacePath: t.TempDir(),
-		Task:          "do not contact the network",
-		APIKey:        "  ",
+func TestNewSessionRejectsMissingAPIKeyBeforeOpeningWorkspace(t *testing.T) {
+	session, err := NewSession(SessionConfig{
+		WorkspacePath:  t.TempDir(),
+		DeepSeekAPIKey: "  ",
 	})
 	if err == nil || !strings.Contains(err.Error(), "API key") {
-		t.Fatalf("Run() error = %v, want missing-key error", err)
+		t.Fatalf("NewSession() error = %v, want missing-key error", err)
 	}
-	if len(result.Transcript) != 0 {
-		t.Fatalf("Run() transcript = %#v, want empty", result.Transcript)
+	if session != nil {
+		t.Fatalf("NewSession() = %#v, want nil", session)
 	}
 }
 
-func TestRunResultFinalTextUsesOnlyLastAssistantTextBlocks(t *testing.T) {
-	result := RunResult{Transcript: []ai.Message{
+func TestAdvanceResultFinalTextUsesOnlyLastAssistantTextBlocks(t *testing.T) {
+	result := AdvanceResult{History: []ai.Message{
 		ai.AssistantMessage{Content: []ai.AssistantContent{ai.TextContent{Text: "earlier"}}, StopReason: ai.StopReasonStop},
 		ai.ToolResultMessage{ToolCallID: "call", ToolName: "read", Content: "tool output"},
 		ai.AssistantMessage{Content: []ai.AssistantContent{
@@ -543,9 +547,63 @@ func TestRunResultFinalTextUsesOnlyLastAssistantTextBlocks(t *testing.T) {
 	if got, want := result.FinalText(), "final answer"; got != want {
 		t.Fatalf("FinalText() = %q, want %q", got, want)
 	}
-	if got := (RunResult{Transcript: []ai.Message{ai.AssistantMessage{StopReason: ai.StopReasonStop}}}).FinalText(); got != "" {
+	if got := (AdvanceResult{History: []ai.Message{ai.AssistantMessage{StopReason: ai.StopReasonStop}}}).FinalText(); got != "" {
 		t.Fatalf("empty FinalText() = %q, want empty", got)
 	}
+}
+
+type testSessionAdvance struct {
+	WorkspacePath string
+	Input         string
+	Observer      observation.Observer
+}
+
+type advancedTestSession struct {
+	SessionInfo
+	AdvanceResult
+}
+
+func advanceTestSessionWithProvider(
+	ctx context.Context,
+	input testSessionAdvance,
+	provider ai.Provider,
+) (advancedTestSession, error) {
+	return advanceTestSessionWithWorkspaceOperations(
+		ctx,
+		input,
+		provider,
+		OpenWorkspace,
+		(*Workspace).Close,
+	)
+}
+
+func advanceTestSessionWithWorkspaceOperations(
+	ctx context.Context,
+	input testSessionAdvance,
+	provider ai.Provider,
+	openWorkspace func(string) (*Workspace, error),
+	closeWorkspace func(*Workspace) error,
+) (advancedTestSession, error) {
+	session, err := newSessionWithWorkspaceOperations(
+		SessionConfig{
+			WorkspacePath: input.WorkspacePath,
+			Observer:      input.Observer,
+		},
+		provider,
+		openWorkspace,
+		closeWorkspace,
+	)
+	if err != nil {
+		return advancedTestSession{}, err
+	}
+
+	info := session.Info()
+	result, advanceErr := session.Advance(ctx, input.Input)
+	closeErr := session.Close(ctx)
+	return advancedTestSession{
+		SessionInfo:   info,
+		AdvanceResult: result,
+	}, errors.Join(advanceErr, closeErr)
 }
 
 func newRuntimeFaux(t *testing.T, steps ...faux.Step) *faux.Provider {

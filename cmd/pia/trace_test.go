@@ -15,7 +15,7 @@ import (
 
 func TestWriteTraceFileCreatesPrivateJSONWithoutClobbering(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.json")
-	trace := coding.Trace{Workspace: "/workspace", RunError: "failed"}
+	trace := coding.Trace{Workspace: "/workspace", SettlementError: "failed"}
 	if err := writeTraceFile(path, trace); err != nil {
 		t.Fatalf("write trace: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestWriteTraceFileCreatesPrivateJSONWithoutClobbering(t *testing.T) {
 	if err := json.Unmarshal(content, &decoded); err != nil {
 		t.Fatalf("decode trace: %v\n%s", err, content)
 	}
-	if decoded.Workspace != trace.Workspace || decoded.RunError != trace.RunError {
+	if decoded.Workspace != trace.Workspace || decoded.SettlementError != trace.SettlementError {
 		t.Fatalf("decoded trace = %#v, want %#v", decoded, trace)
 	}
 

@@ -68,7 +68,7 @@ type compactionModelSource struct {
 	Excluded        []int
 }
 
-func (c *conversation) compactBeforeRun(ctx context.Context, userInput string) error {
+func (c *Session) compactBeforeRun(ctx context.Context, userInput string) error {
 	if !c.compaction.enabled() {
 		return nil
 	}
@@ -84,7 +84,7 @@ func (c *conversation) compactBeforeRun(ctx context.Context, userInput string) e
 	)
 }
 
-func (c *conversation) compactAfterOverflow(ctx context.Context, excludedPosition int) error {
+func (c *Session) compactAfterOverflow(ctx context.Context, excludedPosition int) error {
 	history, previousProjection := c.compactionSnapshot()
 	if excludedPosition < 0 || excludedPosition >= len(history) {
 		return fmt.Errorf(
@@ -103,7 +103,7 @@ func (c *conversation) compactAfterOverflow(ctx context.Context, excludedPositio
 	)
 }
 
-func (c *conversation) compactContext(
+func (c *Session) compactContext(
 	ctx context.Context,
 	history []ai.Message,
 	previousProjection *compactionProjection,
@@ -141,8 +141,8 @@ func (c *conversation) compactContext(
 		source.Messages,
 		0,
 		pendingMessages,
-		c.systemPrompt,
-		c.tools,
+		c.info.SystemPrompt,
+		c.info.Tools,
 		c.compaction,
 		historyBeforeProjection(history, previousProjection),
 	)
@@ -202,24 +202,22 @@ func (c *conversation) compactContext(
 		return cause
 	}
 
-	// The final cancellation check, idle-only replacement, and metadata publish
-	// contain no intervening asynchronous operation. Cancellation after this
-	// commit point does not roll back the valid projection.
-	if err := c.core.ReplaceWorkingContext(candidate); err != nil {
-		return fmt.Errorf("coding: replace compacted Working Context: %w", err)
-	}
+	// The final cancellation check and metadata publish contain no intervening
+	// asynchronous operation. Working Context is derived from this projection
+	// at the next execution boundary, so there is no second mutable owner to
+	// replace. Cancellation after this commit point does not roll it back.
 	c.publishProjection(projection)
 	return nil
 }
 
-func (c *conversation) modelRequest(messages, pendingMessages []ai.Message) ai.Request {
+func (c *Session) modelRequest(messages, pendingMessages []ai.Message) ai.Request {
 	withPending := make([]ai.Message, 0, len(messages)+len(pendingMessages))
 	withPending = append(withPending, messages...)
 	withPending = append(withPending, pendingMessages...)
 	return ai.Request{
-		SystemPrompt: c.systemPrompt,
+		SystemPrompt: c.info.SystemPrompt,
 		Messages:     withPending,
-		Tools:        c.tools,
+		Tools:        c.info.Tools,
 	}
 }
 
@@ -603,7 +601,7 @@ func estimateMessagesTokens(messages []ai.Message) int64 {
 	return tokens
 }
 
-func (c *conversation) executeCompactionPlan(
+func (c *Session) executeCompactionPlan(
 	ctx context.Context,
 	plan compactionPlan,
 	previousSummary string,
@@ -636,7 +634,7 @@ func (c *conversation) executeCompactionPlan(
 	return summary, nil
 }
 
-func (c *conversation) requestSummary(ctx context.Context, prompt string, requestedOutput int64) (string, error) {
+func (c *Session) requestSummary(ctx context.Context, prompt string, requestedOutput int64) (string, error) {
 	request := ai.Request{
 		SystemPrompt: summarizationSystemPrompt,
 		Messages: []ai.Message{

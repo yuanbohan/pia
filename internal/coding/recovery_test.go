@@ -195,7 +195,7 @@ func TestOpenAICompatibleHTTPOverflowTerminalReachesClassifier(t *testing.T) {
 	}
 }
 
-func TestConversationRecoversOverflowWithoutRepeatingUserInput(t *testing.T) {
+func TestSessionRecoversOverflowWithoutRepeatingUserInput(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -215,18 +215,18 @@ func TestConversationRecoversOverflowWithoutRepeatingUserInput(t *testing.T) {
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "recovered answer"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
 		faux.Step{Events: []ai.Event{ai.ErrorEvent{Message: overflow}}},
-		conversationAssistantStep(summary),
-		conversationAssistantStep(recovered),
+		codingAssistantStep(summary),
+		codingAssistantStep(recovered),
 	)
-	conversation := newRecoveryTestConversation(t, provider)
+	session := newRecoveryTestSession(t, provider)
 
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
-	history, err := conversation.run(context.Background(), "continue accepted task")
+	history, err := session.advanceHistory(context.Background(), "continue accepted task")
 	if err != nil {
 		t.Fatalf("recovered run error = %v", err)
 	}
@@ -256,15 +256,15 @@ func TestConversationRecoversOverflowWithoutRepeatingUserInput(t *testing.T) {
 	if !strings.Contains(summaryInput, "first question") {
 		t.Fatalf("summary input lost usable earlier context:\n%s", summaryInput)
 	}
-	if conversation.projection == nil {
+	if session.projection == nil {
 		t.Fatal("recovery did not publish a projection")
 	}
-	if !strings.Contains(conversation.projection.Summary, "earlier work checkpoint") {
-		t.Fatalf("published summary = %q, want generated checkpoint", conversation.projection.Summary)
+	if !strings.Contains(session.projection.Summary, "earlier work checkpoint") {
+		t.Fatalf("published summary = %q, want generated checkpoint", session.projection.Summary)
 	}
 
 	wantContinuation := []ai.Message{
-		syntheticSummaryMessage(conversation.projection.Summary),
+		syntheticSummaryMessage(session.projection.Summary),
 		withoutUsage(first),
 		ai.UserMessage{Content: "continue accepted task"},
 	}
@@ -272,10 +272,10 @@ func TestConversationRecoversOverflowWithoutRepeatingUserInput(t *testing.T) {
 		t.Fatalf("continuation messages = %#v, want %#v", requests[3].Messages, wantContinuation)
 	}
 
-	if got, want := conversation.projection.Excluded, []int{3}; !reflect.DeepEqual(got, want) {
+	if got, want := session.projection.Excluded, []int{3}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("projection exclusions = %v, want %v", got, want)
 	}
-	projected, err := projectedMessages(history, conversation.projection)
+	projected, err := projectedMessages(history, session.projection)
 	if err != nil {
 		t.Fatalf("projectedMessages() error = %v", err)
 	}
@@ -284,7 +284,7 @@ func TestConversationRecoversOverflowWithoutRepeatingUserInput(t *testing.T) {
 	}
 }
 
-func TestConversationDoesNotRecoverOverflowTerminalWithCompletedToolCall(t *testing.T) {
+func TestSessionDoesNotRecoverOverflowTerminalWithCompletedToolCall(t *testing.T) {
 	t.Parallel()
 
 	overflow := ai.AssistantMessage{
@@ -299,16 +299,16 @@ func TestConversationDoesNotRecoverOverflowTerminalWithCompletedToolCall(t *test
 		ErrorMessage: "context length exceeded",
 	}
 	call := overflow.Content[0].(ai.ToolCall)
-	provider := newConversationFaux(t, faux.Step{Events: []ai.Event{
+	provider := newCodingFaux(t, faux.Step{Events: []ai.Event{
 		ai.StartEvent{},
 		ai.ToolCallStartEvent{ContentIndex: 0, ID: call.ID, Name: call.Name},
 		ai.ToolCallDeltaEvent{ContentIndex: 0, Delta: string(call.Arguments)},
 		ai.ToolCallEndEvent{ContentIndex: 0, ToolCall: call},
 		ai.ErrorEvent{Message: overflow},
 	}})
-	conversation := newRecoveryTestConversation(t, provider)
+	session := newRecoveryTestSession(t, provider)
 
-	history, err := conversation.run(context.Background(), "inspect")
+	history, err := session.advanceHistory(context.Background(), "inspect")
 	if err == nil || !strings.Contains(err.Error(), "context length exceeded") {
 		t.Fatalf("run error = %v, want original overflow failure", err)
 	}
@@ -326,22 +326,22 @@ func TestConversationDoesNotRecoverOverflowTerminalWithCompletedToolCall(t *test
 		!strings.Contains(settlement.Content, "not executed") {
 		t.Fatalf("tool settlement = %#v, want same-ID not-executed result", history[2])
 	}
-	if conversation.projection != nil {
-		t.Fatalf("ineligible overflow published projection %#v", conversation.projection)
+	if session.projection != nil {
+		t.Fatalf("ineligible overflow published projection %#v", session.projection)
 	}
 }
 
-func TestConversationDoesNotRecoverOrdinaryProviderFailure(t *testing.T) {
+func TestSessionDoesNotRecoverOrdinaryProviderFailure(t *testing.T) {
 	t.Parallel()
 
 	failure := ai.AssistantMessage{
 		StopReason:   ai.StopReasonError,
 		ErrorMessage: "HTTP 503 service unavailable",
 	}
-	provider := newConversationFaux(t, recoveryErrorStep(failure))
-	conversation := newRecoveryTestConversation(t, provider)
+	provider := newCodingFaux(t, recoveryErrorStep(failure))
+	session := newRecoveryTestSession(t, provider)
 
-	history, err := conversation.run(context.Background(), "finish the task")
+	history, err := session.advanceHistory(context.Background(), "finish the task")
 	if err == nil || !strings.Contains(err.Error(), failure.ErrorMessage) {
 		t.Fatalf("run error = %v, want original Provider failure", err)
 	}
@@ -355,12 +355,12 @@ func TestConversationDoesNotRecoverOrdinaryProviderFailure(t *testing.T) {
 	if got, want := len(provider.Requests()), 1; got != want {
 		t.Fatalf("Provider requests = %d, want no summary or continuation", got)
 	}
-	if conversation.projection != nil {
-		t.Fatalf("ordinary failure published projection %#v", conversation.projection)
+	if session.projection != nil {
+		t.Fatalf("ordinary failure published projection %#v", session.projection)
 	}
 }
 
-func TestConversationRecoveryKeepsCompletedToolResultWithoutReexecution(t *testing.T) {
+func TestSessionRecoveryKeepsCompletedToolResultWithoutReexecution(t *testing.T) {
 	t.Parallel()
 
 	call := ai.ToolCall{
@@ -380,16 +380,16 @@ func TestConversationRecoveryKeepsCompletedToolResultWithoutReexecution(t *testi
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "finished from the existing result"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
+	provider := newCodingFaux(t,
 		fauxToolStep(call),
 		recoveryErrorStep(overflow),
-		conversationAssistantStep(summary),
-		conversationAssistantStep(recovered),
+		codingAssistantStep(summary),
+		codingAssistantStep(recovered),
 	)
 	tool := &countingRecoveryTool{}
-	conversation := newRecoveryTestConversation(t, provider, tool)
+	session := newRecoveryTestSession(t, provider, tool)
 
-	history, err := conversation.run(context.Background(), "inspect and finish")
+	history, err := session.advanceHistory(context.Background(), "inspect and finish")
 	if err != nil {
 		t.Fatalf("recovered run error = %v", err)
 	}
@@ -422,7 +422,7 @@ func TestConversationRecoveryKeepsCompletedToolResultWithoutReexecution(t *testi
 	}
 }
 
-func TestConversationStopsAfterSecondOverflowInOneUserAdvance(t *testing.T) {
+func TestSessionStopsAfterSecondOverflowInOneUserAdvance(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -441,18 +441,18 @@ func TestConversationStopsAfterSecondOverflowInOneUserAdvance(t *testing.T) {
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "checkpoint"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
 		recoveryErrorStep(overflowOne),
-		conversationAssistantStep(summary),
+		codingAssistantStep(summary),
 		recoveryErrorStep(overflowTwo),
 	)
-	conversation := newRecoveryTestConversation(t, provider)
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	session := newRecoveryTestSession(t, provider)
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 
-	history, err := conversation.run(context.Background(), "finish once")
+	history, err := session.advanceHistory(context.Background(), "finish once")
 	if err == nil || !strings.Contains(err.Error(), "overflow recovery exhausted") ||
 		!strings.Contains(err.Error(), overflowTwo.ErrorMessage) {
 		t.Fatalf("second run error = %v, want exhausted recovery preserving second cause", err)
@@ -467,12 +467,12 @@ func TestConversationStopsAfterSecondOverflowInOneUserAdvance(t *testing.T) {
 		!messagesContainAssistantError(history, overflowTwo.ErrorMessage) {
 		t.Fatalf("complete History lost overflow facts: %#v", history)
 	}
-	if conversation.projection == nil || !reflect.DeepEqual(conversation.projection.Excluded, []int{3}) {
-		t.Fatalf("projection = %#v, want only initial overflow excluded", conversation.projection)
+	if session.projection == nil || !reflect.DeepEqual(session.projection.Excluded, []int{3}) {
+		t.Fatalf("projection = %#v, want only initial overflow excluded", session.projection)
 	}
 }
 
-func TestConversationSummaryFailureKeepsOverflowContextAndProjectionUnchanged(t *testing.T) {
+func TestSessionSummaryFailureKeepsOverflowContextAndProjectionUnchanged(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -487,17 +487,17 @@ func TestConversationSummaryFailureKeepsOverflowContextAndProjectionUnchanged(t 
 		StopReason:   ai.StopReasonError,
 		ErrorMessage: "summary service unavailable",
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
 		recoveryErrorStep(overflow),
 		recoveryErrorStep(summaryFailure),
 	)
-	conversation := newRecoveryTestConversation(t, provider)
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	session := newRecoveryTestSession(t, provider)
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 
-	history, err := conversation.run(context.Background(), "accepted before overflow")
+	history, err := session.advanceHistory(context.Background(), "accepted before overflow")
 	if err == nil || !strings.Contains(err.Error(), "recover context overflow") ||
 		!strings.Contains(err.Error(), summaryFailure.ErrorMessage) {
 		t.Fatalf("recovery error = %v, want wrapped summary cause", err)
@@ -505,15 +505,11 @@ func TestConversationSummaryFailureKeepsOverflowContextAndProjectionUnchanged(t 
 	if !messagesContainAssistantError(history, overflow.ErrorMessage) {
 		t.Fatalf("complete History lost overflow: %#v", history)
 	}
-	if conversation.projection != nil {
-		t.Fatalf("failed summary published projection %#v", conversation.projection)
+	if session.projection != nil {
+		t.Fatalf("failed summary published projection %#v", session.projection)
 	}
 	if got, want := len(provider.Requests()), 3; got != want {
 		t.Fatalf("Provider requests = %d, want no continuation", got)
-	}
-	if _, continueErr := conversation.core.Continue(context.Background()); continueErr == nil ||
-		!strings.Contains(continueErr.Error(), "assistant") {
-		t.Fatalf("Core Continue error = %v, want unchanged overflow assistant tail", continueErr)
 	}
 }
 
@@ -534,31 +530,31 @@ func TestLaterRecoveryFailurePreservesPreviouslyCommittedProjection(t *testing.T
 		StopReason:   ai.StopReasonError,
 		ErrorMessage: "summary unavailable",
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
 		recoveryErrorStep(overflowOne),
-		conversationAssistantStep(textAssistant("checkpoint one")),
-		conversationAssistantStep(recoveredOne),
+		codingAssistantStep(textAssistant("checkpoint one")),
+		codingAssistantStep(recoveredOne),
 		recoveryErrorStep(overflowTwo),
 		recoveryErrorStep(summaryFailure),
 	)
-	conversation := newRecoveryTestConversation(t, provider)
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	session := newRecoveryTestSession(t, provider)
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
-	if _, err := conversation.run(context.Background(), "first recovery task"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first recovery task"); err != nil {
 		t.Fatalf("first recovery run error = %v", err)
 	}
-	_, committed := conversation.compactionSnapshot()
+	_, committed := session.compactionSnapshot()
 	if committed == nil {
 		t.Fatal("first recovery did not publish a projection")
 	}
 
-	history, err := conversation.run(context.Background(), "second recovery task")
+	history, err := session.advanceHistory(context.Background(), "second recovery task")
 	if err == nil || !strings.Contains(err.Error(), summaryFailure.ErrorMessage) {
 		t.Fatalf("second recovery error = %v, want summary failure", err)
 	}
-	_, afterFailure := conversation.compactionSnapshot()
+	_, afterFailure := session.compactionSnapshot()
 	if !reflect.DeepEqual(afterFailure, committed) {
 		t.Fatalf("projection after failure = %#v, want prior committed projection %#v", afterFailure, committed)
 	}
@@ -578,7 +574,7 @@ func TestLaterRecoveryFailurePreservesPreviouslyCommittedProjection(t *testing.T
 	}
 }
 
-func TestConversationRejectsOversizedRecoveryCandidateWithoutPublishing(t *testing.T) {
+func TestSessionRejectsOversizedRecoveryCandidateWithoutPublishing(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -595,32 +591,32 @@ func TestConversationRejectsOversizedRecoveryCandidateWithoutPublishing(t *testi
 		},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),
 		recoveryErrorStep(overflow),
-		conversationAssistantStep(oversizedSummary),
+		codingAssistantStep(oversizedSummary),
 	)
-	conversation := newRecoveryTestConversation(t, provider)
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	session := newRecoveryTestSession(t, provider)
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 
-	history, err := conversation.run(context.Background(), "accepted before overflow")
+	history, err := session.advanceHistory(context.Background(), "accepted before overflow")
 	if err == nil || !strings.Contains(err.Error(), "still at or above threshold") {
 		t.Fatalf("recovery error = %v, want oversized candidate rejection", err)
 	}
 	if !messagesContainAssistantError(history, overflow.ErrorMessage) {
 		t.Fatalf("complete History lost overflow: %#v", history)
 	}
-	if conversation.projection != nil {
-		t.Fatalf("oversized candidate published projection %#v", conversation.projection)
+	if session.projection != nil {
+		t.Fatalf("oversized candidate published projection %#v", session.projection)
 	}
 	if got, want := len(provider.Requests()), 3; got != want {
 		t.Fatalf("Provider requests = %d, want no continuation", got)
 	}
 }
 
-func TestConversationCancellationDuringRecoverySummaryKeepsCandidateUnpublished(t *testing.T) {
+func TestSessionCancellationDuringRecoverySummaryKeepsCandidateUnpublished(t *testing.T) {
 	t.Parallel()
 
 	cancelErr := errors.New("operator canceled recovery summary")
@@ -637,8 +633,8 @@ func TestConversationCancellationDuringRecoverySummaryKeepsCandidateUnpublished(
 			return &cancelBlockingStream{ctx: ctx, started: summaryStarted}
 		},
 	)
-	conversation := newRecoveryTestConversation(t, provider)
-	wantBeforeRecovery, err := conversation.run(context.Background(), "first question")
+	session := newRecoveryTestSession(t, provider)
+	wantBeforeRecovery, err := session.advanceHistory(context.Background(), "first question")
 	if err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
@@ -650,7 +646,7 @@ func TestConversationCancellationDuringRecoverySummaryKeepsCandidateUnpublished(
 	}
 	returned := make(chan runReturn, 1)
 	go func() {
-		history, runErr := conversation.run(ctx, "accepted before cancellation")
+		history, runErr := session.advanceHistory(ctx, "accepted before cancellation")
 		returned <- runReturn{history: history, err: runErr}
 	}()
 	select {
@@ -659,9 +655,9 @@ func TestConversationCancellationDuringRecoverySummaryKeepsCandidateUnpublished(
 		t.Fatal("recovery summary did not start")
 	}
 
-	concurrentHistory, concurrentErr := conversation.run(context.Background(), "must be rejected")
-	if !errors.Is(concurrentErr, agent.ErrRunActive) {
-		t.Fatalf("concurrent run error = %v, want ErrRunActive", concurrentErr)
+	concurrentHistory, concurrentErr := session.advanceHistory(context.Background(), "must be rejected")
+	if !errors.Is(concurrentErr, ErrSessionBusy) {
+		t.Fatalf("concurrent Advance error = %v, want ErrSessionBusy", concurrentErr)
 	}
 	wantInProgress := append(ai.CloneMessages(wantBeforeRecovery),
 		ai.UserMessage{Content: "accepted before cancellation"},
@@ -683,16 +679,12 @@ func TestConversationCancellationDuringRecoverySummaryKeepsCandidateUnpublished(
 	case <-time.After(2 * time.Second):
 		t.Fatal("canceled recovery did not settle")
 	}
-	if conversation.projection != nil {
-		t.Fatalf("summary cancellation published projection %#v", conversation.projection)
-	}
-	if _, continueErr := conversation.core.Continue(context.Background()); continueErr == nil ||
-		!strings.Contains(continueErr.Error(), "assistant") {
-		t.Fatalf("Core Continue error = %v, want unchanged overflow assistant tail", continueErr)
+	if session.projection != nil {
+		t.Fatalf("summary cancellation published projection %#v", session.projection)
 	}
 }
 
-func TestConversationCancellationDuringRecoveryContinuationKeepsCommittedProjection(t *testing.T) {
+func TestSessionCancellationDuringRecoveryContinuationKeepsCommittedProjection(t *testing.T) {
 	t.Parallel()
 
 	cancelErr := errors.New("operator canceled continuation")
@@ -711,8 +703,8 @@ func TestConversationCancellationDuringRecoveryContinuationKeepsCommittedProject
 			return &cancelBlockingStream{ctx: ctx, started: continuationStarted}
 		},
 	)
-	conversation := newRecoveryTestConversation(t, provider)
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	session := newRecoveryTestSession(t, provider)
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
 
@@ -723,7 +715,7 @@ func TestConversationCancellationDuringRecoveryContinuationKeepsCommittedProject
 	}
 	returned := make(chan runReturn, 1)
 	go func() {
-		history, runErr := conversation.run(ctx, "accepted before cancellation")
+		history, runErr := session.advanceHistory(ctx, "accepted before cancellation")
 		returned <- runReturn{history: history, err: runErr}
 	}()
 	select {
@@ -732,11 +724,11 @@ func TestConversationCancellationDuringRecoveryContinuationKeepsCommittedProject
 		t.Fatal("recovery continuation did not start")
 	}
 
-	if conversation.projection == nil || !reflect.DeepEqual(conversation.projection.Excluded, []int{3}) {
-		t.Fatalf("projection before continuation settlement = %#v, want committed exclusion", conversation.projection)
+	if session.projection == nil || !reflect.DeepEqual(session.projection.Excluded, []int{3}) {
+		t.Fatalf("projection before continuation settlement = %#v, want committed exclusion", session.projection)
 	}
-	if _, concurrentErr := conversation.run(context.Background(), "must be rejected"); !errors.Is(concurrentErr, agent.ErrRunActive) {
-		t.Fatalf("concurrent run error = %v, want ErrRunActive", concurrentErr)
+	if _, concurrentErr := session.advanceHistory(context.Background(), "must be rejected"); !errors.Is(concurrentErr, ErrSessionBusy) {
+		t.Fatalf("concurrent Advance error = %v, want ErrSessionBusy", concurrentErr)
 	}
 
 	cancel(cancelErr)
@@ -759,96 +751,8 @@ func TestConversationCancellationDuringRecoveryContinuationKeepsCommittedProject
 	case <-time.After(2 * time.Second):
 		t.Fatal("canceled continuation did not settle")
 	}
-	if conversation.projection == nil || !reflect.DeepEqual(conversation.projection.Excluded, []int{3}) {
-		t.Fatalf("cancellation rolled back committed projection %#v", conversation.projection)
-	}
-}
-
-func TestConversationRecoveryReplacementFailureKeepsCandidateUnpublished(t *testing.T) {
-	t.Parallel()
-
-	first := textAssistant("first answer")
-	overflow := ai.AssistantMessage{
-		StopReason:   ai.StopReasonError,
-		ErrorMessage: "context length exceeded",
-	}
-	summaryStarted := make(chan struct{})
-	releaseSummary := make(chan struct{})
-	directStarted := make(chan struct{})
-	releaseDirect := make(chan struct{})
-	provider := newScriptedRecoveryProvider(
-		eventStreamFactory(ai.DoneEvent{Message: first}),
-		eventStreamFactory(ai.ErrorEvent{Message: overflow}),
-		func(context.Context) ai.Stream {
-			close(summaryStarted)
-			return &gatedRecoveryStream{
-				release: releaseSummary,
-				event:   ai.DoneEvent{Message: textAssistant("checkpoint")},
-			}
-		},
-		func(context.Context) ai.Stream {
-			close(directStarted)
-			return &gatedRecoveryStream{
-				release: releaseDirect,
-				event:   ai.DoneEvent{Message: textAssistant("direct result")},
-			}
-		},
-	)
-	conversation := newRecoveryTestConversation(t, provider)
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
-		t.Fatalf("first run error = %v", err)
-	}
-
-	type runReturn struct {
-		history []ai.Message
-		err     error
-	}
-	returned := make(chan runReturn, 1)
-	go func() {
-		history, runErr := conversation.run(context.Background(), "accepted before overflow")
-		returned <- runReturn{history: history, err: runErr}
-	}()
-	select {
-	case <-summaryStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("recovery summary did not start")
-	}
-
-	directReturned := make(chan error, 1)
-	go func() {
-		_, runErr := conversation.core.Run(context.Background(), "direct Core conflict")
-		directReturned <- runErr
-	}()
-	select {
-	case <-directStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("direct Core Run did not start")
-	}
-	close(releaseSummary)
-
-	select {
-	case result := <-returned:
-		if !errors.Is(result.err, agent.ErrRunActive) {
-			t.Fatalf("recovery replacement error = %v, want ErrRunActive", result.err)
-		}
-		if !messagesContainAssistantError(result.history, overflow.ErrorMessage) {
-			t.Fatalf("History lost overflow after replacement failure: %#v", result.history)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("recovery replacement failure did not settle")
-	}
-	if conversation.projection != nil {
-		t.Fatalf("replacement failure published projection %#v", conversation.projection)
-	}
-
-	close(releaseDirect)
-	select {
-	case directErr := <-directReturned:
-		if directErr != nil {
-			t.Fatalf("direct Core Run error = %v", directErr)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("direct Core Run did not settle")
+	if session.projection == nil || !reflect.DeepEqual(session.projection.Excluded, []int{3}) {
+		t.Fatalf("cancellation rolled back committed projection %#v", session.projection)
 	}
 }
 
@@ -881,32 +785,32 @@ func TestExcludedOverflowStaysOutAcrossThresholdCompactionAndLaterRecovery(t *te
 		Content:    []ai.AssistantContent{ai.TextContent{Text: "second recovered answer"}},
 		StopReason: ai.StopReasonStop,
 	}
-	provider := newConversationFaux(t,
-		conversationAssistantStep(first),                   // 0: first coding Run
-		recoveryErrorStep(overflowOne),                     // 1: first overflow
-		conversationAssistantStep(textAssistant("r1")),     // 2: first recovery summary
-		conversationAssistantStep(recoveredOne),            // 3: first continuation
-		conversationAssistantStep(textAssistant("normal")), // 4: threshold history summary
-		conversationAssistantStep(textAssistant("prefix")), // 5: threshold turn-prefix summary
-		conversationAssistantStep(ordinary),                // 6: ordinary coding Run
-		recoveryErrorStep(overflowTwo),                     // 7: second overflow
-		conversationAssistantStep(textAssistant("r2")),     // 8: second recovery summary
-		conversationAssistantStep(recoveredTwo),            // 9: second continuation
+	provider := newCodingFaux(t,
+		codingAssistantStep(first),                   // 0: first coding Run
+		recoveryErrorStep(overflowOne),               // 1: first overflow
+		codingAssistantStep(textAssistant("r1")),     // 2: first recovery summary
+		codingAssistantStep(recoveredOne),            // 3: first continuation
+		codingAssistantStep(textAssistant("normal")), // 4: threshold history summary
+		codingAssistantStep(textAssistant("prefix")), // 5: threshold turn-prefix summary
+		codingAssistantStep(ordinary),                // 6: ordinary coding Run
+		recoveryErrorStep(overflowTwo),               // 7: second overflow
+		codingAssistantStep(textAssistant("r2")),     // 8: second recovery summary
+		codingAssistantStep(recoveredTwo),            // 9: second continuation
 	)
-	conversation := newRecoveryTestConversation(t, provider)
-	if _, err := conversation.run(context.Background(), "first question"); err != nil {
+	session := newRecoveryTestSession(t, provider)
+	if _, err := session.advanceHistory(context.Background(), "first question"); err != nil {
 		t.Fatalf("first run error = %v", err)
 	}
-	if _, err := conversation.run(context.Background(), "first recovery task"); err != nil {
+	if _, err := session.advanceHistory(context.Background(), "first recovery task"); err != nil {
 		t.Fatalf("first recovery run error = %v", err)
 	}
 
-	conversation.compaction = testCompactionPolicy()
-	conversation.compaction.RetainedRawTarget = 1
-	if _, err := conversation.run(context.Background(), "ordinary task"); err != nil {
+	session.compaction = testCompactionPolicy()
+	session.compaction.RetainedRawTarget = 1
+	if _, err := session.advanceHistory(context.Background(), "ordinary task"); err != nil {
 		t.Fatalf("threshold-compacted run error = %v", err)
 	}
-	history, err := conversation.run(context.Background(), "second recovery task")
+	history, err := session.advanceHistory(context.Background(), "second recovery task")
 	if err != nil {
 		t.Fatalf("second recovery run error = %v", err)
 	}
@@ -935,17 +839,17 @@ func TestExcludedOverflowStaysOutAcrossThresholdCompactionAndLaterRecovery(t *te
 	if got := countUserMessages(history, "second recovery task"); got != 1 {
 		t.Fatalf("second recovery user count = %d, want 1", got)
 	}
-	if conversation.projection == nil || !reflect.DeepEqual(conversation.projection.Excluded, []int{8}) {
-		t.Fatalf("final projection = %#v, want only second absolute overflow position", conversation.projection)
+	if session.projection == nil || !reflect.DeepEqual(session.projection.Excluded, []int{8}) {
+		t.Fatalf("final projection = %#v, want only second absolute overflow position", session.projection)
 	}
 }
 
 func TestProjectionExclusionsAreOwnershipIndependent(t *testing.T) {
 	t.Parallel()
 
-	provider := newConversationFaux(t)
-	conversation := newTestConversation(t, provider)
-	conversation.history = []ai.Message{
+	provider := newCodingFaux(t)
+	session := newHistoryTestSession(t, provider)
+	session.history = []ai.Message{
 		ai.UserMessage{Content: "question"},
 		ai.AssistantMessage{StopReason: ai.StopReasonError, ErrorMessage: "context length exceeded"},
 	}
@@ -955,16 +859,16 @@ func TestProjectionExclusionsAreOwnershipIndependent(t *testing.T) {
 		UsageValidFrom: 2,
 		Excluded:       []int{1},
 	}
-	conversation.publishProjection(projection)
+	session.publishProjection(projection)
 	projection.Excluded[0] = 0
 
-	_, snapshot := conversation.compactionSnapshot()
+	_, snapshot := session.compactionSnapshot()
 	if snapshot == nil || !reflect.DeepEqual(snapshot.Excluded, []int{1}) {
 		t.Fatalf("projection snapshot = %#v, want independent exclusion [1]", snapshot)
 	}
 	snapshot.Excluded[0] = 0
-	if !reflect.DeepEqual(conversation.projection.Excluded, []int{1}) {
-		t.Fatalf("snapshot mutation changed owner projection: %#v", conversation.projection)
+	if !reflect.DeepEqual(session.projection.Excluded, []int{1}) {
+		t.Fatalf("snapshot mutation changed owner projection: %#v", session.projection)
 	}
 }
 
@@ -1016,7 +920,7 @@ func TestCompactionModelSourceFiltersExclusionsAndPreservesAbsolutePositions(t *
 	}
 }
 
-func TestRunWithProviderProjectsRecoveredFinalTextAndCompleteTrace(t *testing.T) {
+func TestSessionWithProviderProjectsRecoveredFinalTextAndCompleteTrace(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -1033,30 +937,30 @@ func TestRunWithProviderProjectsRecoveredFinalTextAndCompleteTrace(t *testing.T)
 		ErrorMessage: "context length exceeded",
 	}
 	recovered := textAssistant("recovered final answer")
-	provider := newConversationFaux(t,
+	provider := newCodingFaux(t,
 		fauxToolStep(call),
 		recoveryErrorStep(overflow),
-		conversationAssistantStep(textAssistant("checkpoint")),
-		conversationAssistantStep(recovered),
+		codingAssistantStep(textAssistant("checkpoint")),
+		codingAssistantStep(recovered),
 	)
 
-	result, err := runWithProvider(context.Background(), RunInput{
+	result, err := advanceTestSessionWithProvider(context.Background(), testSessionAdvance{
 		WorkspacePath: workspace,
-		Task:          "read main.go and finish",
+		Input:         "read main.go and finish",
 	}, provider)
 	if err != nil {
-		t.Fatalf("runWithProvider() error = %v", err)
+		t.Fatalf("advance test Session error = %v", err)
 	}
 	if got, want := result.FinalText(), "recovered final answer"; got != want {
 		t.Fatalf("FinalText() = %q, want %q", got, want)
 	}
-	if !messagesContainAssistantError(result.Transcript, overflow.ErrorMessage) {
-		t.Fatalf("complete product transcript lost overflow: %#v", result.Transcript)
+	if !messagesContainAssistantError(result.History, overflow.ErrorMessage) {
+		t.Fatalf("complete product History lost overflow: %#v", result.History)
 	}
-	if got := countUserMessages(result.Transcript, "read main.go and finish"); got != 1 {
+	if got := countUserMessages(result.History, "read main.go and finish"); got != 1 {
 		t.Fatalf("product task count = %d, want 1", got)
 	}
-	trace, err := BuildTrace(result, nil)
+	trace, err := BuildTrace(result.SessionInfo, result.AdvanceResult, nil)
 	if err != nil {
 		t.Fatalf("BuildTrace() error = %v", err)
 	}
@@ -1071,11 +975,11 @@ func TestRunWithProviderProjectsRecoveredFinalTextAndCompleteTrace(t *testing.T)
 	}
 }
 
-func newRecoveryTestConversation(
+func newRecoveryTestSession(
 	t *testing.T,
 	provider ai.Provider,
 	tools ...agent.Tool,
-) *conversation {
+) *Session {
 	t.Helper()
 
 	limits := ai.RequestLimits{
@@ -1084,7 +988,7 @@ func newRecoveryTestConversation(
 		ContextSafety:   100,
 	}
 	schemas := toolSchemas(tools)
-	core, err := agent.New(agent.Config{
+	engine, err := agent.New(agent.Config{
 		Provider:      provider,
 		SystemPrompt:  "system",
 		Tools:         tools,
@@ -1093,12 +997,15 @@ func newRecoveryTestConversation(
 	if err != nil {
 		t.Fatalf("agent.New() error = %v", err)
 	}
-	conversation, err := newConversation(conversationConfig{
-		Core:          core,
-		Provider:      provider,
-		SystemPrompt:  "system",
-		Tools:         schemas,
-		RequestLimits: limits,
+	session, err := newSession(sessionDependencies{
+		Engine:         engine,
+		Provider:       provider,
+		RequestLimits:  limits,
+		CloseWorkspace: func() error { return nil },
+		Info: SessionInfo{
+			SystemPrompt: "system",
+			Tools:        schemas,
+		},
 		Compaction: compactionPolicy{
 			Threshold:                1_000,
 			SoftCeiling:              500,
@@ -1108,9 +1015,9 @@ func newRecoveryTestConversation(
 		},
 	})
 	if err != nil {
-		t.Fatalf("newConversation() error = %v", err)
+		t.Fatalf("newSession() error = %v", err)
 	}
-	return conversation
+	return session
 }
 
 func countUserMessages(messages []ai.Message, content string) int {

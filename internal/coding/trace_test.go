@@ -13,7 +13,7 @@ import (
 func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 	parameters := json.RawMessage(`{"type":"object"}`)
 	arguments := json.RawMessage(`{"path":`)
-	result := RunResult{
+	info := SessionInfo{
 		WorkspacePath: "/workspace",
 		SystemPrompt:  "stable prompt",
 		Model: ModelInfo{
@@ -31,7 +31,9 @@ func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 			Path:    ".pia/skills/broken/SKILL.md",
 			Message: "required name is missing",
 		}},
-		Transcript: []ai.Message{
+	}
+	result := AdvanceResult{
+		History: []ai.Message{
 			ai.UserMessage{Content: "inspect"},
 			ai.AssistantMessage{
 				Content: []ai.AssistantContent{
@@ -53,14 +55,14 @@ func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 	}
 	runErr := errors.New("run failed")
 
-	trace, err := BuildTrace(result, runErr)
+	trace, err := BuildTrace(info, result, runErr)
 	if err != nil {
 		t.Fatalf("BuildTrace() error = %v", err)
 	}
-	if trace.RunError != runErr.Error() {
-		t.Fatalf("trace RunError = %q, want %q", trace.RunError, runErr)
+	if trace.SettlementError != runErr.Error() {
+		t.Fatalf("trace SettlementError = %q, want %q", trace.SettlementError, runErr)
 	}
-	if got, want := trace.SkillDiagnostics, result.SkillDiagnostics; !reflect.DeepEqual(got, want) {
+	if got, want := trace.SkillDiagnostics, info.SkillDiagnostics; !reflect.DeepEqual(got, want) {
 		t.Fatalf("trace SkillDiagnostics = %#v, want %#v", got, want)
 	}
 	if got, want := len(trace.Transcript), 3; got != want {
@@ -82,7 +84,7 @@ func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 
 	parameters[0] = '['
 	arguments[0] = '['
-	result.SkillDiagnostics[0].Message = "changed through source"
+	info.SkillDiagnostics[0].Message = "changed through source"
 	if got, want := string(trace.Tools[0].Parameters), `{"type":"object"}`; got != want {
 		t.Fatalf("trace parameters changed through source alias: %q", got)
 	}
@@ -121,7 +123,7 @@ func TestBuildTraceRepresentsEveryTranscriptVariant(t *testing.T) {
 }
 
 func TestBuildTraceRejectsNilTranscriptEntry(t *testing.T) {
-	_, err := BuildTrace(RunResult{Transcript: []ai.Message{nil}}, nil)
+	_, err := BuildTrace(SessionInfo{}, AdvanceResult{History: []ai.Message{nil}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "message 0") {
 		t.Fatalf("BuildTrace() error = %v, want indexed message error", err)
 	}

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/yuanbohan/pia/internal/agent"
 	"github.com/yuanbohan/pia/internal/ai"
@@ -51,10 +50,12 @@ func TestRunClampsEachRequestOutputToProjectedContext(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if _, err := runtime.Run(context.Background(), "first"); err != nil {
+	firstResult, err := runtime.Run(context.Background(), nil, "first")
+	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
-	if _, err := runtime.Run(context.Background(), "12345"); err != nil {
+	firstContext := firstResult.NewMessages
+	if _, err := runtime.Run(context.Background(), firstContext, "12345"); err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
 
@@ -83,7 +84,7 @@ func TestRunSendsCompleteRequestAndReturnsTerminalDelta(t *testing.T) {
 	provider := newFaux(t, assistantStep(message))
 	runtime := newAgent(t, provider, "stable system prompt")
 
-	result, err := runtime.Run(context.Background(), "inspect the project")
+	result, err := runtime.Run(context.Background(), nil, "inspect the project")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -120,7 +121,7 @@ func TestRunTreatsEmptyAssistantAsNormalCompletion(t *testing.T) {
 	}})
 	runtime := newAgent(t, provider, "")
 
-	result, err := runtime.Run(context.Background(), "respond if needed")
+	result, err := runtime.Run(context.Background(), nil, "respond if needed")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -139,7 +140,7 @@ func TestRunTreatsLengthStopAsNormalCompletion(t *testing.T) {
 	provider := newFaux(t, assistantStep(message))
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Run(context.Background(), "answer within the limit")
+	result, err := runtime.Run(context.Background(), nil, "answer within the limit")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -148,7 +149,7 @@ func TestRunTreatsLengthStopAsNormalCompletion(t *testing.T) {
 	}
 }
 
-func TestSequentialRunsKeepWorkingContextAndReturnIndependentDeltas(t *testing.T) {
+func TestRunsUseExplicitWorkingContextAndReturnIndependentDeltas(t *testing.T) {
 	t.Parallel()
 
 	first := ai.AssistantMessage{
@@ -162,14 +163,21 @@ func TestSequentialRunsKeepWorkingContextAndReturnIndependentDeltas(t *testing.T
 	provider := newFaux(t, assistantStep(first), assistantStep(second))
 	runtime := newAgent(t, provider, "system")
 
-	firstResult, err := runtime.Run(context.Background(), "first question")
+	firstResult, err := runtime.Run(context.Background(), nil, "first question")
 	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
 	returnedAssistant := firstResult.NewMessages[1].(ai.AssistantMessage)
 	returnedAssistant.Content[0] = ai.TextContent{Text: "caller mutation"}
 
-	secondResult, err := runtime.Run(context.Background(), "second question")
+	secondResult, err := runtime.Run(
+		context.Background(),
+		[]ai.Message{
+			ai.UserMessage{Content: "first question"},
+			first,
+		},
+		"second question",
+	)
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
@@ -204,7 +212,7 @@ func TestProviderCannotMutateAgentWorkingContextThroughRequest(t *testing.T) {
 	}}
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Run(context.Background(), "original user input")
+	result, err := runtime.Run(context.Background(), nil, "original user input")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -231,13 +239,17 @@ func TestProviderCannotMutateNestedWorkingContextThroughRequest(t *testing.T) {
 	provider := &nestedRequestMutatingProvider{responses: []ai.AssistantMessage{first, second, third}}
 	runtime := newAgent(t, provider, "system")
 
-	if _, err := runtime.Run(context.Background(), "first question"); err != nil {
+	firstResult, err := runtime.Run(context.Background(), nil, "first question")
+	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
-	if _, err := runtime.Run(context.Background(), "second question"); err != nil {
+	history := ai.CloneMessages(firstResult.NewMessages)
+	secondResult, err := runtime.Run(context.Background(), history, "second question")
+	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
-	if _, err := runtime.Run(context.Background(), "third question"); err != nil {
+	history = append(history, ai.CloneMessages(secondResult.NewMessages)...)
+	if _, err := runtime.Run(context.Background(), history, "third question"); err != nil {
 		t.Fatalf("third Run() error = %v", err)
 	}
 	if got, want := provider.previousTexts, []string{"first answer", "first answer"}; !reflect.DeepEqual(got, want) {
@@ -269,12 +281,13 @@ func TestProviderTerminalMutationCannotAffectAgentWorkingContext(t *testing.T) {
 		},
 	})
 
-	if _, err := runtime.Run(context.Background(), "inspect"); err != nil {
+	firstResult, err := runtime.Run(context.Background(), nil, "inspect")
+	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	arguments[9] = 'X'
 
-	if _, err := runtime.Run(context.Background(), "continue"); err != nil {
+	if _, err := runtime.Run(context.Background(), firstResult.NewMessages, "continue"); err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
 	requests := provider.Requests()
@@ -300,7 +313,7 @@ func TestRunAppendsProviderErrorTerminalExactlyOnce(t *testing.T) {
 	}})
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Run(context.Background(), "try once")
+	result, err := runtime.Run(context.Background(), nil, "try once")
 	if err == nil || !strings.Contains(err.Error(), "upstream unavailable") {
 		t.Fatalf("Run() error = %v, want upstream error", err)
 	}
@@ -321,7 +334,7 @@ func TestPreCanceledRunDoesNotMutateWorkingContextOrCallProvider(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := runtime.Run(ctx, "not accepted")
+	result, err := runtime.Run(ctx, nil, "not accepted")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
@@ -353,7 +366,7 @@ func TestCancelAfterAcceptanceWaitsForReceiveAndAppendsOneAbortedTerminal(t *tes
 	}
 	returned := make(chan runReturn, 1)
 	go func() {
-		result, err := runtime.Run(ctx, "accepted input")
+		result, err := runtime.Run(ctx, nil, "accepted input")
 		returned <- runReturn{result: result, err: err}
 	}()
 
@@ -400,7 +413,7 @@ func TestRunPreservesProviderAbortedTerminalAndContextCause(t *testing.T) {
 		},
 	}}, "system")
 
-	result, err := runtime.Run(ctx, "inspect")
+	result, err := runtime.Run(ctx, nil, "inspect")
 	if !errors.Is(err, cause) {
 		t.Fatalf("Run() error = %v, want cancellation cause", err)
 	}
@@ -414,7 +427,7 @@ func TestRunSynthesizesErrorWhenStreamEndsBeforeTerminal(t *testing.T) {
 
 	runtime := newAgent(t, staticProvider{stream: eofStream{}}, "system")
 
-	result, err := runtime.Run(context.Background(), "broken stream")
+	result, err := runtime.Run(context.Background(), nil, "broken stream")
 	if err == nil || !strings.Contains(err.Error(), "before terminal") {
 		t.Fatalf("Run() error = %v, want missing-terminal error", err)
 	}
@@ -433,7 +446,7 @@ func TestRunSynthesizesErrorForNonEOFReceiveFailure(t *testing.T) {
 	receiveErr := errors.New("connection reset")
 	runtime := newAgent(t, staticProvider{stream: errorStream{err: receiveErr}}, "system")
 
-	result, err := runtime.Run(context.Background(), "broken stream")
+	result, err := runtime.Run(context.Background(), nil, "broken stream")
 	if !errors.Is(err, receiveErr) {
 		t.Fatalf("Run() error = %v, want wrapped receive error", err)
 	}
@@ -479,7 +492,7 @@ func TestRunSynthesizesProtocolErrorForInvalidTerminal(t *testing.T) {
 				events: []ai.Event{test.event},
 			}}, "system")
 
-			result, err := runtime.Run(context.Background(), "invalid response")
+			result, err := runtime.Run(context.Background(), nil, "invalid response")
 			if err == nil || !strings.Contains(err.Error(), "provider protocol") {
 				t.Fatalf("Run() error = %v, want protocol error", err)
 			}
@@ -496,7 +509,7 @@ func TestRunSynthesizesErrorWhenProviderReturnsNilStream(t *testing.T) {
 
 	runtime := newAgent(t, staticProvider{}, "system")
 
-	result, err := runtime.Run(context.Background(), "broken provider")
+	result, err := runtime.Run(context.Background(), nil, "broken provider")
 	if err == nil || !strings.Contains(err.Error(), "nil stream") {
 		t.Fatalf("Run() error = %v, want nil-stream protocol error", err)
 	}
@@ -526,7 +539,7 @@ func TestTerminalEventWinsWhenReceiveAlsoReturnsCancellation(t *testing.T) {
 		},
 	}}, "system")
 
-	result, err := runtime.Run(ctx, "finish this turn")
+	result, err := runtime.Run(ctx, nil, "finish this turn")
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil after terminal settlement", err)
 	}
@@ -539,7 +552,7 @@ func TestTerminalEventWinsWhenReceiveAlsoReturnsCancellation(t *testing.T) {
 	}
 }
 
-func TestReplaceWorkingContextDeepClonesAndChangesNextRequest(t *testing.T) {
+func TestRunDeepClonesExplicitWorkingContext(t *testing.T) {
 	t.Parallel()
 
 	priorAssistant := ai.AssistantMessage{
@@ -550,29 +563,27 @@ func TestReplaceWorkingContextDeepClonesAndChangesNextRequest(t *testing.T) {
 		ai.UserMessage{Content: "summary of earlier work"},
 		priorAssistant,
 	}
-	final := ai.AssistantMessage{
-		Content:    []ai.AssistantContent{ai.TextContent{Text: "continued"}},
-		StopReason: ai.StopReasonStop,
-	}
-	provider := newFaux(t, assistantStep(final))
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := &blockingProvider{started: started, release: release}
 	runtime := newAgent(t, provider, "system")
 
-	if err := runtime.ReplaceWorkingContext(replacement); err != nil {
-		t.Fatalf("ReplaceWorkingContext() error = %v", err)
+	type runReturn struct {
+		result agent.RunResult
+		err    error
 	}
+	returned := make(chan runReturn, 1)
+	go func() {
+		result, err := runtime.Run(context.Background(), replacement, "continue the task")
+		returned <- runReturn{result: result, err: err}
+	}()
+	<-started
 	replacement[0] = ai.UserMessage{Content: "caller changed top-level slice"}
 	priorAssistant.Content[0] = ai.TextContent{Text: "caller changed nested content"}
-
-	result, err := runtime.Run(context.Background(), "continue the task")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	wantDelta := []ai.Message{
-		ai.UserMessage{Content: "continue the task"},
-		final,
-	}
-	if !reflect.DeepEqual(result.NewMessages, wantDelta) {
-		t.Fatalf("Run() NewMessages = %#v, want %#v", result.NewMessages, wantDelta)
+	close(release)
+	got := <-returned
+	if got.err != nil {
+		t.Fatalf("Run() error = %v", got.err)
 	}
 	wantRequest := []ai.Message{
 		ai.UserMessage{Content: "summary of earlier work"},
@@ -589,99 +600,15 @@ func TestReplaceWorkingContextDeepClonesAndChangesNextRequest(t *testing.T) {
 	if !reflect.DeepEqual(requests[0].Messages, wantRequest) {
 		t.Fatalf("Provider messages = %#v, want %#v", requests[0].Messages, wantRequest)
 	}
-}
-
-func TestReplaceWorkingContextRejectsActiveRunWithoutChangingContext(t *testing.T) {
-	t.Parallel()
-
-	started := make(chan struct{})
-	release := make(chan struct{})
-	provider := &blockingProvider{started: started, release: release}
-	runtime := newAgent(t, provider, "system")
-	firstReturned := make(chan agent.RunResult, 1)
-	go func() {
-		result, _ := runtime.Run(context.Background(), "first input")
-		firstReturned <- result
-	}()
-	<-started
-
-	err := runtime.ReplaceWorkingContext([]ai.Message{
-		ai.UserMessage{Content: "must not replace active context"},
-	})
-	if !errors.Is(err, agent.ErrRunActive) {
-		t.Fatalf("ReplaceWorkingContext() error = %v, want ErrRunActive", err)
-	}
-
-	close(release)
-	first := <-firstReturned
-	if got, want := len(first.NewMessages), 2; got != want {
-		t.Fatalf("first NewMessages length = %d, want %d", got, want)
-	}
-	if _, err := runtime.Run(context.Background(), "second input"); err != nil {
-		t.Fatalf("second Run() error = %v", err)
-	}
-
-	requests := provider.Requests()
-	if got, want := len(requests), 2; got != want {
-		t.Fatalf("Provider requests = %d, want %d", got, want)
-	}
-	wantSecondRequest := []ai.Message{
-		ai.UserMessage{Content: "first input"},
+	if got, want := got.result.NewMessages, []ai.Message{
+		ai.UserMessage{Content: "continue the task"},
 		provider.message(),
-		ai.UserMessage{Content: "second input"},
-	}
-	if !reflect.DeepEqual(requests[1].Messages, wantSecondRequest) {
-		t.Fatalf("second Provider messages = %#v, want %#v", requests[1].Messages, wantSecondRequest)
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Run() NewMessages = %#v, want %#v", got, want)
 	}
 }
 
-func TestConcurrentRunIsRejectedWithoutAppendingSecondInput(t *testing.T) {
-	t.Parallel()
-
-	started := make(chan struct{})
-	release := make(chan struct{})
-	provider := &blockingProvider{started: started, release: release}
-	runtime := newAgent(t, provider, "system")
-	firstReturned := make(chan agent.RunResult, 1)
-	go func() {
-		result, _ := runtime.Run(context.Background(), "first input")
-		firstReturned <- result
-	}()
-	<-started
-
-	type secondReturn struct {
-		result agent.RunResult
-		err    error
-	}
-	secondReturned := make(chan secondReturn, 1)
-	go func() {
-		result, err := runtime.Run(context.Background(), "second input")
-		secondReturned <- secondReturn{result: result, err: err}
-	}()
-	select {
-	case second := <-secondReturned:
-		if !errors.Is(second.err, agent.ErrRunActive) {
-			t.Fatalf("second Run() error = %v, want ErrRunActive", second.err)
-		}
-		if len(second.result.NewMessages) != 0 {
-			t.Fatalf("second Run() NewMessages = %#v, want zero result", second.result.NewMessages)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("second Run() blocked instead of returning ErrRunActive")
-	}
-
-	close(release)
-	first := <-firstReturned
-	want := []ai.Message{
-		ai.UserMessage{Content: "first input"},
-		provider.message(),
-	}
-	if !reflect.DeepEqual(first.NewMessages, want) {
-		t.Fatalf("first Run() NewMessages = %#v, want %#v", first.NewMessages, want)
-	}
-}
-
-func newAgent(t *testing.T, provider ai.Provider, systemPrompt string) *agent.Agent {
+func newAgent(t *testing.T, provider ai.Provider, systemPrompt string) *agent.Engine {
 	t.Helper()
 	runtime, err := agent.New(agent.Config{
 		Provider:     provider,
