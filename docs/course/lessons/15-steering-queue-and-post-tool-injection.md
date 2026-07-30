@@ -17,6 +17,14 @@ failure 结束当前 Engine Run，但 pending Steering 会明确 hand back；已
 Steering 只进入 History，不会重复交还。未来 terminal 如何把 hand-back 文本
 恢复到 composer 或桥接到新 execution，仍由后续课程实现。
 
+> **Lesson 16 修正（2026-07-30）：** 本课的 batch-all、start/post-tool/
+> would-stop safe points、Session 原子 drain/seal、overflow transfer 和
+> policy-neutral hand-back 继续有效。D107 把 `Steer` +
+> `ErrSteerUnavailable` 收敛为 `TrySteer(input) (bool, error)`，删除所有
+> Follow-up 与双 queue policy，并把 future routing、composer restore、`Esc`、
+> `/exit` 等行为移到 future Daemon/client protocol scope。下文被取代的 API 与
+> terminal policy 仍保留为本课历史设计和实现记录。
+
 ## 解锁能力
 
 Lesson 14 允许 active Advance 接受 Follow-up，但它必须等当前 Engine Run 完整

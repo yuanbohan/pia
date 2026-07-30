@@ -203,47 +203,6 @@ func TestSessionCancelCommitsAbortedTerminalAndRemainsReusable(t *testing.T) {
 	}
 }
 
-func TestSessionWaitObservesCurrentAdvanceWithoutCanceling(t *testing.T) {
-	t.Parallel()
-
-	provider := &blockingCodingProvider{
-		started: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-	session := newLifecycleSession(t, provider, func() error { return nil })
-	returned := make(chan error, 1)
-	go func() {
-		_, err := session.Advance(context.Background(), "wait")
-		returned <- err
-	}()
-	<-provider.started
-
-	waitCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if err := session.Wait(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Wait() error = %v, want deadline", err)
-	}
-	select {
-	case err := <-returned:
-		t.Fatalf("Wait canceled active Advance with error %v", err)
-	default:
-	}
-
-	close(provider.release)
-	if err := session.Wait(context.Background()); err != nil {
-		t.Fatalf("Wait() after release error = %v", err)
-	}
-	if err := receiveError(t, returned); err != nil {
-		t.Fatalf("Advance() error = %v", err)
-	}
-
-	idleCtx, idleCancel := context.WithCancel(context.Background())
-	idleCancel()
-	if err := session.Wait(idleCtx); err != nil {
-		t.Fatalf("idle Wait() error = %v, want nil", err)
-	}
-}
-
 func TestSessionCloseIdleRunsUniqueCleanupAndSharesItsError(t *testing.T) {
 	t.Parallel()
 
@@ -310,8 +269,13 @@ func TestSessionCloseBusyCancelsAdmissionAndHonorsCallerDeadline(t *testing.T) {
 	if _, err := session.Advance(context.Background(), "must be rejected"); !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("Advance() while closing error = %v, want ErrSessionClosed", err)
 	}
-	if err := session.FollowUp("must also be rejected"); !errors.Is(err, ErrSessionClosed) {
-		t.Fatalf("FollowUp() while closing error = %v, want ErrSessionClosed", err)
+	if accepted, err := session.TrySteer("must also be rejected"); accepted ||
+		!errors.Is(err, ErrSessionClosed) {
+		t.Fatalf(
+			"TrySteer() while closing = (%t, %v), want (false, ErrSessionClosed)",
+			accepted,
+			err,
+		)
 	}
 
 	close(provider.release)

@@ -1,6 +1,6 @@
 ---
 name: Pia
-last_updated: 2026-07-20
+last_updated: 2026-07-30
 ---
 
 # Pia Strategy
@@ -11,7 +11,7 @@ last_updated: 2026-07-20
 
 ## Our approach
 
-以冻结的 Pi coding agent 作为语义基线、能力下限和公平对照，用 Go 原生方式建立结构一致、可解释、可测试的核心系统。Skills 是 Pia 的内建 coding 能力：先用 project-local Pia Skill v1 建立最小可靠闭环，再分阶段扩展到 Agent Skills 可移植契约及 Claude Code/Codex 社区兼容，而不是一次性复制完整厂商 runtime。持续研究其他优秀开源 coding agent 以及 Codex、Grok 等可获得的工程证据；只有当候选机制能融入既有责任边界，并通过受控、重复评测证明收益时才吸收。
+以冻结的 Pi coding agent 作为语义基线、能力下限和公平对照，用 Go 原生方式建立结构一致、可解释、可测试的核心系统。Skills 是 Pia 的内建 coding 能力：先用 project-local Pia Skill v1 建立最小可靠闭环，再分阶段扩展到 Agent Skills 可移植契约及 Claude Code/Codex 社区兼容，而不是一次性复制完整厂商 runtime。长期交互采用严格 Client/Server：Pia Daemon 是任务与 Sessions 的 server authority，TUI、GUI、Mobile 与 IM Gateway 通过同一协议接入。持续研究其他优秀开源 coding agent 以及 Codex、Grok 等可获得的工程证据；只有当候选机制能融入既有责任边界，并通过受控、重复评测证明收益时才吸收。
 
 ## Who it's for
 
@@ -20,7 +20,7 @@ last_updated: 2026-07-20
 ## Key metrics
 
 - **相对 Pi 的 coding resolve rate**——在相同模型、任务、初始仓库和资源约束下重复运行；通过未来的受控对照评测体系测量，Pi parity 是下限，稳定超过是目标。
-- **IM 任务端到端完成率**——从 IM 创建任务，到 Session 返回通过独立验证的 coding 结果且无需人工修复运行状态；通过 Gateway、Orchestrator 和 Session telemetry 测量。
+- **IM 任务端到端完成率**——从 IM 创建任务，到 Session 返回通过独立验证的 coding 结果且无需人工修复运行状态；通过 IM Gateway、Pia Daemon 和 Session telemetry 测量。
 - **Session 连续性与恢复率**——连接中断、进程重启、暂停或长任务恢复后，Session 能从权威状态继续且不污染其他 Session；通过恢复测试和运行 telemetry 测量。
 - **长上下文任务完成率**——需要多轮工具调用、context compaction 和多次推进的任务最终通过验证的比例；通过长任务评测集测量。
 - **每个成功任务的成本**——每个通过验证的任务所消耗的 token、Provider 成本、turn 数和 wall time；通过 Provider usage 与 Session outcome 联合测量。
@@ -41,7 +41,7 @@ _Why it serves the approach:_ 长任务和多任务运行要求完整事实、�
 
 ### Orchestration and Access
 
-建设 Gateway、Orchestrator、任务生命周期和 IM 接入，使用户能通过聊天创建、推进、暂停、恢复和查看 coding task。
+建设长期运行的 Pia Daemon、common Client Protocol、任务生命周期与多 Session orchestration；TUI、GUI、Mobile 和 IM Gateway 作为 clients 使用同一服务能力创建、推进、暂停、恢复和查看 coding task。
 
 _Why it serves the approach:_ Coding capability 需要成为可持续驱动的服务，而不是永远停留在一次性本地命令。
 

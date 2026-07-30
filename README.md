@@ -6,9 +6,9 @@ Pia 是面向学习、验证和长期演进的 Go coding agent。仓库为 [`yua
 
 课程按阶段推进；阶段目标、逐课规划、实施文档和当前进度统一记录在[课程阶段与实施计划](docs/course/README.md)。根 README 只保留产品概览、当前运行方式和文档入口。
 
-当前实现仍是单 workspace、单进程内 Session 的本地入口；一个 Session 可顺序接受多次 Advance，但同时至多有一个 active Advance。项目尚未进入 Goal Runtime、Session 持久化、TUI、公共 SDK、RPC/IM、多用户、多仓库或 worktree/GitHub 管理。bash 不是 sandbox；具体安全边界和验收约束记录在课程与实施文档中。
+当前实现仍是单 workspace、单进程内 Session 的本地入口；一个 Session 可顺序接受多次 Advance，但同时至多有一个 active Advance。Lesson 16 已把它收敛为 future Daemon 可复用的 runtime boundary：Session 不再拥有 future Follow-up submissions 或 public Wait，只保留 current-execution Steering 的 `TrySteer` admission。项目尚未进入 Pia Daemon、common Client Protocol、Session 持久化、TUI/GUI/Mobile/IM clients、公共 SDK、多用户、多仓库或 worktree/GitHub 管理。bash 不是 sandbox；具体安全边界和验收约束记录在课程与实施文档中。
 
-长期目标是在迁移 coding-relevant Pi 能力后，让 Pi parity 成为能力下限，并通过同模型、同任务、多次独立运行的稳定评测追求可证明的持续超越。Skills 是 Pia 的核心能力；当前先实现 project-local Pia Skill v1 的最小可靠闭环，完整 Agent Skills、Claude Code/Codex community roots 与 vendor runtime compatibility 分阶段补充，而不是一次性扩建 Skill engine。Pi 是语义基线和主要对照组；其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据用于发现候选机制，而不是直接复制。长期产品将通过 Orchestrator、Gateway 和 IM 驱动多个可持久化、可恢复且相互隔离的 Sessions；完整方向、指标和投入领域见[产品策略](STRATEGY.md)。
+长期目标是在迁移 coding-relevant Pi 能力后，让 Pi parity 成为能力下限，并通过同模型、同任务、多次独立运行的稳定评测追求可证明的持续超越。Skills 是 Pia 的核心能力；当前先实现 project-local Pia Skill v1 的最小可靠闭环，完整 Agent Skills、Claude Code/Codex community roots 与 vendor runtime compatibility 分阶段补充，而不是一次性扩建 Skill engine。Pi 是语义基线和主要对照组；其他优秀开源 coding agent 以及 Codex、Grok 的可获得证据用于发现候选机制，而不是直接复制。长期产品采用严格 C/S：Pia Daemon 管理多个可持久化、可恢复且相互隔离的 Sessions，TUI、GUI、Mobile 与 IM Gateway 都通过同一 Client Protocol 接入；完整方向、指标和投入领域见[产品策略](STRATEGY.md)。
 
 ## 文档导航
 

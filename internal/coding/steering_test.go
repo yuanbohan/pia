@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/yuanbohan/pia/internal/ai"
 	"github.com/yuanbohan/pia/internal/observation"
@@ -42,12 +43,8 @@ func TestSessionSteeringBatchesAtSafeBoundaryWithinSameRun(t *testing.T) {
 	}()
 	<-started
 
-	if err := session.Steer("first correction"); err != nil {
-		t.Fatalf("first Steer() error = %v", err)
-	}
-	if err := session.Steer("second correction"); err != nil {
-		t.Fatalf("second Steer() error = %v", err)
-	}
+	requireTrySteerAccepted(t, session, "first correction")
+	requireTrySteerAccepted(t, session, "second correction")
 	close(release)
 
 	got := receiveAdvance(t, returned)
@@ -104,7 +101,7 @@ func TestSessionSteeringBatchesAtSafeBoundaryWithinSameRun(t *testing.T) {
 	}
 }
 
-func TestSessionSteerAdmissionRejectsIdleBlankSealedAndClosed(t *testing.T) {
+func TestSessionTrySteerDistinguishesUnavailableInvalidAndClosed(t *testing.T) {
 	t.Parallel()
 
 	runSettled := make(chan struct{})
@@ -122,13 +119,17 @@ func TestSessionSteerAdmissionRejectsIdleBlankSealedAndClosed(t *testing.T) {
 	)
 	session := newObservedSession(t, provider, observer)
 
-	if err := session.Steer("idle"); !errors.Is(err, ErrSteerUnavailable) {
-		t.Fatalf("idle Steer() error = %v, want ErrSteerUnavailable", err)
+	if accepted, err := session.TrySteer("idle"); accepted || err != nil {
+		t.Fatalf("idle TrySteer() = (%t, %v), want (false, nil)", accepted, err)
 	}
-	if err := session.Steer(" \t\n"); err == nil ||
-		errors.Is(err, ErrSteerUnavailable) ||
+	if accepted, err := session.TrySteer(" \t\n"); accepted ||
+		err == nil ||
 		errors.Is(err, ErrSessionClosed) {
-		t.Fatalf("blank Steer() error = %v, want input validation error", err)
+		t.Fatalf(
+			"blank TrySteer() = (%t, %v), want input validation error",
+			accepted,
+			err,
+		)
 	}
 
 	returned := make(chan sessionAdvanceReturn, 1)
@@ -138,8 +139,12 @@ func TestSessionSteerAdmissionRejectsIdleBlankSealedAndClosed(t *testing.T) {
 	}()
 	<-runSettled
 
-	if err := session.Steer("too late"); !errors.Is(err, ErrSteerUnavailable) {
-		t.Fatalf("sealed Steer() error = %v, want ErrSteerUnavailable", err)
+	if accepted, err := session.TrySteer("too late"); accepted || err != nil {
+		t.Fatalf(
+			"sealed TrySteer() = (%t, %v), want (false, nil)",
+			accepted,
+			err,
+		)
 	}
 	close(releaseSettlement)
 	if got := receiveAdvance(t, returned); got.err != nil {
@@ -149,12 +154,17 @@ func TestSessionSteerAdmissionRejectsIdleBlankSealedAndClosed(t *testing.T) {
 	if err := session.Close(context.Background()); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
-	if err := session.Steer("closed"); !errors.Is(err, ErrSessionClosed) {
-		t.Fatalf("closed Steer() error = %v, want ErrSessionClosed", err)
+	if accepted, err := session.TrySteer("closed"); accepted ||
+		!errors.Is(err, ErrSessionClosed) {
+		t.Fatalf(
+			"closed TrySteer() = (%t, %v), want (false, ErrSessionClosed)",
+			accepted,
+			err,
+		)
 	}
 }
 
-func TestSessionProviderFailureHandsBackUnconsumedInputs(t *testing.T) {
+func TestSessionProviderFailureHandsBackUnconsumedSteering(t *testing.T) {
 	t.Parallel()
 
 	started := make(chan struct{})
@@ -180,15 +190,8 @@ func TestSessionProviderFailureHandsBackUnconsumedInputs(t *testing.T) {
 	}()
 	<-started
 
-	if err := session.Steer("first correction"); err != nil {
-		t.Fatalf("first Steer() error = %v", err)
-	}
-	if err := session.Steer("second correction"); err != nil {
-		t.Fatalf("second Steer() error = %v", err)
-	}
-	if err := session.FollowUp("later task"); err != nil {
-		t.Fatalf("FollowUp() error = %v", err)
-	}
+	requireTrySteerAccepted(t, session, "first correction")
+	requireTrySteerAccepted(t, session, "second correction")
 	close(release)
 
 	got := receiveAdvance(t, returned)
@@ -202,16 +205,6 @@ func TestSessionProviderFailureHandsBackUnconsumedInputs(t *testing.T) {
 		t.Fatalf(
 			"UnconsumedSteering = %#v, want %#v",
 			got.result.UnconsumedSteering,
-			want,
-		)
-	}
-	if want := []string{"later task"}; !reflect.DeepEqual(
-		got.result.UnconsumedFollowUps,
-		want,
-	) {
-		t.Fatalf(
-			"UnconsumedFollowUps = %#v, want %#v",
-			got.result.UnconsumedFollowUps,
 			want,
 		)
 	}
@@ -253,9 +246,7 @@ func TestSessionProviderFailureDoesNotHandBackConsumedSteering(t *testing.T) {
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-started
-	if err := session.Steer("consumed correction"); err != nil {
-		t.Fatalf("Steer() error = %v", err)
-	}
+	requireTrySteerAccepted(t, session, "consumed correction")
 	close(release)
 
 	got := receiveAdvance(t, returned)
@@ -290,13 +281,121 @@ func TestSessionProviderFailureDoesNotHandBackConsumedSteering(t *testing.T) {
 	}
 }
 
-func TestSessionCancelSealsAdmissionAndHandsBackPendingInputs(t *testing.T) {
+func TestSessionCancellationSealsAdmissionAndHandsBackPendingSteering(t *testing.T) {
+	t.Parallel()
+
+	callerCause := errors.New("caller canceled")
+	tests := []struct {
+		name       string
+		trigger    func(*Session, context.CancelCauseFunc) error
+		wantCause  error
+		wantClosed bool
+	}{
+		{
+			name: "caller context",
+			trigger: func(_ *Session, cancel context.CancelCauseFunc) error {
+				cancel(callerCause)
+				return nil
+			},
+			wantCause: callerCause,
+		},
+		{
+			name: "Cancel",
+			trigger: func(session *Session, _ context.CancelCauseFunc) error {
+				session.Cancel()
+				return nil
+			},
+			wantCause: context.Canceled,
+		},
+		{
+			name: "Close",
+			trigger: func(session *Session, _ context.CancelCauseFunc) error {
+				return session.Close(context.Background())
+			},
+			wantCause:  context.Canceled,
+			wantClosed: true,
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			started := make(chan struct{})
+			provider := newScriptedRecoveryProvider(func(ctx context.Context) ai.Stream {
+				return &cancelBlockingStream{ctx: ctx, started: started}
+			})
+			session := newLifecycleSession(t, provider, func() error { return nil })
+			t.Cleanup(func() {
+				if err := session.Close(context.Background()); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+			})
+			ctx, cancel := context.WithCancelCause(context.Background())
+
+			returned := make(chan sessionAdvanceReturn, 1)
+			go func() {
+				result, err := session.Advance(ctx, "initial")
+				returned <- sessionAdvanceReturn{result: result, err: err}
+			}()
+			<-started
+			requireTrySteerAccepted(t, session, "pending correction")
+
+			if err := test.trigger(session, cancel); err != nil {
+				t.Fatalf("control operation error = %v", err)
+			}
+			accepted, err := session.TrySteer("after cancellation")
+			if test.wantClosed {
+				if accepted || !errors.Is(err, ErrSessionClosed) {
+					t.Fatalf(
+						"post-close TrySteer() = (%t, %v), want (false, ErrSessionClosed)",
+						accepted,
+						err,
+					)
+				}
+			} else if accepted || err != nil {
+				t.Fatalf(
+					"post-cancel TrySteer() = (%t, %v), want (false, nil)",
+					accepted,
+					err,
+				)
+			}
+
+			got := receiveAdvance(t, returned)
+			if !errors.Is(got.err, test.wantCause) {
+				t.Fatalf("Advance() error = %v, want %v", got.err, test.wantCause)
+			}
+			if want := []string{"pending correction"}; !reflect.DeepEqual(
+				got.result.UnconsumedSteering,
+				want,
+			) {
+				t.Fatalf(
+					"UnconsumedSteering = %#v, want %#v",
+					got.result.UnconsumedSteering,
+					want,
+				)
+			}
+			if users := userMessageTexts(got.result.History); !reflect.DeepEqual(
+				users,
+				[]string{"initial"},
+			) {
+				t.Fatalf("History user messages = %#v, want only initial", users)
+			}
+		})
+	}
+}
+
+func TestSessionCancelAfterSuccessfulTerminalHandsBackPendingSteering(t *testing.T) {
 	t.Parallel()
 
 	started := make(chan struct{})
-	provider := newScriptedRecoveryProvider(func(ctx context.Context) ai.Stream {
-		return &cancelBlockingStream{ctx: ctx, started: started}
-	})
+	release := make(chan struct{})
+	provider := newScriptedRecoveryProvider(
+		gatedEventFactory(started, release, ai.DoneEvent{
+			Message: textAssistant("current Run still completed"),
+		}),
+	)
 	session := newLifecycleSession(t, provider, func() error { return nil })
 	t.Cleanup(func() {
 		if err := session.Close(context.Background()); err != nil {
@@ -310,26 +409,15 @@ func TestSessionCancelSealsAdmissionAndHandsBackPendingInputs(t *testing.T) {
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-started
-	if err := session.Steer("pending correction"); err != nil {
-		t.Fatalf("Steer() error = %v", err)
-	}
-	if err := session.FollowUp("pending follow-up"); err != nil {
-		t.Fatalf("FollowUp() error = %v", err)
-	}
+	requireTrySteerAccepted(t, session, "must not be consumed")
 
 	session.Cancel()
-	if err := session.Steer("after cancel"); !errors.Is(err, ErrSteerUnavailable) {
-		t.Fatalf("post-Cancel Steer() error = %v, want ErrSteerUnavailable", err)
-	}
-	if err := session.FollowUp("after cancel"); !errors.Is(err, ErrFollowUpUnavailable) {
-		t.Fatalf("post-Cancel FollowUp() error = %v, want ErrFollowUpUnavailable", err)
-	}
-
+	close(release)
 	got := receiveAdvance(t, returned)
 	if !errors.Is(got.err, context.Canceled) {
 		t.Fatalf("Advance() error = %v, want context.Canceled", got.err)
 	}
-	if want := []string{"pending correction"}; !reflect.DeepEqual(
+	if want := []string{"must not be consumed"}; !reflect.DeepEqual(
 		got.result.UnconsumedSteering,
 		want,
 	) {
@@ -339,15 +427,11 @@ func TestSessionCancelSealsAdmissionAndHandsBackPendingInputs(t *testing.T) {
 			want,
 		)
 	}
-	if want := []string{"pending follow-up"}; !reflect.DeepEqual(
-		got.result.UnconsumedFollowUps,
-		want,
-	) {
-		t.Fatalf(
-			"UnconsumedFollowUps = %#v, want %#v",
-			got.result.UnconsumedFollowUps,
-			want,
-		)
+	if gotText, want := got.result.FinalText(), "current Run still completed"; gotText != want {
+		t.Fatalf("FinalText() = %q, want %q", gotText, want)
+	}
+	if gotRequests := len(provider.Requests()); gotRequests != 1 {
+		t.Fatalf("Provider requests = %d, want 1", gotRequests)
 	}
 }
 
@@ -389,15 +473,14 @@ func TestSessionSteeringSurvivesOverflowRecovery(t *testing.T) {
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-runStarted
-	if err := session.Steer("preserved correction"); err != nil {
-		t.Fatalf("Steer() error = %v", err)
-	}
+	requireTrySteerAccepted(t, session, "preserved correction")
 	close(releaseRun)
 
 	<-compactionStarted
-	if err := session.Steer("during compaction"); !errors.Is(err, ErrSteerUnavailable) {
+	if accepted, err := session.TrySteer("during compaction"); accepted || err != nil {
 		t.Fatalf(
-			"compaction Steer() error = %v, want ErrSteerUnavailable",
+			"compaction TrySteer() = (%t, %v), want (false, nil)",
+			accepted,
 			err,
 		)
 	}
@@ -434,7 +517,7 @@ func TestSessionSteeringSurvivesOverflowRecovery(t *testing.T) {
 	}
 }
 
-func TestSessionSteerRacingFinalSealIsConsumedOrRejected(t *testing.T) {
+func TestSessionTrySteerRacingFinalSealIsConsumedOrUnavailable(t *testing.T) {
 	for iteration := range 50 {
 		started := make(chan struct{})
 		release := make(chan struct{})
@@ -454,10 +537,11 @@ func TestSessionSteerRacingFinalSealIsConsumedOrRejected(t *testing.T) {
 		<-started
 
 		race := make(chan struct{})
-		admissionReturned := make(chan error, 1)
+		admissionReturned := make(chan trySteerReturn, 1)
 		go func() {
 			<-race
-			admissionReturned <- session.Steer("racing correction")
+			accepted, err := session.TrySteer("racing correction")
+			admissionReturned <- trySteerReturn{accepted: accepted, err: err}
 		}()
 		go func() {
 			<-race
@@ -465,14 +549,14 @@ func TestSessionSteerRacingFinalSealIsConsumedOrRejected(t *testing.T) {
 		}()
 		close(race)
 
-		admissionErr := receiveError(t, admissionReturned)
+		admission := receiveTrySteer(t, admissionReturned)
 		got := receiveAdvance(t, returned)
 		if got.err != nil {
 			t.Fatalf("iteration %d Advance() error = %v", iteration, got.err)
 		}
 		users := userMessageTexts(got.result.History)
 		switch {
-		case admissionErr == nil:
+		case admission.accepted && admission.err == nil:
 			if want := []string{"initial", "racing correction"}; !reflect.DeepEqual(users, want) {
 				t.Fatalf(
 					"iteration %d accepted users = %#v, want %#v",
@@ -481,17 +565,22 @@ func TestSessionSteerRacingFinalSealIsConsumedOrRejected(t *testing.T) {
 					want,
 				)
 			}
-		case errors.Is(admissionErr, ErrSteerUnavailable):
+		case !admission.accepted && admission.err == nil:
 			if want := []string{"initial"}; !reflect.DeepEqual(users, want) {
 				t.Fatalf(
-					"iteration %d rejected users = %#v, want %#v",
+					"iteration %d unavailable users = %#v, want %#v",
 					iteration,
 					users,
 					want,
 				)
 			}
 		default:
-			t.Fatalf("iteration %d Steer() error = %v", iteration, admissionErr)
+			t.Fatalf(
+				"iteration %d TrySteer() = (%t, %v), want accepted or unavailable",
+				iteration,
+				admission.accepted,
+				admission.err,
+			)
 		}
 		if len(got.result.UnconsumedSteering) != 0 {
 			t.Fatalf(
@@ -504,4 +593,59 @@ func TestSessionSteerRacingFinalSealIsConsumedOrRejected(t *testing.T) {
 			t.Fatalf("iteration %d Close() error = %v", iteration, err)
 		}
 	}
+}
+
+func requireTrySteerAccepted(t *testing.T, session *Session, input string) {
+	t.Helper()
+
+	accepted, err := session.TrySteer(input)
+	if !accepted || err != nil {
+		t.Fatalf("TrySteer(%q) = (%t, %v), want (true, nil)", input, accepted, err)
+	}
+}
+
+type trySteerReturn struct {
+	accepted bool
+	err      error
+}
+
+func receiveTrySteer(
+	t *testing.T,
+	returned <-chan trySteerReturn,
+) trySteerReturn {
+	t.Helper()
+
+	select {
+	case result := <-returned:
+		return result
+	case <-time.After(2 * time.Second):
+		t.Fatal("TrySteer did not settle")
+		return trySteerReturn{}
+	}
+}
+
+func gatedEventFactory(
+	started chan<- struct{},
+	release <-chan struct{},
+	event ai.Event,
+) recoveryStreamFactory {
+	return func(context.Context) ai.Stream {
+		close(started)
+		return &gatedRecoveryStream{release: release, event: event}
+	}
+}
+
+func userMessageTexts(messages []ai.Message) []string {
+	var texts []string
+	for _, message := range messages {
+		switch message := message.(type) {
+		case ai.UserMessage:
+			texts = append(texts, message.Content)
+		case *ai.UserMessage:
+			if message != nil {
+				texts = append(texts, message.Content)
+			}
+		}
+	}
+	return texts
 }

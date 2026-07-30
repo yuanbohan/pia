@@ -6,6 +6,7 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 The main runtime terms are different kinds of things rather than peer controllers:
 
+- **Pia Daemon** is the future long-running server authority for acknowledged Submissions and Sessions.
 - **Session** is the long-lived lifecycle object.
 - **Conversation** is the interaction state owned inside a Session.
 - **Agent Execution Engine** is the run-local model/tool loop component a Session calls.
@@ -14,11 +15,14 @@ The main runtime terms are different kinds of things rather than peer controller
 ```text
 Pia                 ── product-assembles ──> Coding Agent
 Pia                 ── owns as a core capability ──> Skills
-Coding Agent        ── hosts ──> Session
+Client              ── future common protocol ──> Pia Daemon
+Pia Daemon          ── owns acknowledged future ──> Submission
+Pia Daemon          ── hosts and routes ──> Session
 
 Session                         long-lived lifecycle authority
 ├── owns ─────────────────────> Conversation state
 ├── owns ─────────────────────> Workspace and resources
+├── owns accepted current ────> Steering
 ├── derives ──────────────────> Working Context
 ├── calls ────────────────────> Agent Execution Engine
 ├── performs ─────────────────> one user advance at a time
@@ -35,7 +39,7 @@ Session                ── commits ──> Run Message Delta
 Working Context        ── copied into ─> Provider Request Snapshot
 ```
 
-The ownership arrows describe semantic authority, not a required Go struct layout. In particular, a user advance does not require a durable struct or package, Conversation state is not an independent active object, and “Conversation Owner” is a role fulfilled by Session. Working Context is a derived model view rather than a second long-lived mutable store. The Agent Execution Engine may hold immutable Provider/tool dependencies, but all invocation-specific messages and control are run-local.
+The ownership arrows describe semantic authority and long-term direction, not a required Go struct layout or a claim that Pia Daemon already exists. The current one-shot CLI directly creates one Session as a local development/acceptance exception. A user advance does not require a durable struct or package, Conversation state is not an independent active object, and “Conversation Owner” is a role fulfilled by Session. Working Context is a derived model view rather than a second long-lived mutable store. The Agent Execution Engine may hold immutable Provider/tool dependencies, but all invocation-specific messages and control are run-local.
 
 ## Agent System
 
@@ -85,7 +89,7 @@ Session may invoke the engine more than once while handling one user advance, su
 
 The complete application specialized for software-engineering tasks by composing a Session, Agent Execution Engine, coding workspace, coding system prompt, coding tools, and model configuration.
 
-A Coding Agent is not another model and does not inherit from the execution engine. It is the product-level assembly that gives the generic model/tool runtime its coding behavior; a CLI, future TUI, or future Orchestrator hosts this application through Session.
+A Coding Agent is not another model and does not inherit from the execution engine. It is the product-level assembly that gives the generic model/tool runtime its coding behavior; the current one-shot CLI hosts it through Session, while future interactive clients reach the same application through Pia Daemon rather than calling Session directly.
 
 ### Skill
 
@@ -109,7 +113,7 @@ Conversation is primarily a state/data concept inside a Session, not a peer life
 
 The runtime responsibility that owns a Conversation’s complete ordered History and current model-view projection. In Pia, Session fulfills this role.
 
-Conversation Owner names a role, not a separate controller, type, or package beside Session. Session accepts at most one active user advance for its Conversation and rejects concurrent attempts rather than silently queueing them. One accepted Advance may consume explicitly admitted Follow-up inputs at settled Run boundaries as additional input-started Runs under the same guard; these are not concurrent Advance attempts. An overflow recovery may likewise coordinate one input-started Run and one later input-free Run under that guard. None of this prevents different Sessions or parallel-safe tools within one Run from executing concurrently. Conversation state does not independently acquire queue, cancel, close, or persistence lifecycle.
+Conversation Owner names a role, not a separate controller, type, or package beside Session. Session accepts at most one active user advance for its Conversation and rejects concurrent attempts rather than silently queueing them. One accepted Advance may coordinate one input-started Run and a later input-free Run for bounded overflow recovery under the same guard; current-execution Steering may also extend that Run at safe boundaries. Future Submissions remain outside Session. None of this prevents different Sessions or parallel-safe tools within one Run from executing concurrently. Conversation state does not independently acquire queue, cancel, close, or persistence lifecycle.
 
 ### Message
 
@@ -123,7 +127,7 @@ The authoritative, complete, ordered record of accepted Messages in a Conversati
 
 It retains successful, error, and aborted terminal assistant messages and the tool results that close accepted tool calls, including explicit not-executed results. It excludes partial stream formation, Provider Request Snapshots, system prompts, tool schemas, logs, and UI-only events.
 
-Session commits each Run Message Delta after that engine invocation settles. One accepted coding user advance may commit multiple input-started deltas while consuming Follow-up inputs, or an initial failed delta and a later input-free continuation delta when bounded overflow recovery succeeds. Until future persistence creates a stronger requirement, Conversation History represents settled Runs rather than partially formed active-Run state.
+Session commits each Run Message Delta after that engine invocation settles. One accepted coding user advance may commit an initial failed delta and a later input-free continuation delta when bounded overflow recovery succeeds; accepted Steering extends the same input-started Run rather than creating another Advance. Until future persistence creates a stronger requirement, Conversation History represents settled Runs rather than partially formed active-Run state.
 
 *Avoid:* using “transcript” without qualification when it is unclear whether the complete Conversation History or the current derived Working Context is meant.
 
@@ -149,15 +153,21 @@ Compaction is not arbitrary truncation: the resulting Working Context must remai
 
 ### Semantic Event
 
-An ordered, ephemeral observation that a meaningful runtime fact occurred, such as Run acceptance, a terminal assistant message, tool execution, compaction, or final settlement. Cancellation-specific request and settlement observations are deferred until Session control and an `Esc` interaction exist.
+An ordered, ephemeral observation that a meaningful runtime fact occurred, such as Run acceptance, a terminal assistant message, tool execution, compaction, or final settlement. Any future cancellation-specific observation must be justified by a real Daemon/client consumer rather than by a particular terminal key.
 
 Semantic Events let a terminal host or another observer follow work while it is happening. They are not authoritative Conversation Messages or durable Session records, and an observer does not gain ownership of Agent Loop, Conversation History, Working Context, or lifecycle state by consuming them.
 
 The current internal event payload carries only bounded semantic state such as fixed modes/outcomes, message role, and a tool call's turn-local source index plus a tool-owned bounded safe summary. That summary may identify the operator-visible target action, such as a path or bounded command, but the event does not copy message text, raw tool arguments/results, raw errors, model-generated call IDs, or mutable authoritative objects. A future consumer may justify an additional bounded projection, but live events are not a second History or trace.
 
+### Submission
+
+One unit of external user input acknowledged by the future Pia Daemon before it is routed into a Session. A Submission may start a new Advance, may be offered as current-execution Steering, or may remain server-owned until later work can start.
+
+Submission is a service-boundary term, not automatically a Conversation Message or Session queue item. A client owns its draft and unacknowledged input; the future Daemon owns acknowledged not-yet-started Submissions; Session acquires only an Advance initial input or Steering that it explicitly accepts. Submission identity, acknowledgement, persistence, result delivery, and protocol shape remain future decisions.
+
 ### User Advance
 
-One transient Session operation that accepts an initial user input and coordinates everything required to reach quiescence from that submission: optional pre-Run compaction, its input-started Run, any explicitly admitted Follow-up inputs consumed as later input-started Runs, bounded overflow recovery with an optional input-free continuation for each eligible Run, Conversation History commits, and the final result snapshot.
+One transient Session operation that accepts one initial user input and coordinates everything required to settle that submission: optional pre-Run compaction, its input-started Run, current-execution Steering accepted at safe boundaries, bounded overflow recovery with an optional input-free continuation, Conversation History commits, and the final result snapshot.
 
 “Advance” is a precise operation boundary used to distinguish the complete user request from an internal Run. It is not a fourth long-lived runtime object, does not require its own owner or package, and does not add another lock or persisted state machine. Session performs it.
 
@@ -165,13 +175,13 @@ One transient Session operation that accepts an initial user input and coordinat
 
 User input accepted while a Session execution has a steerable Engine Run and intended to join that same run at a defined safe boundary after the current assistant turn and all of that message's tool work settle. Every Steering accepted before one atomic boundary is appended, in admission order, as a separate user Message before the same next Provider request.
 
-Steering does not start a concurrent Run, preempt an in-flight Provider or tool call, or mean cancellation. Terminal input capture is a separate concern: while the terminal remains open, a normal submission is retained and automatically delivered even when same-Run Steering is unavailable. Until Session acknowledges Steering ownership transfer, the terminal coordinator still owns that input and may route it into later work after the current execution settles.
+Steering does not start a concurrent Run, preempt an in-flight Provider or tool call, or mean cancellation. External Submission routing is a separate concern: until Session explicitly accepts Steering ownership, the future Daemon retains that input and may start a later Advance after the current execution settles. The client does not need to observe a temporarily unavailable Steering window as a rejection.
 
 ### Follow-up
 
-User input accepted while a Session Advance is active but reserved for a later sequential input-started Run under that same Advance, after the current Run reaches an eligible settlement boundary and commits its Message Delta.
+An optional client-facing delivery intent meaning “do not try to alter the current execution; run this after it.” A Terminal might expose it as a dedicated action while an IM client might initially expose only ordinary messages.
 
-Successful Follow-up admission transfers responsibility for that input from the caller to Session; it acknowledges acceptance, not execution completion or a per-input result. A pending Follow-up is not a Conversation Message until its Run accepts it. It is distinct from Steering and keeps the Session from reporting true quiescence until it is consumed or an abnormal Advance settlement explicitly hands it back to the host.
+Follow-up is not a Session API, queue, Message kind, or lifetime state. A future common Client Protocol may express this intent, but the Daemon still owns the acknowledged future Submission and starts a later Advance. The exact protocol representation remains undecided.
 
 ### Session Journal
 
@@ -181,17 +191,23 @@ The Session Journal may contain Session identity and workspace metadata, settled
 
 ### Session
 
-A lifecycle and persistence envelope around a Conversation, and the intended single outer controller for user operations on that Conversation. It may add durable identity, workspace binding, stored entries, model settings, compaction records, branches, timestamps, queue/cancel/close controls, and resume behavior.
+A lifecycle and persistence envelope around a Conversation, and the intended single runtime owner for operations on that Conversation. It may add durable identity, workspace binding, stored entries, model settings, compaction records, branches, timestamps, active execution control, accepted current Steering, and resume behavior.
 
 A Session is broader than Conversation History and is not synonymous with Working Context. It owns Conversation state and Workspace resources, derives Working Context, invokes the Agent Execution Engine, and performs user advances; those terms are not peer lifecycle controllers.
 
-Session is the exclusive entrypoint and the only `busy`/queue/cancel/wait/close authority for one Conversation. It does not wrap a second Conversation controller or stateful Core Agent with overlapping lifecycle or Working Context ownership. Persistence, queues, branches, and multi-Session management may extend Session in later lessons without changing this single-owner boundary.
+Session is the only lifetime, active-Advance, current-Steering, cancel, and close authority for one Conversation. It does not wrap a second Conversation controller or stateful Core Agent with overlapping lifecycle or Working Context ownership, and it does not own future Submissions. Persistence and branches may extend Session later; durable submission queues and multi-Session routing belong to the future Daemon service layer.
 
 A Session is **closing** after Close has permanently stopped admission but before active work and owned resources have fully settled. Close immediately requests cancellation, but cancel request and clean closure are different facts. A caller may stop waiting at its context boundary while the Session remains closing; timeout never reopens the Session or turns an incomplete shutdown into a clean close. A process host may subsequently terminate the process, leaving an unclean Session for checkpoint-based recovery.
 
 A workspace binding, when owned by a Session, is durable Session metadata rather than a Conversation Message or Working Context content. The host process's launch directory is not implicitly part of the Conversation and must not silently replace that binding during resume.
 
 A future durable compaction record belongs to the Session Journal as control/checkpoint state, alongside but distinct from message entries. It is not a Conversation Message or a live event: the latest committed record can rebuild the Working Context projection, while failed or canceled settled records remain observable without changing that model view.
+
+### Pia Daemon
+
+The future long-running Pia server process that exposes one common Client Protocol to TUI, GUI, Mobile, and IM Gateway clients. It will own acknowledged future Submissions, Session lookup and orchestration, and result delivery while delegating one Conversation’s lifetime and active execution to its Session.
+
+Pia Daemon is not another name for Session, Engine, Gateway, or a terminal coordinator. Its protocol, persistence, multi-Session registry, authorization, and shutdown design are intentionally deferred until a real external client is in scope.
 
 ## Flagged Ambiguities
 

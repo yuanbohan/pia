@@ -20,29 +20,29 @@ func (source sessionSteeringSource) DrainOrSeal() []string {
 	return source.session.drainSteering(source.control, true)
 }
 
-// Steer admits input for the current Engine invocation to consume at its next
-// safe boundary. A nil error acknowledges ownership transfer, not completion.
-func (s *Session) Steer(input string) error {
+// TrySteer attempts to transfer input ownership to the current Engine
+// invocation for consumption at its next safe boundary.
+func (s *Session) TrySteer(input string) (bool, error) {
 	if err := validateInput(input); err != nil {
-		return err
+		return false, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.lifetime != sessionOpen {
-		return ErrSessionClosed
+		return false, ErrSessionClosed
 	}
 	if s.active == nil ||
 		!s.active.acceptingSteering ||
 		context.Cause(s.active.ctx) != nil {
-		return ErrSteerUnavailable
+		return false, nil
 	}
 	s.active.pendingSteering = append(
 		s.active.pendingSteering,
 		strings.Clone(input),
 	)
-	return nil
+	return true, nil
 }
 
 func (s *Session) openSteering(

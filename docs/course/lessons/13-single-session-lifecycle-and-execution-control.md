@@ -6,6 +6,13 @@
 
 本课状态为**已完成并提交**，规模保持 **Large**。多次顺序 Advance、busy/idle、cancel、wait、close、外层 guard 迁移和 workspace lifetime 共同定义一个不可再少的长期 Session lifecycle；follow-up、steering、终端、journal 和 resume 都可以独立验收，不并入本课。源码证据、边界、实现和验证结果均已记录。
 
+> **Lesson 16 修正（2026-07-30）：** 本课建立的单一 Session owner、同步
+> Advance、Cancel 与 Close 契约继续有效；D107 取代 public `Wait`，并取代
+> terminal 直接作为长期 Session host 的路线。未来 interactive clients 通过
+> Pia Daemon 的 common protocol 接入，Session 内部仍保留 Close/settlement
+> 所需的 private completion signal。下文对 Wait 和未来 direct terminal 的描述
+> 仅保留为本课历史设计与实现记录。
+
 ## 解锁能力
 
 开课前的 `internal/coding.Run` 每次调用都会：

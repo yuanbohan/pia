@@ -24,6 +24,13 @@ Session-owned capability；不修改 active tool loop、不加入 steering、持
 per-follow-up result handles、后台 driver 或第二套 lifecycle state，本课将重新
 评估规模并在成为 XLarge 前拆分。
 
+> **Lesson 16 修正（2026-07-30）：** 本课的 queue、Run 与 hand-back 行为是
+> 有效的学习证据，但 D107 已完整取代 Session-owned Follow-up capability。
+> Lesson 16 已删除 `FollowUp` API、pending queue、同一 Advance 的多
+> input-started Runs 与 `UnconsumedFollowUps`。Follow-up 以后只可能是
+> client-facing delivery intent；acknowledged future Submission 由 future Pia
+> Daemon 拥有，并以稍后的独立 Advance 执行。下文保留为历史课程记录。
+
 ## 解锁能力
 
 Lesson 13 的 Session 已支持多个调用方**顺序**执行 `Advance`，但 active 时的
