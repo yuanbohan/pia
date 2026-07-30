@@ -324,7 +324,7 @@ func TestSessionPreRunFailureReturnsDequeuedFollowUpFirst(t *testing.T) {
 	}
 }
 
-func TestSessionCancellationHandsBackPendingFollowUps(t *testing.T) {
+func TestSessionCancellationHandsBackPendingInputs(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -370,6 +370,9 @@ func TestSessionCancellationHandsBackPendingFollowUps(t *testing.T) {
 				returned <- sessionAdvanceReturn{result: result, err: err}
 			}()
 			<-started
+			if err := session.Steer("pending steering"); err != nil {
+				t.Fatalf("Steer() error = %v", err)
+			}
 			if err := session.FollowUp("first pending"); err != nil {
 				t.Fatalf("first FollowUp() error = %v", err)
 			}
@@ -383,6 +386,16 @@ func TestSessionCancellationHandsBackPendingFollowUps(t *testing.T) {
 			got := receiveAdvance(t, returned)
 			if got.err == nil {
 				t.Fatal("Advance() error = nil, want cancellation")
+			}
+			if want := []string{"pending steering"}; !reflect.DeepEqual(
+				got.result.UnconsumedSteering,
+				want,
+			) {
+				t.Fatalf(
+					"UnconsumedSteering = %#v, want %#v",
+					got.result.UnconsumedSteering,
+					want,
+				)
 			}
 			want := []string{"first pending", "second pending"}
 			if !reflect.DeepEqual(got.result.UnconsumedFollowUps, want) {
@@ -431,6 +444,9 @@ func TestSessionCancelAfterSuccessfulRunStopsBeforePendingFollowUp(t *testing.T)
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-started
+	if err := session.Steer("must not steer"); err != nil {
+		t.Fatalf("Steer() error = %v", err)
+	}
 	if err := session.FollowUp("must not start"); err != nil {
 		t.Fatalf("FollowUp() error = %v", err)
 	}
@@ -440,6 +456,16 @@ func TestSessionCancelAfterSuccessfulRunStopsBeforePendingFollowUp(t *testing.T)
 	got := receiveAdvance(t, returned)
 	if !errors.Is(got.err, context.Canceled) {
 		t.Fatalf("Advance() error = %v, want context.Canceled", got.err)
+	}
+	if want := []string{"must not steer"}; !reflect.DeepEqual(
+		got.result.UnconsumedSteering,
+		want,
+	) {
+		t.Fatalf(
+			"UnconsumedSteering = %#v, want %#v",
+			got.result.UnconsumedSteering,
+			want,
+		)
 	}
 	if want := []string{"must not start"}; !reflect.DeepEqual(
 		got.result.UnconsumedFollowUps,

@@ -24,6 +24,14 @@ type RunResult struct {
 	NewMessages []ai.Message
 }
 
+// SteeringSource supplies user inputs accepted for one Engine invocation.
+// Drain keeps admission open. DrainOrSeal returns the final available batch or
+// seals admission when the invocation should stop.
+type SteeringSource interface {
+	Drain() []string
+	DrainOrSeal() []string
+}
+
 // Engine owns immutable dependencies shared by run-local Agent Loop
 // executions. Its caller owns and serializes Conversation state.
 type Engine struct {

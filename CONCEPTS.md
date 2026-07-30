@@ -163,9 +163,9 @@ One transient Session operation that accepts an initial user input and coordinat
 
 ### Steering
 
-User input accepted while a Session execution is active and intended to join that same ongoing advance at a defined safe boundary after current tool work settles.
+User input accepted while a Session execution has a steerable Engine Run and intended to join that same run at a defined safe boundary after the current assistant turn and all of that message's tool work settle. Every Steering accepted before one atomic boundary is appended, in admission order, as a separate user Message before the same next Provider request.
 
-Steering does not start a concurrent Run, preempt an in-flight Provider or tool call, or mean cancellation. Its exact safe-boundary behavior remains subject to source calibration when the corresponding course starts.
+Steering does not start a concurrent Run, preempt an in-flight Provider or tool call, or mean cancellation. Terminal input capture is a separate concern: while the terminal remains open, a normal submission is retained and automatically delivered even when same-Run Steering is unavailable. Until Session acknowledges Steering ownership transfer, the terminal coordinator still owns that input and may route it into later work after the current execution settles.
 
 ### Follow-up
 

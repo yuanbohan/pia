@@ -50,12 +50,12 @@ func TestRunClampsEachRequestOutputToProjectedContext(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	firstResult, err := runtime.Run(context.Background(), nil, "first")
+	firstResult, err := runtime.Run(context.Background(), nil, "first", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
 	firstContext := firstResult.NewMessages
-	if _, err := runtime.Run(context.Background(), firstContext, "12345"); err != nil {
+	if _, err := runtime.Run(context.Background(), firstContext, "12345", emptySteeringSource{}); err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestRunSendsCompleteRequestAndReturnsTerminalDelta(t *testing.T) {
 	provider := newFaux(t, assistantStep(message))
 	runtime := newAgent(t, provider, "stable system prompt")
 
-	result, err := runtime.Run(context.Background(), nil, "inspect the project")
+	result, err := runtime.Run(context.Background(), nil, "inspect the project", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRunTreatsEmptyAssistantAsNormalCompletion(t *testing.T) {
 	}})
 	runtime := newAgent(t, provider, "")
 
-	result, err := runtime.Run(context.Background(), nil, "respond if needed")
+	result, err := runtime.Run(context.Background(), nil, "respond if needed", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -140,7 +140,7 @@ func TestRunTreatsLengthStopAsNormalCompletion(t *testing.T) {
 	provider := newFaux(t, assistantStep(message))
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Run(context.Background(), nil, "answer within the limit")
+	result, err := runtime.Run(context.Background(), nil, "answer within the limit", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -163,7 +163,7 @@ func TestRunsUseExplicitWorkingContextAndReturnIndependentDeltas(t *testing.T) {
 	provider := newFaux(t, assistantStep(first), assistantStep(second))
 	runtime := newAgent(t, provider, "system")
 
-	firstResult, err := runtime.Run(context.Background(), nil, "first question")
+	firstResult, err := runtime.Run(context.Background(), nil, "first question", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
@@ -176,8 +176,8 @@ func TestRunsUseExplicitWorkingContextAndReturnIndependentDeltas(t *testing.T) {
 			ai.UserMessage{Content: "first question"},
 			first,
 		},
-		"second question",
-	)
+		"second question", emptySteeringSource{})
+
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
@@ -212,7 +212,7 @@ func TestProviderCannotMutateAgentWorkingContextThroughRequest(t *testing.T) {
 	}}
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Run(context.Background(), nil, "original user input")
+	result, err := runtime.Run(context.Background(), nil, "original user input", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -239,17 +239,17 @@ func TestProviderCannotMutateNestedWorkingContextThroughRequest(t *testing.T) {
 	provider := &nestedRequestMutatingProvider{responses: []ai.AssistantMessage{first, second, third}}
 	runtime := newAgent(t, provider, "system")
 
-	firstResult, err := runtime.Run(context.Background(), nil, "first question")
+	firstResult, err := runtime.Run(context.Background(), nil, "first question", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
 	history := ai.CloneMessages(firstResult.NewMessages)
-	secondResult, err := runtime.Run(context.Background(), history, "second question")
+	secondResult, err := runtime.Run(context.Background(), history, "second question", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
 	history = append(history, ai.CloneMessages(secondResult.NewMessages)...)
-	if _, err := runtime.Run(context.Background(), history, "third question"); err != nil {
+	if _, err := runtime.Run(context.Background(), history, "third question", emptySteeringSource{}); err != nil {
 		t.Fatalf("third Run() error = %v", err)
 	}
 	if got, want := provider.previousTexts, []string{"first answer", "first answer"}; !reflect.DeepEqual(got, want) {
@@ -281,13 +281,13 @@ func TestProviderTerminalMutationCannotAffectAgentWorkingContext(t *testing.T) {
 		},
 	})
 
-	firstResult, err := runtime.Run(context.Background(), nil, "inspect")
+	firstResult, err := runtime.Run(context.Background(), nil, "inspect", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	arguments[9] = 'X'
 
-	if _, err := runtime.Run(context.Background(), firstResult.NewMessages, "continue"); err != nil {
+	if _, err := runtime.Run(context.Background(), firstResult.NewMessages, "continue", emptySteeringSource{}); err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}
 	requests := provider.Requests()
@@ -313,7 +313,7 @@ func TestRunAppendsProviderErrorTerminalExactlyOnce(t *testing.T) {
 	}})
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Run(context.Background(), nil, "try once")
+	result, err := runtime.Run(context.Background(), nil, "try once", emptySteeringSource{})
 	if err == nil || !strings.Contains(err.Error(), "upstream unavailable") {
 		t.Fatalf("Run() error = %v, want upstream error", err)
 	}
@@ -334,7 +334,7 @@ func TestPreCanceledRunDoesNotMutateWorkingContextOrCallProvider(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := runtime.Run(ctx, nil, "not accepted")
+	result, err := runtime.Run(ctx, nil, "not accepted", emptySteeringSource{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
@@ -366,7 +366,7 @@ func TestCancelAfterAcceptanceWaitsForReceiveAndAppendsOneAbortedTerminal(t *tes
 	}
 	returned := make(chan runReturn, 1)
 	go func() {
-		result, err := runtime.Run(ctx, nil, "accepted input")
+		result, err := runtime.Run(ctx, nil, "accepted input", emptySteeringSource{})
 		returned <- runReturn{result: result, err: err}
 	}()
 
@@ -413,7 +413,7 @@ func TestRunPreservesProviderAbortedTerminalAndContextCause(t *testing.T) {
 		},
 	}}, "system")
 
-	result, err := runtime.Run(ctx, nil, "inspect")
+	result, err := runtime.Run(ctx, nil, "inspect", emptySteeringSource{})
 	if !errors.Is(err, cause) {
 		t.Fatalf("Run() error = %v, want cancellation cause", err)
 	}
@@ -427,7 +427,7 @@ func TestRunSynthesizesErrorWhenStreamEndsBeforeTerminal(t *testing.T) {
 
 	runtime := newAgent(t, staticProvider{stream: eofStream{}}, "system")
 
-	result, err := runtime.Run(context.Background(), nil, "broken stream")
+	result, err := runtime.Run(context.Background(), nil, "broken stream", emptySteeringSource{})
 	if err == nil || !strings.Contains(err.Error(), "before terminal") {
 		t.Fatalf("Run() error = %v, want missing-terminal error", err)
 	}
@@ -446,7 +446,7 @@ func TestRunSynthesizesErrorForNonEOFReceiveFailure(t *testing.T) {
 	receiveErr := errors.New("connection reset")
 	runtime := newAgent(t, staticProvider{stream: errorStream{err: receiveErr}}, "system")
 
-	result, err := runtime.Run(context.Background(), nil, "broken stream")
+	result, err := runtime.Run(context.Background(), nil, "broken stream", emptySteeringSource{})
 	if !errors.Is(err, receiveErr) {
 		t.Fatalf("Run() error = %v, want wrapped receive error", err)
 	}
@@ -492,7 +492,7 @@ func TestRunSynthesizesProtocolErrorForInvalidTerminal(t *testing.T) {
 				events: []ai.Event{test.event},
 			}}, "system")
 
-			result, err := runtime.Run(context.Background(), nil, "invalid response")
+			result, err := runtime.Run(context.Background(), nil, "invalid response", emptySteeringSource{})
 			if err == nil || !strings.Contains(err.Error(), "provider protocol") {
 				t.Fatalf("Run() error = %v, want protocol error", err)
 			}
@@ -509,7 +509,7 @@ func TestRunSynthesizesErrorWhenProviderReturnsNilStream(t *testing.T) {
 
 	runtime := newAgent(t, staticProvider{}, "system")
 
-	result, err := runtime.Run(context.Background(), nil, "broken provider")
+	result, err := runtime.Run(context.Background(), nil, "broken provider", emptySteeringSource{})
 	if err == nil || !strings.Contains(err.Error(), "nil stream") {
 		t.Fatalf("Run() error = %v, want nil-stream protocol error", err)
 	}
@@ -539,7 +539,7 @@ func TestTerminalEventWinsWhenReceiveAlsoReturnsCancellation(t *testing.T) {
 		},
 	}}, "system")
 
-	result, err := runtime.Run(ctx, nil, "finish this turn")
+	result, err := runtime.Run(ctx, nil, "finish this turn", emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil after terminal settlement", err)
 	}
@@ -574,7 +574,7 @@ func TestRunDeepClonesExplicitWorkingContext(t *testing.T) {
 	}
 	returned := make(chan runReturn, 1)
 	go func() {
-		result, err := runtime.Run(context.Background(), replacement, "continue the task")
+		result, err := runtime.Run(context.Background(), replacement, "continue the task", emptySteeringSource{})
 		returned <- runReturn{result: result, err: err}
 	}()
 	<-started

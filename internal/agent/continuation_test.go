@@ -25,7 +25,7 @@ func TestContinueUsesExistingUserTailWithoutAppendingInput(t *testing.T) {
 	provider := newFaux(t, assistantStep(final))
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Continue(context.Background(), initial)
+	result, err := runtime.Continue(context.Background(), initial, emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Continue() error = %v", err)
 	}
@@ -69,7 +69,7 @@ func TestContinueAcceptsPairedToolResultTail(t *testing.T) {
 	provider := newFaux(t, assistantStep(final))
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Continue(context.Background(), initial)
+	result, err := runtime.Continue(context.Background(), initial, emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Continue() error = %v", err)
 	}
@@ -106,7 +106,7 @@ func TestContinueReusesToolLoopAndReturnsOnlyNewMessages(t *testing.T) {
 	})
 	initial := []ai.Message{ai.UserMessage{Content: "inspect then finish"}}
 
-	result, err := runtime.Continue(context.Background(), initial)
+	result, err := runtime.Continue(context.Background(), initial, emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("Continue() error = %v", err)
 	}
@@ -158,7 +158,7 @@ func TestContinueReusesProviderFailureToolCallSettlement(t *testing.T) {
 	})
 	initial := []ai.Message{ai.UserMessage{Content: "finish from this accepted input"}}
 
-	result, err := runtime.Continue(context.Background(), initial)
+	result, err := runtime.Continue(context.Background(), initial, emptySteeringSource{})
 	if err == nil || !strings.Contains(err.Error(), failed.ErrorMessage) {
 		t.Fatalf("Continue() error = %v, want Provider failure", err)
 	}
@@ -252,7 +252,7 @@ func TestContinueRejectsInvalidContextWithoutCallingProvider(t *testing.T) {
 			provider := newFaux(t, assistantStep(ai.AssistantMessage{StopReason: ai.StopReasonStop}))
 			runtime := newAgent(t, provider, "system")
 
-			result, err := runtime.Continue(context.Background(), test.messages)
+			result, err := runtime.Continue(context.Background(), test.messages, emptySteeringSource{})
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), test.want) {
 				t.Fatalf("Continue() error = %v, want fragment %q", err, test.want)
 			}
@@ -279,7 +279,7 @@ func TestPreCanceledContinueDoesNotMutateWorkingContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := runtime.Continue(ctx, initial)
+	result, err := runtime.Continue(ctx, initial, emptySteeringSource{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Continue() error = %v, want context.Canceled", err)
 	}
@@ -290,7 +290,7 @@ func TestPreCanceledContinueDoesNotMutateWorkingContext(t *testing.T) {
 		t.Fatalf("Provider requests after canceled Continue = %d, want 0", got)
 	}
 
-	result, err = runtime.Continue(context.Background(), initial)
+	result, err = runtime.Continue(context.Background(), initial, emptySteeringSource{})
 	if err != nil {
 		t.Fatalf("second Continue() error = %v", err)
 	}

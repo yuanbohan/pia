@@ -20,6 +20,8 @@ var (
 	ErrSessionClosed = errors.New("coding: session is closed")
 	// ErrFollowUpUnavailable means no active Advance can accept a Follow-up.
 	ErrFollowUpUnavailable = errors.New("coding: follow-up is unavailable")
+	// ErrSteerUnavailable means no active Engine invocation can accept Steering.
+	ErrSteerUnavailable = errors.New("coding: steering is unavailable")
 )
 
 // SessionConfig contains the fixed DeepSeek coding profile inputs.
@@ -40,9 +42,10 @@ type SessionInfo struct {
 }
 
 // AdvanceResult contains the complete authoritative Conversation History and
-// any admitted Follow-ups handed back after one Advance settles.
+// admitted inputs handed back after one Advance settles.
 type AdvanceResult struct {
 	History             []ai.Message
+	UnconsumedSteering  []string
 	UnconsumedFollowUps []string
 }
 
@@ -98,30 +101,37 @@ const (
 )
 
 type activeAdvance struct {
+	ctx                context.Context
 	cancel             context.CancelCauseFunc
 	done               chan struct{}
+	acceptingSteering  bool
+	pendingSteering    []string
 	acceptingFollowUps bool
 	pendingFollowUps   []string
 }
 
-// sealAndDetachFollowUps transfers queue ownership to the caller. Session.mu
-// must be held.
-func (control *activeAdvance) sealAndDetachFollowUps(
+// sealAndDetachInputs transfers pending-input ownership to the caller.
+// Session.mu must be held.
+func (control *activeAdvance) sealAndDetachInputs(
 	currentInput string,
 	returnCurrent bool,
-) []string {
+) (steering []string, followUps []string) {
+	control.acceptingSteering = false
 	control.acceptingFollowUps = false
+	steering = control.pendingSteering
+	control.pendingSteering = nil
+
 	if !returnCurrent {
-		unconsumed := control.pendingFollowUps
+		followUps = control.pendingFollowUps
 		control.pendingFollowUps = nil
-		return unconsumed
+		return steering, followUps
 	}
 
-	unconsumed := make([]string, 0, len(control.pendingFollowUps)+1)
-	unconsumed = append(unconsumed, currentInput)
-	unconsumed = append(unconsumed, control.pendingFollowUps...)
+	followUps = make([]string, 0, len(control.pendingFollowUps)+1)
+	followUps = append(followUps, currentInput)
+	followUps = append(followUps, control.pendingFollowUps...)
 	control.pendingFollowUps = nil
-	return unconsumed
+	return steering, followUps
 }
 
 // Session is the sole long-lived owner of one coding Conversation, its
@@ -197,9 +207,11 @@ func (s *Session) Advance(
 	}
 
 	s.observer.Observe(observation.Advance{Phase: observation.PhaseStarted})
+	var unconsumedSteering []string
 	var unconsumedFollowUps []string
 	defer func() {
 		result.History = s.historySnapshot()
+		result.UnconsumedSteering = unconsumedSteering
 		result.UnconsumedFollowUps = unconsumedFollowUps
 		s.observer.Observe(observation.Advance{
 			Phase:   observation.PhaseSettled,
@@ -211,9 +223,13 @@ func (s *Session) Advance(
 	nextInput := input
 	isFollowUp := false
 	for {
-		accepted, advanceErr := s.executeInput(executionCtx, nextInput)
+		accepted, advanceErr := s.executeInput(
+			executionCtx,
+			control,
+			nextInput,
+		)
 		if advanceErr != nil {
-			unconsumedFollowUps = s.stopFollowUps(
+			unconsumedSteering, unconsumedFollowUps = s.stopPendingInputs(
 				control,
 				nextInput,
 				isFollowUp && !accepted,
@@ -223,10 +239,11 @@ func (s *Session) Advance(
 
 		var ok bool
 		var dequeueErr error
-		nextInput, ok, unconsumedFollowUps, dequeueErr = s.dequeueFollowUp(
-			control,
-			executionCtx,
-		)
+		nextInput,
+			ok,
+			unconsumedSteering,
+			unconsumedFollowUps,
+			dequeueErr = s.dequeueFollowUp(control, executionCtx)
 		if dequeueErr != nil {
 			return result, fmt.Errorf("coding: run Agent: %w", dequeueErr)
 		}
@@ -237,7 +254,11 @@ func (s *Session) Advance(
 	}
 }
 
-func (s *Session) executeInput(ctx context.Context, input string) (bool, error) {
+func (s *Session) executeInput(
+	ctx context.Context,
+	control *activeAdvance,
+	input string,
+) (bool, error) {
 	if err := s.compactBeforeRun(ctx, input); err != nil {
 		return false, err
 	}
@@ -246,7 +267,9 @@ func (s *Session) executeInput(ctx context.Context, input string) (bool, error) 
 	if err != nil {
 		return false, fmt.Errorf("coding: derive Working Context: %w", err)
 	}
-	result, runErr := s.engine.Run(ctx, workingContext, input)
+	steering := s.openSteering(control)
+	result, runErr := s.engine.Run(ctx, workingContext, input, steering)
+	s.pauseSteering(control)
 	// Engine.Run returns an empty delta only when cancellation wins before its
 	// input acceptance point.
 	accepted := len(result.NewMessages) > 0
@@ -267,7 +290,9 @@ func (s *Session) executeInput(ctx context.Context, input string) (bool, error) 
 	if err != nil {
 		return accepted, fmt.Errorf("coding: derive recovery Working Context: %w", err)
 	}
-	continuation, continueErr := s.engine.Continue(ctx, workingContext)
+	steering = s.openSteering(control)
+	continuation, continueErr := s.engine.Continue(ctx, workingContext, steering)
+	s.pauseSteering(control)
 	s.appendRun(continuation.NewMessages)
 	if continueErr != nil {
 		if _, overflowedAgain := recoverableOverflowTerminal(continuation.NewMessages); overflowedAgain {
@@ -297,12 +322,13 @@ func (s *Session) beginAdvance(
 	if cause := context.Cause(callerCtx); cause != nil {
 		return nil, nil, ai.CloneMessages(s.history), cause
 	}
-	if strings.TrimSpace(input) == "" {
-		return nil, nil, ai.CloneMessages(s.history), errors.New("coding: input is required")
+	if err := validateInput(input); err != nil {
+		return nil, nil, ai.CloneMessages(s.history), err
 	}
 
 	executionCtx, cancel := context.WithCancelCause(callerCtx)
 	control := &activeAdvance{
+		ctx:                executionCtx,
 		cancel:             cancel,
 		done:               make(chan struct{}),
 		acceptingFollowUps: true,
@@ -314,8 +340,8 @@ func (s *Session) beginAdvance(
 // FollowUp admits input for the active Advance to consume at its next settled
 // Run boundary. A nil error acknowledges ownership transfer, not completion.
 func (s *Session) FollowUp(input string) error {
-	if strings.TrimSpace(input) == "" {
-		return errors.New("coding: input is required")
+	if err := validateInput(input); err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -324,7 +350,9 @@ func (s *Session) FollowUp(input string) error {
 	if s.lifetime != sessionOpen {
 		return ErrSessionClosed
 	}
-	if s.active == nil || !s.active.acceptingFollowUps {
+	if s.active == nil ||
+		!s.active.acceptingFollowUps ||
+		context.Cause(s.active.ctx) != nil {
 		return ErrFollowUpUnavailable
 	}
 	s.active.pendingFollowUps = append(
@@ -334,10 +362,23 @@ func (s *Session) FollowUp(input string) error {
 	return nil
 }
 
+func validateInput(input string) error {
+	if strings.TrimSpace(input) == "" {
+		return errors.New("coding: input is required")
+	}
+	return nil
+}
+
 func (s *Session) dequeueFollowUp(
 	control *activeAdvance,
 	ctx context.Context,
-) (input string, ok bool, unconsumed []string, err error) {
+) (
+	input string,
+	ok bool,
+	unconsumedSteering []string,
+	unconsumedFollowUps []string,
+	err error,
+) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -345,30 +386,33 @@ func (s *Session) dequeueFollowUp(
 	if cause == nil && s.lifetime != sessionOpen {
 		cause = context.Canceled
 	}
-	if cause != nil && len(control.pendingFollowUps) > 0 {
-		unconsumed = control.sealAndDetachFollowUps("", false)
-		return "", false, unconsumed, cause
+	if cause != nil &&
+		(len(control.pendingSteering) > 0 ||
+			len(control.pendingFollowUps) > 0) {
+		unconsumedSteering, unconsumedFollowUps =
+			control.sealAndDetachInputs("", false)
+		return "", false, unconsumedSteering, unconsumedFollowUps, cause
 	}
 	if len(control.pendingFollowUps) == 0 {
 		control.acceptingFollowUps = false
-		return "", false, nil, nil
+		return "", false, nil, nil, nil
 	}
 
 	input = control.pendingFollowUps[0]
 	control.pendingFollowUps[0] = ""
 	control.pendingFollowUps = control.pendingFollowUps[1:]
-	return input, true, nil, nil
+	return input, true, nil, nil, nil
 }
 
-func (s *Session) stopFollowUps(
+func (s *Session) stopPendingInputs(
 	control *activeAdvance,
 	currentInput string,
 	returnCurrent bool,
-) []string {
+) (steering []string, followUps []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return control.sealAndDetachFollowUps(currentInput, returnCurrent)
+	return control.sealAndDetachInputs(currentInput, returnCurrent)
 }
 
 func (s *Session) finishAdvance(control *activeAdvance) {
@@ -390,15 +434,12 @@ func (s *Session) finishAdvance(control *activeAdvance) {
 // Cancel requests cancellation of the sole active Advance and never waits.
 func (s *Session) Cancel() {
 	s.mu.Lock()
-	var cancel context.CancelCauseFunc
 	if s.active != nil {
-		cancel = s.active.cancel
+		s.active.acceptingSteering = false
+		s.active.acceptingFollowUps = false
+		s.active.cancel(context.Canceled)
 	}
 	s.mu.Unlock()
-
-	if cancel != nil {
-		cancel(context.Canceled)
-	}
 }
 
 // Wait observes the current Advance settlement without canceling it.
@@ -416,7 +457,6 @@ func (s *Session) Wait(ctx context.Context) error {
 // Close permanently stops admission, cancels active work, and waits within ctx
 // for settlement and the unique Workspace close.
 func (s *Session) Close(ctx context.Context) error {
-	var cancel context.CancelCauseFunc
 	shouldClose := false
 
 	s.mu.Lock()
@@ -424,7 +464,9 @@ func (s *Session) Close(ctx context.Context) error {
 	case sessionOpen:
 		s.lifetime = sessionClosing
 		if s.active != nil {
-			cancel = s.active.cancel
+			s.active.acceptingSteering = false
+			s.active.acceptingFollowUps = false
+			s.active.cancel(context.Canceled)
 		} else {
 			shouldClose = true
 		}
@@ -436,9 +478,6 @@ func (s *Session) Close(ctx context.Context) error {
 	done := s.closeDone
 	s.mu.Unlock()
 
-	if cancel != nil {
-		cancel(context.Canceled)
-	}
 	if shouldClose {
 		s.finishClose()
 	}

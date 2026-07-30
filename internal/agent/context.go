@@ -5,12 +5,18 @@ import "github.com/yuanbohan/pia/internal/ai"
 type execution struct {
 	engine         *Engine
 	workingContext []ai.Message
+	steering       SteeringSource
 }
 
-func newExecution(engine *Engine, workingContext []ai.Message) *execution {
+func newExecution(
+	engine *Engine,
+	workingContext []ai.Message,
+	steering SteeringSource,
+) *execution {
 	return &execution{
 		engine:         engine,
 		workingContext: ai.CloneMessages(workingContext),
+		steering:       steering,
 	}
 }
 

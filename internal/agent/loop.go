@@ -16,11 +16,15 @@ func (e *Engine) Run(
 	ctx context.Context,
 	workingContext []ai.Message,
 	userInput string,
+	steering SteeringSource,
 ) (result RunResult, err error) {
+	if steering == nil {
+		return RunResult{}, errors.New("agent: steering source is required")
+	}
 	if cause := context.Cause(ctx); cause != nil {
 		return RunResult{}, cause
 	}
-	execution := newExecution(e, workingContext)
+	execution := newExecution(e, workingContext, steering)
 	runStart := len(execution.workingContext)
 	execution.workingContext = append(
 		execution.workingContext,
@@ -38,6 +42,9 @@ func (e *Engine) Run(
 			Outcome: observation.OutcomeFromError(err),
 		})
 	}()
+	if _, err := execution.consumeSteering(ctx, steering.Drain); err != nil {
+		return execution.snapshotRun(runStart), err
+	}
 	return execution.executeRun(ctx, runStart)
 }
 
@@ -46,11 +53,15 @@ func (e *Engine) Run(
 func (e *Engine) Continue(
 	ctx context.Context,
 	workingContext []ai.Message,
+	steering SteeringSource,
 ) (result RunResult, err error) {
+	if steering == nil {
+		return RunResult{}, errors.New("agent: steering source is required")
+	}
 	if cause := context.Cause(ctx); cause != nil {
 		return RunResult{}, cause
 	}
-	execution := newExecution(e, workingContext)
+	execution := newExecution(e, workingContext, steering)
 	if err := validateContinuationContext(execution.workingContext); err != nil {
 		return RunResult{}, err
 	}
@@ -66,18 +77,14 @@ func (e *Engine) Continue(
 			Outcome: observation.OutcomeFromError(err),
 		})
 	}()
+	if _, err := execution.consumeSteering(ctx, steering.Drain); err != nil {
+		return execution.snapshotRun(runStart), err
+	}
 	return execution.executeRun(ctx, runStart)
 }
 
 func (e *execution) executeRun(ctx context.Context, runStart int) (RunResult, error) {
-	continuingAfterTools := false
 	for {
-		if continuingAfterTools {
-			if cause := context.Cause(ctx); cause != nil {
-				return e.snapshotRun(runStart), cause
-			}
-		}
-
 		e.engine.observer.Observe(observation.Turn{Phase: observation.PhaseStarted})
 		request := e.requestSnapshot()
 		message, turnErr := receiveAssistant(ctx, e.engine.provider.Stream(ctx, request))
@@ -102,7 +109,14 @@ func (e *execution) executeRun(ctx context.Context, runStart int) (RunResult, er
 				Phase:   observation.PhaseSettled,
 				Outcome: observation.OutcomeSuccess,
 			})
-			return e.snapshotRun(runStart), nil
+			consumed, err := e.consumeFinalSteering(ctx)
+			if err != nil {
+				return e.snapshotRun(runStart), err
+			}
+			if !consumed {
+				return e.snapshotRun(runStart), nil
+			}
+			continue
 		}
 
 		var results []ai.ToolResultMessage
@@ -125,8 +139,49 @@ func (e *execution) executeRun(ctx context.Context, runStart int) (RunResult, er
 			Phase:   observation.PhaseSettled,
 			Outcome: observation.OutcomeSuccess,
 		})
-		continuingAfterTools = true
+		if _, err := e.consumeSteering(ctx, e.steering.Drain); err != nil {
+			return e.snapshotRun(runStart), err
+		}
 	}
+}
+
+func (e *execution) consumeSteering(
+	ctx context.Context,
+	drain func() []string,
+) (bool, error) {
+	if cause := context.Cause(ctx); cause != nil {
+		return false, cause
+	}
+	inputs := drain()
+	e.appendSteering(inputs)
+	if cause := context.Cause(ctx); cause != nil {
+		return len(inputs) > 0, cause
+	}
+	return len(inputs) > 0, nil
+}
+
+func (e *execution) appendSteering(inputs []string) {
+	for _, input := range inputs {
+		e.workingContext = append(
+			e.workingContext,
+			ai.UserMessage{Content: input},
+		)
+		e.engine.observer.Observe(observation.Message{
+			Role: observation.MessageRoleUser,
+		})
+	}
+}
+
+func (e *execution) consumeFinalSteering(ctx context.Context) (bool, error) {
+	inputs := e.steering.DrainOrSeal()
+	e.appendSteering(inputs)
+	if len(inputs) == 0 {
+		return false, nil
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		return true, cause
+	}
+	return true, nil
 }
 
 func (e *Engine) observeAssistant(message ai.AssistantMessage) {

@@ -46,7 +46,7 @@ func TestRunEmitsEngineSemanticEventsInSettlementOrder(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if _, err := runtime.Run(context.Background(), nil, "inspect"); err != nil {
+	if _, err := runtime.Run(context.Background(), nil, "inspect", emptySteeringSource{}); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 
@@ -96,7 +96,7 @@ func TestRunEmitsErrorSettlementsWithoutCopyingProviderError(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if _, err := runtime.Run(context.Background(), nil, "fail"); err == nil {
+	if _, err := runtime.Run(context.Background(), nil, "fail", emptySteeringSource{}); err == nil {
 		t.Fatal("Run() error = nil, want Provider failure")
 	}
 
@@ -139,7 +139,7 @@ func TestAgentWithoutObserverDoesNotDescribeToolInvocation(t *testing.T) {
 	)
 	runtime := newAgentWithTools(t, provider, "system", read)
 
-	if _, err := runtime.Run(context.Background(), nil, "inspect"); err != nil {
+	if _, err := runtime.Run(context.Background(), nil, "inspect", emptySteeringSource{}); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if descriptionCalls != 0 {
@@ -184,7 +184,7 @@ func TestSerialToolErrorSettlesOnlyThatToolAsError(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if _, err := runtime.Run(context.Background(), nil, "inspect then update"); err != nil {
+	if _, err := runtime.Run(context.Background(), nil, "inspect then update", emptySteeringSource{}); err != nil {
 		t.Fatalf("Run() error = %v, want call-local tool error to remain in the Turn", err)
 	}
 
