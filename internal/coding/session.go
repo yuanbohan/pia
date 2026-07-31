@@ -37,11 +37,10 @@ type SessionInfo struct {
 	SkillDiagnostics []SkillDiagnostic
 }
 
-// AdvanceResult contains the complete authoritative Conversation History and
-// admitted inputs handed back after one Advance settles.
+// AdvanceResult contains the complete authoritative Conversation History after
+// one Advance settles.
 type AdvanceResult struct {
-	History            []ai.Message
-	UnconsumedSteering []string
+	History []ai.Message
 }
 
 // FinalText concatenates text blocks from the last assistant message without
@@ -102,7 +101,7 @@ type activeAdvance struct {
 	pendingSteering   []string
 }
 
-// sealAndDetachSteering transfers pending Steering ownership to the caller.
+// sealAndDetachSteering detaches accepted Steering for Session settlement.
 // Session.mu must be held.
 func (control *activeAdvance) sealAndDetachSteering() []string {
 	control.acceptingSteering = false
@@ -172,22 +171,24 @@ func (s *Session) Info() SessionInfo {
 	return cloneSessionInfo(s.info)
 }
 
-// Advance accepts one initial input and settles every execution, commit, and
-// observation it starts before returning.
+// Advance accepts one nonempty input batch and settles every execution, commit,
+// and observation it starts before returning. Each input remains a separate
+// user message.
 func (s *Session) Advance(
 	ctx context.Context,
-	input string,
+	inputs []string,
 ) (result AdvanceResult, err error) {
-	control, executionCtx, history, err := s.beginAdvance(ctx, input)
+	control, executionCtx, acceptedInputs, history, err := s.beginAdvance(
+		ctx,
+		inputs,
+	)
 	if err != nil {
 		return AdvanceResult{History: history}, err
 	}
 
 	s.observer.Observe(observation.Advance{Phase: observation.PhaseStarted})
-	var unconsumedSteering []string
 	defer func() {
 		result.History = s.historySnapshot()
-		result.UnconsumedSteering = unconsumedSteering
 		s.observer.Observe(observation.Advance{
 			Phase:   observation.PhaseSettled,
 			Outcome: observation.OutcomeFromError(err),
@@ -195,14 +196,15 @@ func (s *Session) Advance(
 		s.finishAdvance(control)
 	}()
 
-	if advanceErr := s.executeInput(executionCtx, control, input); advanceErr != nil {
-		unconsumedSteering = s.stopSteering(control)
+	if advanceErr := s.executeInput(
+		executionCtx,
+		control,
+		acceptedInputs,
+	); advanceErr != nil {
+		s.commitPendingSteering(control)
 		return result, fmt.Errorf("coding: run Agent: %w", advanceErr)
 	}
-	unconsumedSteering, err = s.settleSuccessfulExecution(
-		control,
-		executionCtx,
-	)
+	err = s.settleSuccessfulExecution(control, executionCtx)
 	if err != nil {
 		return result, fmt.Errorf("coding: run Agent: %w", err)
 	}
@@ -212,9 +214,9 @@ func (s *Session) Advance(
 func (s *Session) executeInput(
 	ctx context.Context,
 	control *activeAdvance,
-	input string,
+	inputs []string,
 ) error {
-	if err := s.compactBeforeRun(ctx, input); err != nil {
+	if err := s.compactBeforeRun(ctx, inputs); err != nil {
 		return err
 	}
 
@@ -223,7 +225,7 @@ func (s *Session) executeInput(
 		return fmt.Errorf("coding: derive Working Context: %w", err)
 	}
 	steering := s.openSteering(control)
-	result, runErr := s.engine.Run(ctx, workingContext, input, steering)
+	result, runErr := s.engine.Run(ctx, workingContext, inputs, steering)
 	s.pauseSteering(control)
 	historyStart := s.appendRun(result.NewMessages)
 	if runErr == nil || !s.compaction.enabled() {
@@ -260,22 +262,23 @@ func (s *Session) executeInput(
 
 func (s *Session) beginAdvance(
 	callerCtx context.Context,
-	input string,
-) (*activeAdvance, context.Context, []ai.Message, error) {
+	inputs []string,
+) (*activeAdvance, context.Context, []string, []ai.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.lifetime != sessionOpen {
-		return nil, nil, ai.CloneMessages(s.history), ErrSessionClosed
+		return nil, nil, nil, ai.CloneMessages(s.history), ErrSessionClosed
 	}
 	if s.active != nil {
-		return nil, nil, ai.CloneMessages(s.history), ErrSessionBusy
+		return nil, nil, nil, ai.CloneMessages(s.history), ErrSessionBusy
 	}
 	if cause := context.Cause(callerCtx); cause != nil {
-		return nil, nil, ai.CloneMessages(s.history), cause
+		return nil, nil, nil, ai.CloneMessages(s.history), cause
 	}
-	if err := validateInput(input); err != nil {
-		return nil, nil, ai.CloneMessages(s.history), err
+	acceptedInputs, err := cloneAndValidateInputs(inputs)
+	if err != nil {
+		return nil, nil, nil, ai.CloneMessages(s.history), err
 	}
 
 	executionCtx, cancel := context.WithCancelCause(callerCtx)
@@ -284,40 +287,67 @@ func (s *Session) beginAdvance(
 		cancel: cancel,
 	}
 	s.active = control
-	return control, executionCtx, nil, nil
+	return control, executionCtx, acceptedInputs, nil, nil
 }
 
-func validateInput(input string) error {
-	if strings.TrimSpace(input) == "" {
-		return errors.New("coding: input is required")
+func cloneAndValidateInputs(inputs []string) ([]string, error) {
+	if len(inputs) == 0 {
+		return nil, errors.New("coding: at least one input is required")
 	}
-	return nil
+	cloned := make([]string, len(inputs))
+	for index, input := range inputs {
+		if strings.TrimSpace(input) == "" {
+			return nil, fmt.Errorf("coding: input %d is required", index)
+		}
+		cloned[index] = strings.Clone(input)
+	}
+	return cloned, nil
 }
 
 func (s *Session) settleSuccessfulExecution(
 	control *activeAdvance,
 	ctx context.Context,
-) ([]string, error) {
+) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	pendingSteering := control.sealAndDetachSteering()
+	cause := context.Cause(ctx)
+	s.mu.Unlock()
 
-	unconsumedSteering := control.sealAndDetachSteering()
-	if len(unconsumedSteering) == 0 {
+	s.appendPendingSteering(pendingSteering)
+	if len(pendingSteering) == 0 {
 		// A completed terminal wins over cancellation that arrived after the
 		// Engine had already consumed or sealed every accepted Steering input.
-		return nil, nil
+		return nil
 	}
 
-	return unconsumedSteering, context.Cause(ctx)
+	return cause
 }
 
-func (s *Session) stopSteering(
-	control *activeAdvance,
-) []string {
+func (s *Session) commitPendingSteering(control *activeAdvance) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	pendingSteering := control.sealAndDetachSteering()
+	s.mu.Unlock()
 
-	return control.sealAndDetachSteering()
+	s.appendPendingSteering(pendingSteering)
+}
+
+func (s *Session) appendPendingSteering(inputs []string) {
+	if len(inputs) == 0 {
+		return
+	}
+	messages := make([]ai.Message, 0, len(inputs))
+	for _, input := range inputs {
+		messages = append(
+			messages,
+			ai.UserMessage{Content: strings.Clone(input)},
+		)
+	}
+	s.appendRun(messages)
+	for range messages {
+		s.observer.Observe(observation.Message{
+			Role: observation.MessageRoleUser,
+		})
+	}
 }
 
 func (s *Session) finishAdvance(control *activeAdvance) {

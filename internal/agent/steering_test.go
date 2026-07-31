@@ -16,7 +16,7 @@ func TestRunRequiresSteeringSource(t *testing.T) {
 	t.Parallel()
 
 	runtime := newAgent(t, newFaux(t), "system")
-	if _, err := runtime.Run(context.Background(), nil, "input", nil); err == nil {
+	if _, err := runtime.Run(context.Background(), nil, []string{"input"}, nil); err == nil {
 		t.Fatal("Run() error = nil, want missing-steering-source error")
 	}
 	if _, err := runtime.Continue(
@@ -49,10 +49,12 @@ func TestRunDrainsSteeringAtStartAndBeforeStopping(t *testing.T) {
 
 	result, err := runtime.Run(
 		context.Background(),
-		nil,
-		"initial",
-		source,
-	)
+		nil, []string{
+
+			"initial"},
+
+		source)
+
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -134,10 +136,12 @@ func TestRunDrainsSteeringAfterCompleteToolBatch(t *testing.T) {
 
 	result, err := runtime.Run(
 		context.Background(),
-		nil,
-		"inspect both",
-		source,
-	)
+		nil, []string{
+
+			"inspect both"},
+
+		source)
+
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -241,10 +245,11 @@ func TestRunDoesNotDrainSteeringAfterProviderFailure(t *testing.T) {
 
 	if _, err := runtime.Run(
 		context.Background(),
-		nil,
-		"initial",
-		source,
-	); !errors.Is(err, providerErr) {
+		nil, []string{
+
+			"initial"},
+
+		source); !errors.Is(err, providerErr) {
 		t.Fatalf("Run() error = %v, want %v", err, providerErr)
 	}
 	if got, want := source.callSnapshot(), []string{"drain"}; !reflect.DeepEqual(got, want) {
@@ -279,7 +284,7 @@ func TestRunDoesNotDrainSteeringAfterToolStageCancellation(t *testing.T) {
 	}
 	runtime := newAgentWithTools(t, provider, "system", tool)
 
-	result, err := runtime.Run(ctx, nil, "cancel during tool", source)
+	result, err := runtime.Run(ctx, nil, []string{"cancel during tool"}, source)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
@@ -308,7 +313,7 @@ func TestRunAppendsEntireDrainedBatchBeforeReturningCancellation(t *testing.T) {
 	provider := &responseProvider{}
 	runtime := newAgent(t, provider, "system")
 
-	result, err := runtime.Run(ctx, nil, "initial", source)
+	result, err := runtime.Run(ctx, nil, []string{"initial"}, source)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}

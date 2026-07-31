@@ -30,13 +30,13 @@ func TestSessionAdvancesCommitHistoryAndDeriveNextWorkingContext(t *testing.T) {
 		}
 	})
 
-	first, err := session.Advance(context.Background(), "first question")
+	first, err := session.Advance(context.Background(), []string{"first question"})
 	if err != nil {
 		t.Fatalf("first Advance() error = %v", err)
 	}
 	first.History[0] = ai.UserMessage{Content: "caller mutation"}
 
-	second, err := session.Advance(context.Background(), "second question")
+	second, err := session.Advance(context.Background(), []string{"second question"})
 	if err != nil {
 		t.Fatalf("second Advance() error = %v", err)
 	}
@@ -61,15 +61,25 @@ func TestSessionRejectsInvalidAdvanceWithoutChangingHistory(t *testing.T) {
 	provider := newCodingFaux(t)
 	session := newTestSession(t, provider)
 
-	blank, blankErr := session.Advance(context.Background(), " \t\n")
-	if blankErr == nil || len(blank.History) != 0 {
-		t.Fatalf("blank Advance = (%#v, %v), want unchanged History and error", blank, blankErr)
+	for _, inputs := range [][]string{
+		nil,
+		{"valid", " \t\n"},
+	} {
+		result, advanceErr := session.Advance(context.Background(), inputs)
+		if advanceErr == nil || len(result.History) != 0 {
+			t.Fatalf(
+				"invalid Advance(%#v) = (%#v, %v), want unchanged History and error",
+				inputs,
+				result,
+				advanceErr,
+			)
+		}
 	}
 
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancelErr := errors.New("caller already canceled")
 	cancel(cancelErr)
-	canceled, err := session.Advance(ctx, "not accepted")
+	canceled, err := session.Advance(ctx, []string{"not accepted"})
 	if !errors.Is(err, cancelErr) || len(canceled.History) != 0 {
 		t.Fatalf("pre-canceled Advance = (%#v, %v), want unchanged History and cause", canceled, err)
 	}
@@ -145,7 +155,7 @@ func TestSessionCancelReturnsWithoutWaitingForUncooperativeProvider(t *testing.T
 	session := newLifecycleSession(t, provider, func() error { return nil })
 	returned := make(chan error, 1)
 	go func() {
-		_, err := session.Advance(context.Background(), "wait")
+		_, err := session.Advance(context.Background(), []string{"wait"})
 		returned <- err
 	}()
 	<-started
@@ -176,7 +186,7 @@ func TestSessionCancelCommitsAbortedTerminalAndRemainsReusable(t *testing.T) {
 	session := newLifecycleSession(t, provider, func() error { return nil })
 	returned := make(chan sessionAdvanceReturn, 1)
 	go func() {
-		result, err := session.Advance(context.Background(), "first input")
+		result, err := session.Advance(context.Background(), []string{"first input"})
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-started
@@ -194,7 +204,7 @@ func TestSessionCancelCommitsAbortedTerminalAndRemainsReusable(t *testing.T) {
 		t.Fatalf("canceled terminal = %#v, want aborted assistant", first.result.History[1])
 	}
 
-	second, err := session.Advance(context.Background(), "second input")
+	second, err := session.Advance(context.Background(), []string{"second input"})
 	if err != nil {
 		t.Fatalf("second Advance() error = %v", err)
 	}
@@ -233,7 +243,7 @@ func TestSessionCloseIdleRunsUniqueCleanupAndSharesItsError(t *testing.T) {
 	if got := closeCalls.Load(); got != 1 {
 		t.Fatalf("Workspace close calls = %d, want 1", got)
 	}
-	if _, err := session.Advance(context.Background(), "not accepted"); !errors.Is(err, ErrSessionClosed) {
+	if _, err := session.Advance(context.Background(), []string{"not accepted"}); !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("Advance() after Close error = %v, want ErrSessionClosed", err)
 	}
 }
@@ -253,7 +263,7 @@ func TestSessionCloseBusyCancelsAdmissionAndHonorsCallerDeadline(t *testing.T) {
 	})
 	advanceReturned := make(chan error, 1)
 	go func() {
-		_, err := session.Advance(context.Background(), "wait")
+		_, err := session.Advance(context.Background(), []string{"wait"})
 		advanceReturned <- err
 	}()
 	<-provider.started
@@ -266,10 +276,10 @@ func TestSessionCloseBusyCancelsAdmissionAndHonorsCallerDeadline(t *testing.T) {
 	if got := closeCalls.Load(); got != 0 {
 		t.Fatalf("Workspace closed %d times before Advance settlement", got)
 	}
-	if _, err := session.Advance(context.Background(), "must be rejected"); !errors.Is(err, ErrSessionClosed) {
+	if _, err := session.Advance(context.Background(), []string{"must be rejected"}); !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("Advance() while closing error = %v, want ErrSessionClosed", err)
 	}
-	if accepted, err := session.TrySteer("must also be rejected"); accepted ||
+	if accepted, err := session.TrySteer([]string{"must also be rejected"}); accepted ||
 		!errors.Is(err, ErrSessionClosed) {
 		t.Fatalf(
 			"TrySteer() while closing = (%t, %v), want (false, ErrSessionClosed)",
@@ -295,7 +305,7 @@ func TestSessionCloseReturnsCleanupResultNotAdvanceFailure(t *testing.T) {
 	session := newLifecycleSession(t, provider, func() error { return nil })
 	advanceReturned := make(chan error, 1)
 	go func() {
-		_, err := session.Advance(context.Background(), "wait")
+		_, err := session.Advance(context.Background(), []string{"wait"})
 		advanceReturned <- err
 	}()
 	<-provider.started
@@ -309,7 +319,7 @@ func TestSessionCloseReturnsCleanupResultNotAdvanceFailure(t *testing.T) {
 }
 
 func (s *Session) advanceHistory(ctx context.Context, input string) ([]ai.Message, error) {
-	result, err := s.Advance(ctx, input)
+	result, err := s.Advance(ctx, []string{input})
 	return result.History, err
 }
 

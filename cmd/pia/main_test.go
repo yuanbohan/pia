@@ -44,6 +44,47 @@ func TestExecuteValidatesArgumentsBeforeReadingConfiguration(t *testing.T) {
 	}
 }
 
+func TestRunProcessUsesInteractiveTerminalOnlyForZeroArguments(t *testing.T) {
+	t.Parallel()
+
+	input := strings.NewReader("input")
+	var called bool
+	deps := dependencies{
+		runTerminal: func(
+			ctx context.Context,
+			gotInput io.Reader,
+			stdout io.Writer,
+			stderr io.Writer,
+		) error {
+			called = true
+			if context.Cause(ctx) != nil {
+				t.Fatalf("terminal context cause = %v, want active context", context.Cause(ctx))
+			}
+			if gotInput != input {
+				t.Fatalf("terminal input = %T, want supplied reader", gotInput)
+			}
+			if stdout != io.Discard || stderr != io.Discard {
+				t.Fatal("terminal writers were not forwarded")
+			}
+			return nil
+		},
+	}
+
+	if code := runProcess(
+		context.Background(),
+		nil,
+		input,
+		io.Discard,
+		io.Discard,
+		deps,
+	); code != 0 {
+		t.Fatalf("runProcess() code = %d, want 0", code)
+	}
+	if !called {
+		t.Fatal("interactive terminal was not called")
+	}
+}
+
 func TestExecuteRequiresInheritedKeyBeforeReadingWorkspace(t *testing.T) {
 	deps := dependencies{
 		lookupEnv: func(name string) (string, bool) {
@@ -111,8 +152,8 @@ func TestExecuteConstructsAdvancesClosesAndPrintsOnlyFinalText(t *testing.T) {
 	if gotConfig.Observer == nil {
 		t.Fatal("Session config observer = nil, want live line observer")
 	}
-	if session.input != task {
-		t.Fatalf("Advance input = %q, want raw task %q", session.input, task)
+	if !reflect.DeepEqual(session.inputs, []string{task}) {
+		t.Fatalf("Advance inputs = %#v, want raw task %q", session.inputs, task)
 	}
 	if session.closeCalls != 1 {
 		t.Fatalf("Close calls = %d, want 1", session.closeCalls)
@@ -326,7 +367,14 @@ func TestRunProcessPrintsEscapedSkillDiagnosticsAfterSuccess(t *testing.T) {
 	}}
 
 	var stdout, stderr bytes.Buffer
-	if got := runProcess(context.Background(), []string{"task"}, &stdout, &stderr, deps); got != 0 {
+	if got := runProcess(
+		context.Background(),
+		[]string{"task"},
+		nil,
+		&stdout,
+		&stderr,
+		deps,
+	); got != 0 {
 		t.Fatalf("runProcess() code = %d, want 0; stderr=%q", got, stderr.String())
 	}
 	if got, want := stdout.String(), "done\n"; got != want {
@@ -347,7 +395,14 @@ func TestRunProcessDoesNotPrintSkillDiagnosticsAfterFailure(t *testing.T) {
 	session.advanceErr = errors.New("advance failed")
 
 	var stderr bytes.Buffer
-	if got := runProcess(context.Background(), []string{"task"}, io.Discard, &stderr, deps); got != 1 {
+	if got := runProcess(
+		context.Background(),
+		[]string{"task"},
+		nil,
+		io.Discard,
+		&stderr,
+		deps,
+	); got != 1 {
 		t.Fatalf("runProcess() code = %d, want 1", got)
 	}
 	if got, want := stderr.String(), "pia: advance failed\n"; got != want {
@@ -374,7 +429,14 @@ func TestRunProcessReportsSettlementErrorsOnlyToStderr(t *testing.T) {
 	session.advanceErr = errors.New("broken")
 	var stdout, stderr bytes.Buffer
 
-	code := runProcess(context.Background(), []string{"task"}, &stdout, &stderr, deps)
+	code := runProcess(
+		context.Background(),
+		[]string{"task"},
+		nil,
+		&stdout,
+		&stderr,
+		deps,
+	)
 	if code == 0 {
 		t.Fatal("runProcess() code = 0, want nonzero")
 	}
@@ -416,7 +478,7 @@ type fakeSession struct {
 	closeErr   error
 	observer   observation.Observer
 	onAdvance  func()
-	input      string
+	inputs     []string
 	closeCalls int
 }
 
@@ -424,8 +486,17 @@ func (s *fakeSession) Info() coding.SessionInfo {
 	return s.info
 }
 
-func (s *fakeSession) Advance(_ context.Context, input string) (coding.AdvanceResult, error) {
-	s.input = input
+func (*fakeSession) TrySteer([]string) (bool, error) {
+	return false, nil
+}
+
+func (*fakeSession) Cancel() {}
+
+func (s *fakeSession) Advance(
+	_ context.Context,
+	inputs []string,
+) (coding.AdvanceResult, error) {
+	s.inputs = append([]string(nil), inputs...)
 	if s.onAdvance != nil {
 		s.onAdvance()
 	}

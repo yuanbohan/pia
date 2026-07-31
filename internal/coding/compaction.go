@@ -68,18 +68,25 @@ type compactionModelSource struct {
 	Excluded        []int
 }
 
-func (c *Session) compactBeforeRun(ctx context.Context, userInput string) error {
+func (c *Session) compactBeforeRun(ctx context.Context, userInputs []string) error {
 	if !c.compaction.enabled() {
 		return nil
 	}
 
 	history, previousProjection := c.compactionSnapshot()
+	pendingMessages := make([]ai.Message, 0, len(userInputs))
+	for _, input := range userInputs {
+		pendingMessages = append(
+			pendingMessages,
+			ai.UserMessage{Content: strings.Clone(input)},
+		)
+	}
 	return c.compactContext(
 		ctx,
 		history,
 		previousProjection,
 		nil,
-		[]ai.Message{ai.UserMessage{Content: userInput}},
+		pendingMessages,
 		false,
 	)
 }

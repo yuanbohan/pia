@@ -15,6 +15,20 @@ Steering、Follow-up、Agent Execution Engine 与 one-shot composition 路径已
 明确的 ownership-transfer 尝试；没有实现 Daemon、Client Protocol、Gateway、
 后台 worker 或持久化 submission inbox。
 
+D108 在本课完成后修正了第三阶段路线：D107 的 Session/future Submission
+ownership 与严格 C/S 长期方向保持不变，但第三阶段不再继续 journal/safe
+resume，而是以一个 direct-Session 的本地行式交互终端完成复杂 coding task
+验收。该终端是开发与验收例外，不恢复被本课删除的 Session-owned future
+queue。
+
+> **Lesson 17 修正（2026-07-31）：** 真实 Terminal Host 证明 atomic routing
+> 需要 ordered non-empty input batch，而不是一个 Advance 只接收一条 initial
+> submission。D109 因此把 `Advance(ctx, string)`/`TrySteer(string)` 改为 batch
+> surface；每个 element 仍是独立 user Message。`TrySteer(true)` 现在是永久
+> ownership transfer，abnormal settlement 把 accepted-but-unseen Steering
+> 直接提交 History，删除 `UnconsumedSteering`。本课下文的单 input 与 hand-back
+> 描述保留为 Lesson 16 的历史实现记录，不代表当前 Runtime。
+
 详细 implementation-ready 契约与实施单元见
 [Daemon-ready Session Boundary Plan](../../plans/2026-07-30-001-refactor-daemon-ready-session-boundary-plan.md)。
 

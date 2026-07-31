@@ -2,7 +2,6 @@ package coding
 
 import (
 	"context"
-	"strings"
 
 	"github.com/yuanbohan/pia/internal/agent"
 )
@@ -20,10 +19,12 @@ func (source sessionSteeringSource) DrainOrSeal() []string {
 	return source.session.drainSteering(source.control, true)
 }
 
-// TrySteer attempts to transfer input ownership to the current Engine
-// invocation for consumption at its next safe boundary.
-func (s *Session) TrySteer(input string) (bool, error) {
-	if err := validateInput(input); err != nil {
+// TrySteer attempts to transfer one nonempty input batch to the current Engine
+// invocation for consumption at its next safe boundary. Admission is
+// all-or-nothing and preserves each input as a separate user message.
+func (s *Session) TrySteer(inputs []string) (bool, error) {
+	acceptedInputs, err := cloneAndValidateInputs(inputs)
+	if err != nil {
 		return false, err
 	}
 
@@ -40,7 +41,7 @@ func (s *Session) TrySteer(input string) (bool, error) {
 	}
 	s.active.pendingSteering = append(
 		s.active.pendingSteering,
-		strings.Clone(input),
+		acceptedInputs...,
 	)
 	return true, nil
 }

@@ -114,7 +114,8 @@ type Turn struct {
 
 func (Turn) isEvent() {}
 
-// Message observes one complete message accepted into Working Context.
+// Message observes one complete protocol message accepted into a run-local
+// Working Context or committed directly to authoritative History at settlement.
 type Message struct {
 	Role       MessageRole
 	StopReason ai.StopReason

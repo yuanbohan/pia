@@ -5,17 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/yuanbohan/pia/internal/ai"
 	"github.com/yuanbohan/pia/internal/observation"
 )
 
-// Run appends one user input to an ownership-independent Working Context and
-// continues Provider turns until the model stops or execution fails.
+// Run appends one or more user inputs to an ownership-independent Working
+// Context and continues Provider turns until the model stops or execution
+// fails. Each input remains a separate user message.
 func (e *Engine) Run(
 	ctx context.Context,
 	workingContext []ai.Message,
-	userInput string,
+	userInputs []string,
 	steering SteeringSource,
 ) (result RunResult, err error) {
 	if steering == nil {
@@ -24,18 +26,17 @@ func (e *Engine) Run(
 	if cause := context.Cause(ctx); cause != nil {
 		return RunResult{}, cause
 	}
+	if err := validateUserInputs(userInputs); err != nil {
+		return RunResult{}, err
+	}
 	execution := newExecution(e, workingContext, steering)
 	runStart := len(execution.workingContext)
-	execution.workingContext = append(
-		execution.workingContext,
-		ai.UserMessage{Content: userInput},
-	)
 
 	e.observer.Observe(observation.Run{
 		Phase: observation.PhaseStarted,
 		Mode:  observation.RunModeInput,
 	})
-	e.observer.Observe(observation.Message{Role: observation.MessageRoleUser})
+	execution.appendUserInputs(userInputs)
 	defer func() {
 		e.observer.Observe(observation.Run{
 			Phase:   observation.PhaseSettled,
@@ -46,6 +47,18 @@ func (e *Engine) Run(
 		return execution.snapshotRun(runStart), err
 	}
 	return execution.executeRun(ctx, runStart)
+}
+
+func validateUserInputs(inputs []string) error {
+	if len(inputs) == 0 {
+		return errors.New("agent: at least one user input is required")
+	}
+	for index, input := range inputs {
+		if strings.TrimSpace(input) == "" {
+			return fmt.Errorf("agent: user input %d is required", index)
+		}
+	}
+	return nil
 }
 
 // Continue resumes Provider turns from an existing user or paired tool-result
@@ -161,10 +174,14 @@ func (e *execution) consumeSteering(
 }
 
 func (e *execution) appendSteering(inputs []string) {
+	e.appendUserInputs(inputs)
+}
+
+func (e *execution) appendUserInputs(inputs []string) {
 	for _, input := range inputs {
 		e.workingContext = append(
 			e.workingContext,
-			ai.UserMessage{Content: input},
+			ai.UserMessage{Content: strings.Clone(input)},
 		)
 		e.engine.observer.Observe(observation.Message{
 			Role: observation.MessageRoleUser,

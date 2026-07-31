@@ -598,7 +598,7 @@ func advanceTestSessionWithWorkspaceOperations(
 	}
 
 	info := session.Info()
-	result, advanceErr := session.Advance(ctx, input.Input)
+	result, advanceErr := session.Advance(ctx, []string{input.Input})
 	closeErr := session.Close(ctx)
 	return advancedTestSession{
 		SessionInfo:   info,

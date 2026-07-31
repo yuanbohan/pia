@@ -82,7 +82,7 @@ func TestSignalHelperProcess(t *testing.T) {
 			return os.WriteFile(path, []byte(trace.SettlementError), 0o600)
 		},
 	}
-	os.Exit(processMain([]string{"task"}, io.Discard, io.Discard, deps))
+	os.Exit(processMain([]string{"task"}, nil, io.Discard, io.Discard, deps))
 }
 
 type signalSession struct {
@@ -93,7 +93,13 @@ func (signalSession) Info() coding.SessionInfo {
 	return coding.SessionInfo{}
 }
 
-func (s signalSession) Advance(ctx context.Context, _ string) (coding.AdvanceResult, error) {
+func (signalSession) TrySteer([]string) (bool, error) {
+	return false, nil
+}
+
+func (signalSession) Cancel() {}
+
+func (s signalSession) Advance(ctx context.Context, _ []string) (coding.AdvanceResult, error) {
 	if err := os.WriteFile(s.readyPath, []byte("ready"), 0o600); err != nil {
 		return coding.AdvanceResult{}, err
 	}

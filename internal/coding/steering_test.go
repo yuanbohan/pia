@@ -36,28 +36,37 @@ func TestSessionSteeringBatchesAtSafeBoundaryWithinSameRun(t *testing.T) {
 		}
 	})
 
+	initialInputs := []string{"initial", "initial constraint"}
 	returned := make(chan sessionAdvanceReturn, 1)
 	go func() {
-		result, err := session.Advance(context.Background(), "initial")
+		result, err := session.Advance(
+			context.Background(),
+			initialInputs,
+		)
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-started
+	initialInputs[0] = "caller mutation"
 
-	requireTrySteerAccepted(t, session, "first correction")
-	requireTrySteerAccepted(t, session, "second correction")
+	steeringInputs := []string{"first correction", "second correction"}
+	requireTrySteerAccepted(
+		t,
+		session,
+		steeringInputs...,
+	)
+	steeringInputs[0] = "caller mutation"
 	close(release)
 
 	got := receiveAdvance(t, returned)
 	if got.err != nil {
 		t.Fatalf("Advance() error = %v", got.err)
 	}
-	if len(got.result.UnconsumedSteering) != 0 {
-		t.Fatalf(
-			"UnconsumedSteering = %#v, want empty",
-			got.result.UnconsumedSteering,
-		)
+	wantUsers := []string{
+		"initial",
+		"initial constraint",
+		"first correction",
+		"second correction",
 	}
-	wantUsers := []string{"initial", "first correction", "second correction"}
 	if users := userMessageTexts(got.result.History); !reflect.DeepEqual(users, wantUsers) {
 		t.Fatalf("History user messages = %#v, want %#v", users, wantUsers)
 	}
@@ -69,10 +78,10 @@ func TestSessionSteeringBatchesAtSafeBoundaryWithinSameRun(t *testing.T) {
 	if users := userMessageTexts(requests[1].Messages); !reflect.DeepEqual(users, wantUsers) {
 		t.Fatalf("second request user messages = %#v, want %#v", users, wantUsers)
 	}
-	if !reflect.DeepEqual(requests[1].Messages[1], ai.Message(firstAssistant)) {
+	if !reflect.DeepEqual(requests[1].Messages[2], ai.Message(firstAssistant)) {
 		t.Fatalf(
-			"second request message 1 = %#v, want first assistant",
-			requests[1].Messages[1],
+			"second request message 2 = %#v, want first assistant",
+			requests[1].Messages[2],
 		)
 	}
 
@@ -119,27 +128,33 @@ func TestSessionTrySteerDistinguishesUnavailableInvalidAndClosed(t *testing.T) {
 	)
 	session := newObservedSession(t, provider, observer)
 
-	if accepted, err := session.TrySteer("idle"); accepted || err != nil {
+	if accepted, err := session.TrySteer([]string{"idle"}); accepted || err != nil {
 		t.Fatalf("idle TrySteer() = (%t, %v), want (false, nil)", accepted, err)
 	}
-	if accepted, err := session.TrySteer(" \t\n"); accepted ||
-		err == nil ||
-		errors.Is(err, ErrSessionClosed) {
-		t.Fatalf(
-			"blank TrySteer() = (%t, %v), want input validation error",
-			accepted,
-			err,
-		)
+	for _, inputs := range [][]string{
+		nil,
+		{"valid", " \t\n"},
+	} {
+		if accepted, err := session.TrySteer(inputs); accepted ||
+			err == nil ||
+			errors.Is(err, ErrSessionClosed) {
+			t.Fatalf(
+				"invalid TrySteer(%#v) = (%t, %v), want input validation error",
+				inputs,
+				accepted,
+				err,
+			)
+		}
 	}
 
 	returned := make(chan sessionAdvanceReturn, 1)
 	go func() {
-		result, err := session.Advance(context.Background(), "initial")
+		result, err := session.Advance(context.Background(), []string{"initial"})
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-runSettled
 
-	if accepted, err := session.TrySteer("too late"); accepted || err != nil {
+	if accepted, err := session.TrySteer([]string{"too late"}); accepted || err != nil {
 		t.Fatalf(
 			"sealed TrySteer() = (%t, %v), want (false, nil)",
 			accepted,
@@ -154,7 +169,7 @@ func TestSessionTrySteerDistinguishesUnavailableInvalidAndClosed(t *testing.T) {
 	if err := session.Close(context.Background()); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
-	if accepted, err := session.TrySteer("closed"); accepted ||
+	if accepted, err := session.TrySteer([]string{"closed"}); accepted ||
 		!errors.Is(err, ErrSessionClosed) {
 		t.Fatalf(
 			"closed TrySteer() = (%t, %v), want (false, ErrSessionClosed)",
@@ -164,7 +179,7 @@ func TestSessionTrySteerDistinguishesUnavailableInvalidAndClosed(t *testing.T) {
 	}
 }
 
-func TestSessionProviderFailureHandsBackUnconsumedSteering(t *testing.T) {
+func TestSessionProviderFailureCommitsAcceptedUnconsumedSteering(t *testing.T) {
 	t.Parallel()
 
 	started := make(chan struct{})
@@ -185,34 +200,28 @@ func TestSessionProviderFailureHandsBackUnconsumedSteering(t *testing.T) {
 
 	returned := make(chan sessionAdvanceReturn, 1)
 	go func() {
-		result, err := session.Advance(context.Background(), "initial")
+		result, err := session.Advance(context.Background(), []string{"initial"})
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-started
 
-	requireTrySteerAccepted(t, session, "first correction")
-	requireTrySteerAccepted(t, session, "second correction")
+	requireTrySteerAccepted(
+		t,
+		session,
+		[]string{"first correction", "second correction"}...,
+	)
 	close(release)
 
 	got := receiveAdvance(t, returned)
 	if got.err == nil {
 		t.Fatal("Advance() error = nil, want Provider failure")
 	}
-	if want := []string{"first correction", "second correction"}; !reflect.DeepEqual(
-		got.result.UnconsumedSteering,
-		want,
-	) {
-		t.Fatalf(
-			"UnconsumedSteering = %#v, want %#v",
-			got.result.UnconsumedSteering,
-			want,
-		)
-	}
+	wantUsers := []string{"initial", "first correction", "second correction"}
 	if users := userMessageTexts(got.result.History); !reflect.DeepEqual(
 		users,
-		[]string{"initial"},
+		wantUsers,
 	) {
-		t.Fatalf("History user messages = %#v, want only initial", users)
+		t.Fatalf("History user messages = %#v, want %#v", users, wantUsers)
 	}
 }
 
@@ -242,7 +251,7 @@ func TestSessionProviderFailureDoesNotHandBackConsumedSteering(t *testing.T) {
 
 	returned := make(chan sessionAdvanceReturn, 1)
 	go func() {
-		result, err := session.Advance(context.Background(), "initial")
+		result, err := session.Advance(context.Background(), []string{"initial"})
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-started
@@ -252,12 +261,6 @@ func TestSessionProviderFailureDoesNotHandBackConsumedSteering(t *testing.T) {
 	got := receiveAdvance(t, returned)
 	if got.err == nil {
 		t.Fatal("Advance() error = nil, want Provider failure")
-	}
-	if len(got.result.UnconsumedSteering) != 0 {
-		t.Fatalf(
-			"UnconsumedSteering = %#v, want empty",
-			got.result.UnconsumedSteering,
-		)
 	}
 	if want := []string{"initial", "consumed correction"}; !reflect.DeepEqual(
 		userMessageTexts(got.result.History),
@@ -281,7 +284,7 @@ func TestSessionProviderFailureDoesNotHandBackConsumedSteering(t *testing.T) {
 	}
 }
 
-func TestSessionCancellationSealsAdmissionAndHandsBackPendingSteering(t *testing.T) {
+func TestSessionCancellationSealsAdmissionAndCommitsPendingSteering(t *testing.T) {
 	t.Parallel()
 
 	callerCause := errors.New("caller canceled")
@@ -336,7 +339,7 @@ func TestSessionCancellationSealsAdmissionAndHandsBackPendingSteering(t *testing
 
 			returned := make(chan sessionAdvanceReturn, 1)
 			go func() {
-				result, err := session.Advance(ctx, "initial")
+				result, err := session.Advance(ctx, []string{"initial"})
 				returned <- sessionAdvanceReturn{result: result, err: err}
 			}()
 			<-started
@@ -345,7 +348,7 @@ func TestSessionCancellationSealsAdmissionAndHandsBackPendingSteering(t *testing
 			if err := test.trigger(session, cancel); err != nil {
 				t.Fatalf("control operation error = %v", err)
 			}
-			accepted, err := session.TrySteer("after cancellation")
+			accepted, err := session.TrySteer([]string{"after cancellation"})
 			if test.wantClosed {
 				if accepted || !errors.Is(err, ErrSessionClosed) {
 					t.Fatalf(
@@ -366,27 +369,18 @@ func TestSessionCancellationSealsAdmissionAndHandsBackPendingSteering(t *testing
 			if !errors.Is(got.err, test.wantCause) {
 				t.Fatalf("Advance() error = %v, want %v", got.err, test.wantCause)
 			}
-			if want := []string{"pending correction"}; !reflect.DeepEqual(
-				got.result.UnconsumedSteering,
-				want,
-			) {
-				t.Fatalf(
-					"UnconsumedSteering = %#v, want %#v",
-					got.result.UnconsumedSteering,
-					want,
-				)
-			}
+			wantUsers := []string{"initial", "pending correction"}
 			if users := userMessageTexts(got.result.History); !reflect.DeepEqual(
 				users,
-				[]string{"initial"},
+				wantUsers,
 			) {
-				t.Fatalf("History user messages = %#v, want only initial", users)
+				t.Fatalf("History user messages = %#v, want %#v", users, wantUsers)
 			}
 		})
 	}
 }
 
-func TestSessionCancelAfterSuccessfulTerminalHandsBackPendingSteering(t *testing.T) {
+func TestSessionCancelAfterSuccessfulTerminalCommitsPendingSteering(t *testing.T) {
 	t.Parallel()
 
 	started := make(chan struct{})
@@ -405,7 +399,7 @@ func TestSessionCancelAfterSuccessfulTerminalHandsBackPendingSteering(t *testing
 
 	returned := make(chan sessionAdvanceReturn, 1)
 	go func() {
-		result, err := session.Advance(context.Background(), "initial")
+		result, err := session.Advance(context.Background(), []string{"initial"})
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-started
@@ -417,15 +411,12 @@ func TestSessionCancelAfterSuccessfulTerminalHandsBackPendingSteering(t *testing
 	if !errors.Is(got.err, context.Canceled) {
 		t.Fatalf("Advance() error = %v, want context.Canceled", got.err)
 	}
-	if want := []string{"must not be consumed"}; !reflect.DeepEqual(
-		got.result.UnconsumedSteering,
-		want,
+	wantUsers := []string{"initial", "must not be consumed"}
+	if users := userMessageTexts(got.result.History); !reflect.DeepEqual(
+		users,
+		wantUsers,
 	) {
-		t.Fatalf(
-			"UnconsumedSteering = %#v, want %#v",
-			got.result.UnconsumedSteering,
-			want,
-		)
+		t.Fatalf("History user messages = %#v, want %#v", users, wantUsers)
 	}
 	if gotText, want := got.result.FinalText(), "current Run still completed"; gotText != want {
 		t.Fatalf("FinalText() = %q, want %q", gotText, want)
@@ -463,13 +454,13 @@ func TestSessionSteeringSurvivesOverflowRecovery(t *testing.T) {
 			t.Errorf("Close() error = %v", err)
 		}
 	})
-	if _, err := session.Advance(context.Background(), "earlier"); err != nil {
+	if _, err := session.Advance(context.Background(), []string{"earlier"}); err != nil {
 		t.Fatalf("earlier Advance() error = %v", err)
 	}
 
 	returned := make(chan sessionAdvanceReturn, 1)
 	go func() {
-		result, err := session.Advance(context.Background(), "initial")
+		result, err := session.Advance(context.Background(), []string{"initial"})
 		returned <- sessionAdvanceReturn{result: result, err: err}
 	}()
 	<-runStarted
@@ -477,7 +468,7 @@ func TestSessionSteeringSurvivesOverflowRecovery(t *testing.T) {
 	close(releaseRun)
 
 	<-compactionStarted
-	if accepted, err := session.TrySteer("during compaction"); accepted || err != nil {
+	if accepted, err := session.TrySteer([]string{"during compaction"}); accepted || err != nil {
 		t.Fatalf(
 			"compaction TrySteer() = (%t, %v), want (false, nil)",
 			accepted,
@@ -489,12 +480,6 @@ func TestSessionSteeringSurvivesOverflowRecovery(t *testing.T) {
 	got := receiveAdvance(t, returned)
 	if got.err != nil {
 		t.Fatalf("Advance() error = %v", got.err)
-	}
-	if len(got.result.UnconsumedSteering) != 0 {
-		t.Fatalf(
-			"UnconsumedSteering = %#v, want empty",
-			got.result.UnconsumedSteering,
-		)
 	}
 	wantUsers := []string{"earlier", "initial", "preserved correction"}
 	if users := userMessageTexts(got.result.History); !reflect.DeepEqual(users, wantUsers) {
@@ -531,7 +516,7 @@ func TestSessionTrySteerRacingFinalSealIsConsumedOrUnavailable(t *testing.T) {
 
 		returned := make(chan sessionAdvanceReturn, 1)
 		go func() {
-			result, err := session.Advance(context.Background(), "initial")
+			result, err := session.Advance(context.Background(), []string{"initial"})
 			returned <- sessionAdvanceReturn{result: result, err: err}
 		}()
 		<-started
@@ -540,7 +525,7 @@ func TestSessionTrySteerRacingFinalSealIsConsumedOrUnavailable(t *testing.T) {
 		admissionReturned := make(chan trySteerReturn, 1)
 		go func() {
 			<-race
-			accepted, err := session.TrySteer("racing correction")
+			accepted, err := session.TrySteer([]string{"racing correction"})
 			admissionReturned <- trySteerReturn{accepted: accepted, err: err}
 		}()
 		go func() {
@@ -582,25 +567,18 @@ func TestSessionTrySteerRacingFinalSealIsConsumedOrUnavailable(t *testing.T) {
 				admission.err,
 			)
 		}
-		if len(got.result.UnconsumedSteering) != 0 {
-			t.Fatalf(
-				"iteration %d UnconsumedSteering = %#v, want empty",
-				iteration,
-				got.result.UnconsumedSteering,
-			)
-		}
 		if err := session.Close(context.Background()); err != nil {
 			t.Fatalf("iteration %d Close() error = %v", iteration, err)
 		}
 	}
 }
 
-func requireTrySteerAccepted(t *testing.T, session *Session, input string) {
+func requireTrySteerAccepted(t *testing.T, session *Session, inputs ...string) {
 	t.Helper()
 
-	accepted, err := session.TrySteer(input)
+	accepted, err := session.TrySteer(inputs)
 	if !accepted || err != nil {
-		t.Fatalf("TrySteer(%q) = (%t, %v), want (true, nil)", input, accepted, err)
+		t.Fatalf("TrySteer(%q) = (%t, %v), want (true, nil)", inputs, accepted, err)
 	}
 }
 

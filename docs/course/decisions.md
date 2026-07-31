@@ -867,6 +867,28 @@
 - Lesson/phase impact：Lesson 16 定名为“Daemon-ready Session input 与 control 边界收敛”，规模 Medium，以删除与重构为主，不增加 Daemon、service package、Coordinator/SessionHost、协议、task handle、background worker 或 persistence。本课完成后第三阶段继续 journal 与 safe resume，并以“Daemon-ready、可安全恢复的单 Session Runtime”结束；直接 interactive terminal 从第三阶段退出条件移除。Pia Daemon、common Client Protocol、durable submission inbox、multi-Session orchestration 与 TUI/GUI/Mobile/IM clients 在后续阶段基于真实 consumer 分拆。
 - 参考证据：冻结 Pi `dcfe36c79702ec240b146c45f167ab75ecddd205` 证明 Steering 与 Follow-up 的 loop 语义差异，但其 stateful Agent queue ownership 不是 Pia 产品契约；Codex CLI `0fb559f0f6e231a88ac02ea002d3ecd248e2b515` 显示 core active-turn input 与 TUI future queued submissions 分层；OpenCode `cb562b2c6289c2eee707078f9ab644cbe1d3d8a9` 显示 direct interactive prompt queue 位于 durable Session 之外。当前 Pia `cmd/pia` 没有 FollowUp、Steer、Cancel 或 Wait 的生产 caller，支持在没有兼容负担时删除错误边界。
 
+### D108. 第三阶段以本地交互终端的复杂任务验收收尾
+
+- 日期：2026-07-30
+- 阶段目标：第三阶段的退出信号改为一个本地行式交互终端能够长期 host 当前单 Session Runtime，并通过多轮用户输入和真实 Provider 推动一个复杂 coding task 完成。该终端是 Runtime 的开发与验收 consumer，不是长期产品拓扑中的正式 client。
+- Journal/resume defer：Versioned Session journal、clean resume、hard-kill 后 last committed Advance fallback 与 in-place interrupted execution recovery 全部移出第三阶段。Journal 与 resume 作为相互依赖的后续能力一起重新校准；当前不实现没有 recovery reader 的 writer-only durable format。
+- Terminal shape：收尾课程采用行式交互终端，选择它而不是只能在 Advance 结束后读取下一条输入的 sequential REPL，也不扩成 full-screen TUI、主题系统、复杂 composer 或通用 terminal framework。具体 input/control routing、显示、one-shot 共存方式、命令和按键等到课程开课时对照真实源码与当前 Pia 再确定。
+- Ownership：本地终端可以作为明确的开发与验收例外，在同一进程直接调用 Session。它只拥有输入、control intent、观察投影和 presentation，不拥有或复制 Conversation History、Working Context、compaction、Engine loop、accepted Steering 或 Session lifecycle 的权威状态。真实 consumer 暴露既有 owner/control 边界错误时，课程直接修正 Runtime，不增加 compatibility wrapper。
+- Long-term topology：D107 的严格 C/S 产品方向不变。正式 TUI、GUI、Mobile 与 IM Gateway clients 未来仍通过 Pia Daemon 的 common protocol 接入；本地验收终端不建立公共 SDK、稳定 CLI/Client Protocol、Daemon、durable future-submission inbox 或 multi-Session routing。
+- Acceptance boundary：收尾课程必须使用真实 workspace 和 Provider，证明 Pia 可以在同一个长期 Conversation 中持续推进一个复杂 coding task；具体任务、交互语义、重复次数和独立验证证据在开课讨论后固定。Faux tests 与一次主观演示不能单独完成该课程。
+- Supersession：本决定取代 D84 中“terminal 后继续 journal 与 clean resume”的第三阶段顺序，也取代 D107 中“第三阶段移除 direct interactive terminal、以 journal/safe resume 收尾”的 phase-impact 结论。D80、D83 与 D96 记录的 persistence/recovery 证据仍保留为未来课程输入，但不再是第三阶段承诺；D107 的 Session/future Submission ownership 与严格 C/S 决定保持有效。
+
+### D109. Terminal routing 使用 ordered batch，accepted Steering 永不 hand back
+
+- 日期：2026-07-31
+- 触发证据：Lesson 17 的真实 local Host 同时可能持有多条尚未被 Session 接受的 FIFO Submissions。若 `Advance` 仍只接收一条 initial input，Host 必须部分转移 queue，或把其余输入伪装成尚未经过 admission 的 Steering；两者都会削弱 whole-batch acknowledgement，并让第一次 Provider request 看不到同一 routing decision 的全部初始约束。
+- Batch surface：`Session.Advance(ctx, inputs []string)` 与 `TrySteer(inputs []string)` 接受 ordered non-empty batch；每个 element 都作为独立 user Message 保持边界和顺序。validation 与 ownership clone 对整批 all-or-nothing；Engine `Run` 和 pre-run compaction 同样看到全部 initial messages。一个 Advance 仍是一项 synchronous external operation，可以包含同一 Engine invocation 的 Steering 和 overflow continuation，但不会排空 Host future queue。
+- Permanent acceptance：`TrySteer(true, nil)` 永久把整个 batch 转给 Session。若 Engine 在 safe point drain，它们进入当前 Run；若 Provider/tool error、caller cancellation、`Cancel` 或 `Close` 先开始 settlement，Session 先提交 Engine terminal delta，再按 admission order 把 accepted-but-unseen Steering 作为 user Messages 提交 History。它们不会在本次 Advance 中执行，也不会返回 Host。
+- Result simplification：删除 `AdvanceResult.UnconsumedSteering`。`TrySteer(false, nil)` 是唯一保持 Host ownership 的正常 routing miss；client/Daemon policy 只处理自己仍拥有的 Submissions，不需要 rollback 已确认 admission。
+- Linearization：`TrySteer` admission、`Drain`/`DrainOrSeal`、Cancel/Close seal 与 abnormal detach 继续共享 Session mutex。drain 与 settlement commit 二者只会取得 accepted batch 一次；Session History commit 保留 Engine delta 在前、unseen Steering 在后的顺序。
+- Terminal policy：Lesson 17 的本地 Host 是该 surface 的当前 consumer。正常 settlement 可以自动启动 Host pending；Cancel/error 后 hold；`Alt+Up` 只能取回 Host-owned queue。该 UI policy 不进入 Session Runtime，也不改变 D107 的 future Daemon ownership 与严格 C/S 方向。
+- Supersession：本决定取代 D107 的 single-input `Advance`/`TrySteer` surface、`UnconsumedSteering` hand-back 与“一个 external Submission 只启动一个 Advance”的严格表述，同时保留 D107 的 owner 分层、one-active-Advance、safe-boundary handshake、Cancel/Close 和 Daemon/client scope。
+
 ## 变更记录
 
 - 2026-07-15：建立初始课程和架构决策，并补充 stream、tool validation、Session storage、平台范围与 Runtime/Manager 边界。
@@ -1022,3 +1044,6 @@
 - 2026-07-30：Lesson 16 代码、测试与文档实现完成；Session surface 已收敛为 `NewSession/Info/Advance/TrySteer/Cancel/Close`，Follow-up 与 public Wait 已删除，完整检查和 race tests 通过，课程进入待理解确认。
 - 2026-07-30：学习者确认理解一个 Advance 由且仅由一个 initial submission 启动、但仍可包含 accepted Steering、多个 Provider turns、tool work 与 overflow continuation 的边界。Lesson 16 的理解确认完成，课程进入待提交；下一课不会自动开始。
 - 2026-07-30：学习者明确要求完成 Lesson 16，并把本课代码、测试与文档作为一个课程提交直接推送到 `origin/main`。课程状态更新为已提交；下一课不会因此自动开始。
+- 2026-07-30：学习者重新校准第三阶段收尾优先级：当前先验证 Pia 能否通过简化交互终端持续推动复杂 coding task，而不是先证明进程重启后的恢复。学习者选择行式终端，随后明确把 journal 与 resume 一起 defer；D108 据此把本地 direct-Session terminal 作为第三阶段唯一剩余课程，同时保持正式 clients 的长期严格 C/S 方向。
+- 2026-07-31：Lesson 17 开课讨论与真实 Host consumer 推翻 Lesson 16 的 single-input/Steering hand-back：Advance/TrySteer 改为 ordered batch，accepted Steering permanent transfer，abnormal settlement 直接提交 History。简化 Terminal 状态机完成首轮实现；真实 PTY trace 定位并修复 textarea focus 只落在 Init 临时副本的问题。
+- 2026-07-31：Lesson 17 完成实现、结构化审查和真实 depplan 验收。审查修复 active `/exit` 的 Close/Advance completion 竞态与 grace-expiry 无限等待，并强化 terminal output 和 external verifier；fresh Attempt 002 在同一 Session 中完成两次 Advance 和一次 accepted Steering，精确 trace、workspace tests/vet 与外部 verifier 全部通过。第三阶段退出条件至此满足，课程尚未提交。

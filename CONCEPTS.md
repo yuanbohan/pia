@@ -39,7 +39,7 @@ Session                ── commits ──> Run Message Delta
 Working Context        ── copied into ─> Provider Request Snapshot
 ```
 
-The ownership arrows describe semantic authority and long-term direction, not a required Go struct layout or a claim that Pia Daemon already exists. The current one-shot CLI directly creates one Session as a local development/acceptance exception. A user advance does not require a durable struct or package, Conversation state is not an independent active object, and “Conversation Owner” is a role fulfilled by Session. Working Context is a derived model view rather than a second long-lived mutable store. The Agent Execution Engine may hold immutable Provider/tool dependencies, but all invocation-specific messages and control are run-local.
+The ownership arrows describe semantic authority and long-term direction, not a required Go struct layout or a claim that Pia Daemon already exists. The current local CLI directly creates one Session for either one-shot or interactive use as a development/acceptance exception. A user advance does not require a durable struct or package, Conversation state is not an independent active object, and “Conversation Owner” is a role fulfilled by Session. Working Context is a derived model view rather than a second long-lived mutable store. The Agent Execution Engine may hold immutable Provider/tool dependencies, but all invocation-specific messages and control are run-local.
 
 ## Agent System
 
@@ -89,7 +89,13 @@ Session may invoke the engine more than once while handling one user advance, su
 
 The complete application specialized for software-engineering tasks by composing a Session, Agent Execution Engine, coding workspace, coding system prompt, coding tools, and model configuration.
 
-A Coding Agent is not another model and does not inherit from the execution engine. It is the product-level assembly that gives the generic model/tool runtime its coding behavior; the current one-shot CLI hosts it through Session, while future interactive clients reach the same application through Pia Daemon rather than calling Session directly.
+A Coding Agent is not another model and does not inherit from the execution engine. It is the product-level assembly that gives the generic model/tool runtime its coding behavior; the current local one-shot and acceptance-terminal modes host it through Session, while future formal interactive clients reach the same application through Pia Daemon rather than calling Session directly.
+
+### Local Acceptance Terminal
+
+The Phase 3 line-oriented interactive consumer that directly hosts one in-memory Session to validate multi-turn complex coding work. It is a local development and acceptance exception, not a formal TUI client, common Client Protocol implementation, or alternative product topology.
+
+The Local Acceptance Terminal owns input capture, control intent, observation projection, and presentation. It does not own or duplicate Conversation History, Working Context, compaction, accepted Steering, Agent Execution Engine state, or Session lifecycle.
 
 ### Skill
 
@@ -176,6 +182,8 @@ One transient Session operation that accepts one initial user input and coordina
 User input accepted while a Session execution has a steerable Engine Run and intended to join that same run at a defined safe boundary after the current assistant turn and all of that message's tool work settle. Every Steering accepted before one atomic boundary is appended, in admission order, as a separate user Message before the same next Provider request.
 
 Steering does not start a concurrent Run, preempt an in-flight Provider or tool call, or mean cancellation. External Submission routing is a separate concern: until Session explicitly accepts Steering ownership, the future Daemon retains that input and may start a later Advance after the current execution settles. The client does not need to observe a temporarily unavailable Steering window as a rejection.
+
+Steering admission is a permanent ownership transfer. If cancellation, closure, or execution failure begins settlement before accepted Steering reaches a safe boundary, Session commits those still-unseen inputs to Conversation History after the Engine terminal delta. They are not executed, returned to the client, or silently discarded.
 
 ### Follow-up
 
